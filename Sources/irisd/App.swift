@@ -29,6 +29,12 @@ struct IrisDaemonCLI: AsyncParsableCommand {
     @Option(name: .long, help: "Log level: trace, debug, info, warning, error.")
     var logLevel: String = "info"
 
+    @Flag(
+        name: .long,
+        help: "Read secrets from IRIS_SECRET_<NAME> env vars instead of the Keychain (debug)."
+    )
+    var inMemorySecrets: Bool = false
+
     mutating func run() async throws {
         var logger = Logger(label: "io.iris.daemon")
         logger.logLevel = parseLogLevel(logLevel) ?? .info
@@ -59,6 +65,7 @@ struct IrisDaemonCLI: AsyncParsableCommand {
             listenPort: port,
             allowedHosts: allowedHosts,
             caPath: caURL,
+            secretBackend: inMemorySecrets ? .inMemoryFromEnvironment : .keychain,
             logger: logger
         )
         try await daemon.run()
