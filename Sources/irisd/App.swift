@@ -3,6 +3,8 @@ import Foundation
 import IrisKit
 import Logging
 
+@main
+@available(macOS 13, *)
 struct IrisDaemonCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "irisd",
@@ -73,5 +75,3 @@ struct IrisDaemonCLI: AsyncParsableCommand {
         }
     }
 }
-
-await IrisDaemonCLI.main()
