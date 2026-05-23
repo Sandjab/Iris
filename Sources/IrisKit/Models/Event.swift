@@ -1,0 +1,46 @@
+import Foundation
+
+public struct Event: Codable, Sendable, Identifiable, Equatable {
+    public let id: UUID
+    public let timestamp: Date
+    public let kind: Kind
+    public let host: String
+    public let method: String
+    public let path: String
+    public let statusCode: Int?
+    public let durationMs: UInt32?
+    public let substitutedSecrets: [String]
+    public let alert: Alert?
+
+    public enum Kind: String, Codable, Sendable, CaseIterable {
+        case substituted
+        case passThrough
+        case noMatch
+        case exfilBlocked
+        case error
+    }
+
+    public init(
+        id: UUID = UUID(),
+        timestamp: Date,
+        kind: Kind,
+        host: String,
+        method: String,
+        path: String,
+        statusCode: Int? = nil,
+        durationMs: UInt32? = nil,
+        substitutedSecrets: [String] = [],
+        alert: Alert? = nil
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.kind = kind
+        self.host = host
+        self.method = method
+        self.path = path
+        self.statusCode = statusCode
+        self.durationMs = durationMs
+        self.substitutedSecrets = substitutedSecrets
+        self.alert = alert
+    }
+}

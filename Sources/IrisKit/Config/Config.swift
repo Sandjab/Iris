@@ -1,5 +1,180 @@
 import Foundation
 
-public struct Config: Sendable {
-    public init() {}
+public struct Config: Codable, Sendable, Hashable {
+    public let broker: BrokerConfig
+    public let security: SecurityConfig
+    public let mitmHosts: [MITMHostEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case broker
+        case security
+        case mitmHosts = "mitm_host"
+    }
+
+    public init(broker: BrokerConfig, security: SecurityConfig, mitmHosts: [MITMHostEntry]) {
+        self.broker = broker
+        self.security = security
+        self.mitmHosts = mitmHosts
+    }
+}
+
+public struct BrokerConfig: Codable, Sendable, Hashable {
+    public let listen: String
+    public let eventsListen: String
+    public let adminSocket: String
+    public let logLevel: LogLevel
+    public let eventRetentionDays: Int
+    public let eventRingSize: Int
+
+    enum CodingKeys: String, CodingKey {
+        case listen
+        case eventsListen = "events_listen"
+        case adminSocket = "admin_socket"
+        case logLevel = "log_level"
+        case eventRetentionDays = "event_retention_days"
+        case eventRingSize = "event_ring_size"
+    }
+
+    public init(
+        listen: String,
+        eventsListen: String,
+        adminSocket: String,
+        logLevel: LogLevel,
+        eventRetentionDays: Int,
+        eventRingSize: Int
+    ) {
+        self.listen = listen
+        self.eventsListen = eventsListen
+        self.adminSocket = adminSocket
+        self.logLevel = logLevel
+        self.eventRetentionDays = eventRetentionDays
+        self.eventRingSize = eventRingSize
+    }
+
+    public var resolvedAdminSocketURL: URL {
+        let expanded = (adminSocket as NSString).expandingTildeInPath
+        return URL(fileURLWithPath: expanded)
+    }
+}
+
+public enum LogLevel: String, Codable, Sendable, CaseIterable {
+    case trace
+    case debug
+    case info
+    case warn
+    case error
+}
+
+public struct SecurityConfig: Codable, Sendable, Hashable {
+    public let onExfilAttempt: ExfilAttemptPolicy
+    public let maxSubstitutionsPerMinute: Int
+
+    enum CodingKeys: String, CodingKey {
+        case onExfilAttempt = "on_exfil_attempt"
+        case maxSubstitutionsPerMinute = "max_substitutions_per_minute"
+    }
+
+    public init(onExfilAttempt: ExfilAttemptPolicy, maxSubstitutionsPerMinute: Int) {
+        self.onExfilAttempt = onExfilAttempt
+        self.maxSubstitutionsPerMinute = maxSubstitutionsPerMinute
+    }
+}
+
+public enum ExfilAttemptPolicy: String, Codable, Sendable, CaseIterable {
+    case blockOnly = "block_only"
+    case blockAndNotify = "block_and_notify"
+    case blockNotifyPause = "block_notify_pause"
+}
+
+public struct MITMHostEntry: Codable, Sendable, Hashable {
+    public let host: String
+
+    public init(host: String) {
+        self.host = host
+    }
+}
+
+extension Config {
+    public func validate() throws {
+        try broker.validate()
+        try security.validate()
+        for entry in mitmHosts {
+            try entry.validate()
+        }
+    }
+}
+
+extension BrokerConfig {
+    public func validate() throws {
+        try Self.validateListenAddress(listen, field: "broker.listen")
+        try Self.validateListenAddress(eventsListen, field: "broker.events_listen")
+        if adminSocket.isEmpty {
+            throw ConfigError.invalidValue(field: "broker.admin_socket", value: adminSocket)
+        }
+        guard eventRetentionDays > 0 else {
+            throw ConfigError.invalidValue(
+                field: "broker.event_retention_days",
+                value: "\(eventRetentionDays)"
+            )
+        }
+        guard eventRingSize > 0 else {
+            throw ConfigError.invalidValue(
+                field: "broker.event_ring_size",
+                value: "\(eventRingSize)"
+            )
+        }
+    }
+
+    static func validateListenAddress(_ address: String, field: String) throws {
+        let parts = address.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              !parts[0].isEmpty,
+              let port = Int(parts[1]),
+              (1...65535).contains(port)
+        else {
+            throw ConfigError.invalidValue(field: field, value: address)
+        }
+    }
+}
+
+extension SecurityConfig {
+    public func validate() throws {
+        guard maxSubstitutionsPerMinute > 0 else {
+            throw ConfigError.invalidValue(
+                field: "security.max_substitutions_per_minute",
+                value: "\(maxSubstitutionsPerMinute)"
+            )
+        }
+    }
+}
+
+extension MITMHostEntry {
+    public func validate() throws {
+        guard Secret.isValidHost(host) else {
+            throw ConfigError.invalidValue(field: "mitm_host.host", value: host)
+        }
+    }
+}
+
+public enum ConfigError: Error, LocalizedError, Equatable {
+    case fileReadFailed(path: String)
+    case fileNotUtf8(path: String)
+    case tomlParseFailed(message: String)
+    case decodeFailed(message: String)
+    case invalidValue(field: String, value: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .fileReadFailed(let path):
+            return "Could not read config file at \(path)"
+        case .fileNotUtf8(let path):
+            return "Config file is not UTF-8: \(path)"
+        case .tomlParseFailed(let message):
+            return "TOML parse failed: \(message)"
+        case .decodeFailed(let message):
+            return "Config decode failed: \(message)"
+        case .invalidValue(let field, let value):
+            return "Invalid value '\(value)' for field '\(field)'"
+        }
+    }
 }
