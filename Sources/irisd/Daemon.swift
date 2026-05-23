@@ -55,21 +55,13 @@ public actor Daemon {
         _ = try await proxy.start()
 
         // Park forever. SIGINT/SIGTERM tears down the process and the
-        // NIO event loops shut down implicitly.
-        await Self.parkUntilCancelled()
+        // NIO event loops shut down implicitly. Proper signal handling
+        // arrives later. UInt64.max nanoseconds is ~584 years; the
+        // process is killed by a signal long before this returns.
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: UInt64.max)
+        }
 
         try await proxy.stop()
-    }
-
-    private static func parkUntilCancelled() async {
-        await withTaskCancellationHandler {
-            await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in
-                // Never resume. The handler below resumes on cancellation.
-            }
-        } onCancel: {
-            // Cancellation propagation does not directly unwind the
-            // checked continuation above; the daemon relies on process
-            // termination signals. Proper signal handling lands later.
-        }
     }
 }
