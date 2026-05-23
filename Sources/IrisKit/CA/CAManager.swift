@@ -40,6 +40,24 @@ public actor CAManager {
         return cert
     }
 
+    /// Returns the persistent CA signing key, generating it if absent. Used by
+    /// `LeafCertCache` to sign per-host leaf certificates.
+    public func signingKey() async throws -> P256.Signing.PrivateKey {
+        try await keyStore.loadOrGenerateKey()
+    }
+
+    /// Returns the issuer DN that leaf certs must reference.
+    public func issuerDistinguishedName() throws -> DistinguishedName {
+        do {
+            return try DistinguishedName {
+                CommonName(options.commonName)
+                OrganizationName(options.organization)
+            }
+        } catch {
+            throw CAError.certificateBuildFailed(message: "DistinguishedName: \(error)")
+        }
+    }
+
     // MARK: - Internals
 
     private func makeSelfSignedCertificate(
@@ -55,7 +73,11 @@ public actor CAManager {
             throw CAError.certificateBuildFailed(message: "DistinguishedName: \(error)")
         }
 
+        // Back-date notBefore by 1h to tolerate sub-second clock skew between
+        // CA creation and TLS validation (BoringSSL rounds ASN.1 times to the
+        // second; a freshly-issued cert can read as "not yet valid").
         let now = Date()
+        let notBefore = now.addingTimeInterval(-3600)
         let calendar = Calendar(identifier: .gregorian)
         let later = calendar.date(byAdding: .year, value: options.validityYears, to: now)
             ?? now.addingTimeInterval(Double(options.validityYears) * 365 * 86_400)
@@ -80,7 +102,7 @@ public actor CAManager {
                 version: .v3,
                 serialNumber: serial,
                 publicKey: publicKey,
-                notValidBefore: now,
+                notValidBefore: notBefore,
                 notValidAfter: later,
                 issuer: subject,
                 subject: subject,
@@ -117,7 +139,7 @@ public actor CAManager {
             derBytes: der,
             pem: pem,
             fingerprintSHA256: fingerprint,
-            notBefore: now,
+            notBefore: notBefore,
             notAfter: later,
             commonName: options.commonName
         )
