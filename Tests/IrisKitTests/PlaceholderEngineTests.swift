@@ -68,9 +68,7 @@ final class PlaceholderEngineTests: XCTestCase {
     }
 
     func testNonUTF8BodyIsNotScanned() async throws {
-        // SPECS §7.4: non-UTF-8 bodies are not scanned. The current naive scan
-        // requires a UTF-8 decode to locate placeholders, so binary payloads
-        // pass through unchanged even if they contain the literal pattern.
+        // SPECS §7.4: non-UTF-8 bodies are not scanned.
         let engine = try await makeEngine(with: ["k": "X"])
         var body = Data([0x00, 0xff, 0x01])
         body.append(Data("{{kc:k}}".utf8))
@@ -78,6 +76,33 @@ final class PlaceholderEngineTests: XCTestCase {
         let outcome = try await engine.substitute(body)
         XCTAssertEqual(outcome.output, body, "binary body must pass through unchanged")
         XCTAssertTrue(outcome.substituted.isEmpty)
+        XCTAssertTrue(outcome.nonUtf8, "nonUtf8 flag must be set for binary payloads")
+    }
+
+    func testValidUTF8BodyHasNonUtf8False() async throws {
+        let engine = try await makeEngine(with: ["k": "val"])
+        let outcome = try await engine.substituteString("x-api-key: {{kc:k}}")
+        XCTAssertFalse(outcome.nonUtf8)
+    }
+
+    func testCacheReturnsSameValueWithoutSecondKeychainCall() async throws {
+        // Verify the LRU cache is hit: replace the secret value in the store
+        // after first substitution — the cached value should still be used.
+        let store = InMemorySecretStore()
+        _ = try await store.add(Data("v1".utf8), named: "tok", allowedHosts: ["h.com"], createdAt: Date())
+        let engine = PlaceholderEngine(secretStore: store)
+
+        let first = try await engine.substituteString("{{kc:tok}}")
+        XCTAssertEqual(String(data: first.output, encoding: .utf8), "v1")
+
+        // Rotate value in the store — if cache is working, engine still sees "v1".
+        _ = try await store.rotate(named: "tok", newValue: Data("v2".utf8))
+
+        let second = try await engine.substituteString("{{kc:tok}}")
+        XCTAssertEqual(
+            String(data: second.output, encoding: .utf8), "v1",
+            "LRU cache must serve the first resolved value within TTL"
+        )
     }
 
     func testSubstitutesInsideUTF8JSONBody() async throws {

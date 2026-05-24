@@ -36,6 +36,7 @@ public final class ProxyServer: @unchecked Sendable {
 
     public let configuration: Configuration
     public let logger: Logger
+    public let eventRing: EventRing
     let placeholderEngine: PlaceholderEngine
     let leafCertCache: LeafCertCache
     let upstreamClient: UpstreamClient
@@ -53,6 +54,7 @@ public final class ProxyServer: @unchecked Sendable {
     ) {
         self.configuration = configuration
         self.logger = logger
+        self.eventRing = EventRing()
         self.placeholderEngine = PlaceholderEngine(secretStore: secretStore)
         self.leafCertCache = LeafCertCache(caManager: caManager)
         if let group = group {

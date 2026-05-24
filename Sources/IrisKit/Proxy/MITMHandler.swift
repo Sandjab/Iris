@@ -82,10 +82,12 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         let host = self.host
         let channel = context.channel
         let eventLoop = context.eventLoop
+        let startTime = Date()
 
-        eventLoop.makeFutureWithTask { () async throws -> ResolvedRequest in
-            try await Self.applySubstitution(head: head, body: body, engine: server.placeholderEngine)
-        }.flatMap { resolved -> EventLoopFuture<UpstreamResponse> in
+        eventLoop.makeFutureWithTask { () async throws -> (ResolvedRequest, UpstreamResponse) in
+            let resolved = try await Self.applySubstitution(
+                head: head, body: body, engine: server.placeholderEngine, logger: server.logger, host: host
+            )
             if !resolved.substituted.isEmpty {
                 server.logger.info(
                     "Substituted secrets",
@@ -96,21 +98,41 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                     ]
                 )
             }
-            return eventLoop.makeFutureWithTask {
-                try await server.upstreamClient.send(
-                    head: resolved.head,
-                    body: resolved.body,
-                    host: host,
-                    port: server.configuration.upstreamPort
-                )
-            }
-        }.flatMap { upstream -> EventLoopFuture<Void> in
-            Self.writeResponse(upstream, to: channel)
+            let upstream = try await server.upstreamClient.send(
+                head: resolved.head,
+                body: resolved.body,
+                host: host,
+                port: server.configuration.upstreamPort
+            )
+            return (resolved, upstream)
+        }.flatMap { (resolved, upstream) -> EventLoopFuture<Void> in
+            let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
+            let event = Event(
+                timestamp: startTime,
+                kind: resolved.substituted.isEmpty ? .noMatch : .substituted,
+                host: host,
+                method: head.method.rawValue,
+                path: head.uri,
+                statusCode: Int(upstream.head.status.code),
+                durationMs: duration,
+                substitutedSecrets: resolved.substituted
+            )
+            let ring = server.eventRing
+            Task { await ring.append(event) }
+            return Self.writeResponse(upstream, to: channel)
         }.whenComplete { result in
-            switch result {
-            case .success:
-                break
-            case .failure(let error):
+            if case .failure(let error) = result {
+                let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
+                let event = Event(
+                    timestamp: startTime,
+                    kind: .error,
+                    host: host,
+                    method: head.method.rawValue,
+                    path: head.uri,
+                    durationMs: duration
+                )
+                let ring = server.eventRing
+                Task { await ring.append(event) }
                 server.logger.warning(
                     "Upstream forwarding failed",
                     metadata: ["host": "\(host)", "error": "\(error)"]
@@ -119,6 +141,9 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
             channel.close(promise: nil)
         }
     }
+
+    // SPECS §7.2: bodies larger than this are passed through without scanning.
+    private static let bodyMaxBytes = 4 * 1024 * 1024
 
     private struct ResolvedRequest {
         let head: HTTPRequestHead
@@ -129,13 +154,16 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
     private static func applySubstitution(
         head: HTTPRequestHead,
         body: ByteBuffer?,
-        engine: PlaceholderEngine
+        engine: PlaceholderEngine,
+        logger: Logger,
+        host: String
     ) async throws -> ResolvedRequest {
         var allSubstituted = Set<String>()
 
-        // Headers
+        // Headers — strip Accept-Encoding (SPECS §7.5: prevents compressed upstream responses)
         var newHeaders = HTTPHeaders()
         for (name, value) in head.headers {
+            if name.lowercased() == "accept-encoding" { continue }
             let nameOutcome = try await engine.substituteString(name)
             let valueOutcome = try await engine.substituteString(value)
             allSubstituted.formUnion(nameOutcome.substituted)
@@ -150,19 +178,33 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         allSubstituted.formUnion(uriOutcome.substituted)
         let newURI = String(data: uriOutcome.output, encoding: .utf8) ?? head.uri
 
-        // Body
+        // Body — skip scan if too large (SPECS §7.2: Content-Length > 4 MiB)
         var newBody = body
         if let originalBody = body {
-            let originalData = Data(originalBody.readableBytesView)
-            let bodyOutcome = try await engine.substitute(originalData)
-            allSubstituted.formUnion(bodyOutcome.substituted)
-            if !bodyOutcome.substituted.isEmpty {
-                var buffer = ByteBufferAllocator().buffer(capacity: bodyOutcome.output.count)
-                buffer.writeBytes(bodyOutcome.output)
-                newBody = buffer
-                // Update Content-Length if originally present
-                if newHeaders.contains(name: "content-length") {
-                    newHeaders.replaceOrAdd(name: "content-length", value: "\(bodyOutcome.output.count)")
+            let declaredSize = head.headers.first(name: "content-length")
+                .flatMap(Int.init) ?? originalBody.readableBytes
+            if declaredSize > bodyMaxBytes {
+                logger.warning(
+                    "Body too large, skipping substitution scan",
+                    metadata: ["host": "\(host)", "size": "\(declaredSize)"]
+                )
+            } else {
+                let originalData = Data(originalBody.readableBytesView)
+                let bodyOutcome = try await engine.substitute(originalData)
+                if bodyOutcome.nonUtf8 {
+                    logger.debug(
+                        "Body is non-UTF-8, skipping substitution scan",
+                        metadata: ["host": "\(host)"]
+                    )
+                } else if !bodyOutcome.substituted.isEmpty {
+                    allSubstituted.formUnion(bodyOutcome.substituted)
+                    var buffer = ByteBufferAllocator().buffer(capacity: bodyOutcome.output.count)
+                    buffer.writeBytes(bodyOutcome.output)
+                    newBody = buffer
+                    // Keep Content-Length accurate after substitution.
+                    if newHeaders.contains(name: "content-length") {
+                        newHeaders.replaceOrAdd(name: "content-length", value: "\(bodyOutcome.output.count)")
+                    }
                 }
             }
         }
@@ -173,7 +215,7 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
             uri: newURI,
             headers: newHeaders
         )
-        // Force HTTP/1.1 upstream (Phase 2 sidesteps HTTP/2)
+        // Force HTTP/1.1 upstream (Phase 2 sidesteps HTTP/2, SPECS §11.5)
         newHead.version = .http1_1
         return ResolvedRequest(
             head: newHead,

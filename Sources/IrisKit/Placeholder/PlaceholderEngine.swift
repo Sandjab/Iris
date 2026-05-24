@@ -4,16 +4,32 @@ public struct SubstitutionOutcome: Sendable, Equatable {
     public let output: Data
     public let substituted: [String]
     public let unresolved: [String]
+    /// True when the input could not be decoded as UTF-8 and was passed through unchanged (SPECS §7.4).
+    public let nonUtf8: Bool
 
-    public init(output: Data, substituted: [String], unresolved: [String]) {
+    public init(output: Data, substituted: [String], unresolved: [String], nonUtf8: Bool = false) {
         self.output = output
         self.substituted = substituted
         self.unresolved = unresolved
+        self.nonUtf8 = nonUtf8
     }
 }
 
 public actor PlaceholderEngine {
     private let secretStore: any SecretStore
+
+    // MARK: - Secret value cache (SPECS §4.1: TTL 5 min, max 32 entries)
+
+    private struct CacheEntry: Sendable {
+        let value: Data
+        let expiresAt: Date
+        var isExpired: Bool { Date() >= expiresAt }
+    }
+
+    private var valueCache: [String: CacheEntry] = [:]
+    private var cacheOrder: [String] = []
+    private static let cacheTTL: TimeInterval = 5 * 60
+    private static let cacheCapacity = 32
 
     public init(secretStore: any SecretStore) {
         self.secretStore = secretStore
@@ -25,6 +41,11 @@ public actor PlaceholderEngine {
     /// placeholders are left unchanged. Scoping (`allowed_hosts`) and exfil
     /// detection arrive in Phase 4.
     public func substitute(_ data: Data) async throws -> SubstitutionOutcome {
+        // SPECS §7.4: non-UTF-8 bodies are not scanned.
+        guard String(data: data, encoding: .utf8) != nil else {
+            return SubstitutionOutcome(output: data, substituted: [], unresolved: [], nonUtf8: true)
+        }
+
         let names = Self.findPlaceholderNames(in: data)
         guard !names.isEmpty else {
             return SubstitutionOutcome(output: data, substituted: [], unresolved: [])
@@ -34,7 +55,7 @@ public actor PlaceholderEngine {
         var unresolved: [String] = []
         for name in names {
             do {
-                let value = try await secretStore.value(forName: name)
+                let value = try await cachedValue(forName: name)
                 resolvedValues[name] = value
             } catch SecretStoreError.unknownSecret {
                 unresolved.append(name)
@@ -56,6 +77,41 @@ public actor PlaceholderEngine {
             }
         }
         return SubstitutionOutcome(output: result, substituted: substituted, unresolved: unresolved)
+    }
+
+    // MARK: - Cache
+
+    private func cachedValue(forName name: String) async throws -> Data {
+        if let entry = valueCache[name], !entry.isExpired {
+            return entry.value
+        }
+        let value = try await secretStore.value(forName: name)
+        insertIntoCache(name: name, value: value)
+        return value
+    }
+
+    private func insertIntoCache(name: String, value: Data) {
+        // Remove existing entry for this name to refresh its position.
+        if valueCache[name] != nil {
+            cacheOrder.removeAll { $0 == name }
+        }
+        // Evict until under capacity.
+        while valueCache.count >= Self.cacheCapacity {
+            if let expiredKey = cacheOrder.first(where: { valueCache[$0]?.isExpired == true }) {
+                valueCache.removeValue(forKey: expiredKey)
+                cacheOrder.removeAll { $0 == expiredKey }
+            } else if let oldest = cacheOrder.first {
+                valueCache.removeValue(forKey: oldest)
+                cacheOrder.removeFirst()
+            } else {
+                break
+            }
+        }
+        valueCache[name] = CacheEntry(
+            value: value,
+            expiresAt: Date().addingTimeInterval(Self.cacheTTL)
+        )
+        cacheOrder.append(name)
     }
 
     public func substituteString(_ text: String) async throws -> SubstitutionOutcome {
