@@ -111,11 +111,11 @@ Si une API est dépréciée dans macOS 13+ : ne pas l'utiliser. Confirmer la ver
 
 - En fin de développement d'une feature ou d'une phase, créer une PR depuis la branche dédiée vers `main`.
 - **La description de la PR doit contenir une checklist de smoke testing explicite** (cases `- [ ]`) couvrant les critères de réussite de la phase. Sans cette checklist, la PR n'est pas mergeable.
-- Pré-requis avant ouverture : `swift build` et `swift test` passent localement.
+- Pré-requis avant ouverture : `swift build`, `swift test` et `swift-format` passent localement.
 
 ### Revue Gemini Code Assist
 
-- Toute PR est revue automatiquement par **Gemini Code Assist** (GitHub App). Après ouverture, Claude attend les commentaires de revue pendant **10 minutes maximum** (polling via `gh pr view --comments` ou `gh api repos/:owner/:repo/pulls/:n/comments`).
+- Toute PR est revue automatiquement par **Gemini Code Assist** (GitHub App). Après ouverture, Claude attend les commentaires de revue pendant **10 minutes maximum** (polling via `gh pr view <n> --json reviews` ou `gh api repos/:owner/:repo/pulls/{number}/comments`).
 - Pour chaque commentaire de Gemini, Claude doit faire **un et un seul** des deux choix :
   - **Appliquer le fix**, commit sur la branche de PR, puis répondre au commentaire en référençant le commit.
   - **Refuser** avec une justification **factuelle** (citation de doc, spec, test, comportement observable). Jamais de "je pense que" ou pushback vague.
@@ -125,7 +125,7 @@ Si une API est dépréciée dans macOS 13+ : ne pas l'utiliser. Confirmer la ver
 
 - Conditions cumulatives avant merge :
   1. Tous les commentaires Gemini sont soit appliqués, soit refusés factuellement.
-  2. Tous les tests passent (`swift build` + `swift test`).
+  2. Tous les tests et le lint passent (`swift build` + `swift test` + `swift-format`).
   3. Tous les items de la checklist de smoke testing sont cochés.
 - **Confirmation explicite de l'utilisateur requise avant `gh pr merge`.** Jamais de merge automatique.
 - Stratégie : **squash and merge** (`gh pr merge --squash`). Un commit propre par PR sur `main`.
