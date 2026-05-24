@@ -46,6 +46,17 @@ final class EventRingTests: XCTestCase {
         XCTAssertEqual(recent.map(\.host), ["only"])
     }
 
+    func testRecentWithZeroOrNegativeReturnsEmpty() async throws {
+        let ring = EventRing(capacity: 16)
+        for index in 0..<3 {
+            await ring.append(Self.makeEvent(host: "h\(index)"))
+        }
+        let zero = await ring.recent(0)
+        let negative = await ring.recent(-5)
+        XCTAssertEqual(zero, [])
+        XCTAssertEqual(negative, [])
+    }
+
     func testEventsSinceFiltersByTimestamp() async throws {
         let ring = EventRing(capacity: 16)
         let base = Date(timeIntervalSinceReferenceDate: 0)
