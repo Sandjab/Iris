@@ -40,8 +40,8 @@ public enum ConfigLoader {
         case .valueNotFound(let type, let ctx):
             return "missing value (expected \(type)) at \(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
         case .dataCorrupted(let ctx):
-            return
-                "data corrupted at \(ctx.codingPath.map(\.stringValue).joined(separator: ".")): \(ctx.debugDescription)"
+            let path = ctx.codingPath.map(\.stringValue).joined(separator: ".")
+            return "data corrupted at \(path): \(ctx.debugDescription)"
         @unknown default:
             return String(describing: error)
         }

@@ -185,9 +185,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         // Body — skip scan if too large (SPECS §7.2: Content-Length > 4 MiB)
         var newBody = body
         if let originalBody = body {
-            let declaredSize =
-                head.headers.first(name: "content-length")
-                .flatMap(Int.init) ?? originalBody.readableBytes
+            let contentLength = head.headers.first(name: "content-length").flatMap(Int.init)
+            let declaredSize = contentLength ?? originalBody.readableBytes
             if declaredSize > bodyMaxBytes {
                 logger.warning(
                     "Body too large, skipping substitution scan",
