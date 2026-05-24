@@ -39,13 +39,17 @@ Si une décision n'est pas dans `SPECS.md` : **ne pas spéculer, demander**. Une
 
 ## 3. Posture de travail
 
-- Direct, sans préambule, sans flatterie, sans empathie performative.
-- Pas de label "honnête" / "verdict honnête" / "réponse honnête".
-- La rigueur sans complaisance est la baseline attendue, pas un label à afficher.
-- Si tu doutes d'une API : **vérifie via Context7 ou la doc officielle Apple avant d'affirmer**. Jamais de spéculation sur les signatures, paramètres, ou comportements.
+- Direct, sans préambule, sans flatterie, sans empathie performative. Baselinbe = Rigueur sans complaisance.
+- Si tu doutes d'une API : **vérifie la doc (cf 4. Vérification s obligatoires) avant d'affirmer**. Jamais de spéculation sur les signatures, paramètres, ou comportements.
 - Erreur dans une dépendance (traceback) → consulter la doc de la dépendance ET de la lib principale.
 
 ## 4. Vérifications obligatoires
+
+**Accède à la doc Apple ou Swift dans l'odre suivant** : 
+1. API/framework Apple → sosumi (search puis fetch)
+2. Concept présenté en session WWDC → sosumi video transcript
+3. Lib open-source Swift → context7
+4. Sinon → WebFetch / WebSearch en dernier recours
 
 **Avant d'utiliser une API** :
 - Security.framework, SecKeychain, SecTrust : doc Apple via `sosumi:searchAppleDocumentation` ou `sosumi:fetchAppleDocumentation`.
