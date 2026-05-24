@@ -2,13 +2,13 @@
 import PackageDescription
 
 let strictConcurrency: [SwiftSetting] = [
-    .enableUpcomingFeature("StrictConcurrency"),
+    .enableUpcomingFeature("StrictConcurrency")
 ]
 
 let package = Package(
     name: "iris",
     platforms: [
-        .macOS(.v13),
+        .macOS(.v13)
     ],
     products: [
         .library(name: "IrisKit", targets: ["IrisKit"]),

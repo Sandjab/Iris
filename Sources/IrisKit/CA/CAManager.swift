@@ -1,7 +1,7 @@
-import Foundation
 import Crypto
-import X509
+import Foundation
 import SwiftASN1
+import X509
 
 public actor CAManager {
     public struct Options: Sendable, Hashable {
@@ -79,7 +79,8 @@ public actor CAManager {
         let now = Date()
         let notBefore = now.addingTimeInterval(-3600)
         let calendar = Calendar(identifier: .gregorian)
-        let later = calendar.date(byAdding: .year, value: options.validityYears, to: now)
+        let later =
+            calendar.date(byAdding: .year, value: options.validityYears, to: now)
             ?? now.addingTimeInterval(Double(options.validityYears) * 365 * 86_400)
 
         let extensions: Certificate.Extensions
@@ -131,7 +132,8 @@ public actor CAManager {
         let pem = pemDoc.pemString
 
         let digest = SHA256.hash(data: der)
-        let fingerprint = digest
+        let fingerprint =
+            digest
             .map { String(format: "%02x", $0) }
             .joined(separator: ":")
 

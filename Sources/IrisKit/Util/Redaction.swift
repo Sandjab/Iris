@@ -1,5 +1,5 @@
-import Foundation
 import Crypto
+import Foundation
 
 public enum Redaction {
     public static func redact(_ value: String) -> String {

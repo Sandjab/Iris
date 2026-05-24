@@ -1,7 +1,7 @@
 import Foundation
+import Logging
 import NIO
 import NIOHTTP1
-import Logging
 
 /// Buffers a single decrypted HTTPS request, runs `PlaceholderEngine` over
 /// headers + body, forwards the modified request to upstream via
@@ -86,7 +86,11 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
 
         eventLoop.makeFutureWithTask { () async throws -> (ResolvedRequest, UpstreamResponse) in
             let resolved = try await Self.applySubstitution(
-                head: head, body: body, engine: server.placeholderEngine, logger: server.logger, host: host
+                head: head,
+                body: body,
+                engine: server.placeholderEngine,
+                logger: server.logger,
+                host: host
             )
             if !resolved.substituted.isEmpty {
                 server.logger.info(
@@ -181,8 +185,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         // Body — skip scan if too large (SPECS §7.2: Content-Length > 4 MiB)
         var newBody = body
         if let originalBody = body {
-            let declaredSize = head.headers.first(name: "content-length")
-                .flatMap(Int.init) ?? originalBody.readableBytes
+            let contentLength = head.headers.first(name: "content-length").flatMap(Int.init)
+            let declaredSize = contentLength ?? originalBody.readableBytes
             if declaredSize > bodyMaxBytes {
                 logger.warning(
                     "Body too large, skipping substitution scan",

@@ -1,10 +1,10 @@
-import XCTest
+import Crypto
+import IrisKit
 import NIO
 import NIOHTTP1
 import NIOSSL
-import Crypto
 import X509
-import IrisKit
+import XCTest
 
 final class ProxyEndToEndTests: XCTestCase {
     func testSubstitutedValueReachesUpstream() async throws {

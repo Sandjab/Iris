@@ -1,8 +1,8 @@
 import Foundation
+import IrisKit
 import NIO
 import NIOHTTP1
 import NIOSSL
-import IrisKit
 
 /// Minimal in-process TLS HTTPS server used as the proxy's upstream target
 /// in integration tests. Records the first complete request it sees.

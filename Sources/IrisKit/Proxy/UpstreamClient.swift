@@ -1,8 +1,8 @@
 import Foundation
+import Logging
 import NIO
 import NIOHTTP1
 import NIOSSL
-import Logging
 
 /// Aggregated upstream response (head + buffered body). Phase 2 buffers
 /// the full response; streaming arrives in Phase 2.x.

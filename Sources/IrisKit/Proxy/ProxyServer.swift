@@ -1,8 +1,8 @@
 import Foundation
+import Logging
 import NIO
 import NIOHTTP1
 import NIOSSL
-import Logging
 
 /// Top-level orchestrator for the local MITM forward proxy.
 ///
@@ -96,7 +96,8 @@ public final class ProxyServer: @unchecked Sendable {
                     .flatMap { channel.pipeline.addHandler(connectHandler) }
             }
 
-        let channel = try await bootstrap
+        let channel =
+            try await bootstrap
             .bind(host: configuration.listenHost, port: configuration.listenPort)
             .get()
         self.serverChannel = channel

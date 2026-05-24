@@ -1,5 +1,5 @@
-import Foundation
 import Crypto
+import Foundation
 import Security
 
 /// Persists the CA private key in the Keychain as a `kSecClassGenericPassword`
@@ -53,7 +53,7 @@ public actor KeychainCAKeyStore: CAKeyStore {
             kSecAttrAccount as String: account,
         ]
         let updateAttrs: [String: Any] = [
-            kSecValueData as String: raw,
+            kSecValueData as String: raw
         ]
         let updateStatus = SecItemUpdate(updateQuery as CFDictionary, updateAttrs as CFDictionary)
         switch updateStatus {
