@@ -70,8 +70,9 @@ public actor Daemon {
         didStart = true
         _ = try await proxy.start()
 
-        // Park forever. With the signal dispositions above, SIGINT and
-        // SIGTERM terminate the process via the OS default action.
+        // Park forever. With the default signal dispositions restored in
+        // the entry point (`IrisDaemonCLI.run()` in App.swift), SIGINT
+        // and SIGTERM terminate the process via the OS default action.
         // UInt64.max nanoseconds is ~584 years; the process is killed
         // by a signal long before this returns.
         while !Task.isCancelled {
