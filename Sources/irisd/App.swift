@@ -36,6 +36,16 @@ struct IrisDaemonCLI: AsyncParsableCommand {
     var inMemorySecrets: Bool = false
 
     mutating func run() async throws {
+        // Restore default disposition for SIGINT/SIGTERM as the very first
+        // step. The Swift Concurrency runtime installs handlers that
+        // prevent default termination (smoke-tested: `kill -INT` was a
+        // no-op otherwise, including while the daemon is blocked on a
+        // Keychain ACL prompt during boot). Graceful shutdown (flush
+        // events, log "Proxy stopping") can come later when IPC +
+        // LaunchAgent require it.
+        signal(SIGINT, SIG_DFL)
+        signal(SIGTERM, SIG_DFL)
+
         var logger = Logger(label: "io.iris.daemon")
         logger.logLevel = parseLogLevel(logLevel) ?? .info
 

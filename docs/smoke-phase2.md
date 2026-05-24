@@ -22,7 +22,7 @@ export IRIS_SECRET_ANTHROPIC_KEY="sk-ant-..."   # vraie clé
 - [ ] Log `CA ready fingerprint=... pem_path=~/Library/Application Support/iris/ca.pem`
 - [ ] Log `Proxy bound address=127.0.0.1:8888 allowed_hosts=["api.anthropic.com"]`
 - [ ] Le fichier `~/Library/Application Support/iris/ca.pem` existe et est un PEM valide (`openssl x509 -in ca.pem -noout -subject` lisible)
-- [ ] La clé privée CA est dans le Keychain login (`security find-generic-password -s io.iris.ca.key -a $(id -un)` retourne un item, **sans afficher la valeur**)
+- [ ] La clé privée CA est dans le Keychain login (`security find-generic-password -s io.iris.ca -a privatekey` retourne un item, **sans afficher la valeur**)
 
 ## 2. CA trust
 
@@ -52,8 +52,7 @@ curl -v -x http://127.0.0.1:8888 \
 
 - [ ] Connexion TLS établie via CA Iris (logs curl : `subject: CN=api.anthropic.com`, issuer = CA Iris)
 - [ ] Daemon log : `Substituted secrets host=api.anthropic.com path=/v1/messages secrets=["anthropic_key"]`
-- [ ] Daemon log : `Event kind=substituted durationMs=<N>` (vérif via `--log-level debug`)
-- [ ] Réponse upstream reçue (HTTP 200 ou erreur applicative Anthropic — pas erreur réseau)
+- [ ] Réponse upstream reçue (HTTP 200 si la clé est valide, HTTP 401 `invalid x-api-key` si dummy — dans les deux cas, pas d'erreur réseau)
 - [ ] `{{kc:anthropic_key}}` n'apparaît jamais dans la requête finale (vérifiable côté Anthropic seulement par succès auth ; côté daemon par l'absence de la chaîne dans les logs)
 - [ ] **La valeur réelle de la clé n'apparaît JAMAIS dans les logs daemon**, même en `--log-level debug` (grep `sk-ant-` sur la sortie → 0 hit)
 
@@ -64,8 +63,8 @@ curl -v -x http://127.0.0.1:8888 -H "x-api-key: real-key-no-placeholder" \
   https://api.anthropic.com/v1/messages -d '{}'
 ```
 
-- [ ] Daemon log : `Event kind=noMatch`
-- [ ] Requête forwardée telle quelle
+- [ ] **Pas** de log `Substituted secrets` pour cette requête (no-match → aucune substitution emit)
+- [ ] Requête forwardée telle quelle (la réponse upstream confirme — code HTTP attendu selon validité du header `x-api-key`)
 
 ## 5. Non-whitelisted host
 
@@ -87,7 +86,8 @@ curl -v -x http://127.0.0.1:8888 \
   https://api.anthropic.com/v1/messages
 ```
 
-- [ ] Daemon log : event avec `bodyTooLarge` OU substitution skippée (placeholder reste dans le body forwardé)
+- [ ] Daemon log : `warning Body too large, skipping substitution scan size=<N>` (avec `<N>` > 4 194 304)
+- [ ] Placeholder reste dans le body forwardé (upstream retourne 401 sur la valeur litterale `{{kc:anthropic_key}}`)
 - [ ] Pas de crash, pas d'OOM
 
 ## 7. Accept-Encoding strippé
@@ -122,20 +122,24 @@ curl -v -x http://127.0.0.1:8888 \
   https://api.anthropic.com/v1/messages
 ```
 
-- [ ] Daemon log : `Event kind=noMatch nonUtf8=true`
+- [ ] Daemon log (debug) : `Body is non-UTF-8, skipping substitution scan`
+- [ ] Substitution sur les headers continue (si placeholder dans header : log `Substituted secrets` émis)
 - [ ] Body forwardé intact (pas de corruption binaire)
 
 ## 10. EventRing (10 000 entrées)
 
-> **Non observable en Phase 2** (pas d'IPC, pas de dump CLI). Couvert :
+> **Non observable en Phase 2** (pas d'IPC, pas de dump CLI). `EventRing.append` est silencieux par design — aucun log `Event kind=...` n'est émis sur stdout. Couvert :
 > - Capacité ring : test unitaire `EventRingTests` si présent (sinon, à ajouter Phase 3)
-> - Émission par requête : implicitement validé par §3, §4, §5, §9 si les logs `Event kind=...` apparaissent
+> - Émission par requête : observable indirectement via les logs `Substituted secrets` (§3, §7, §9) et `Refusing non-whitelisted host` (§5)
 
 - [ ] Tests unitaires `EventRing` présents et verts : `swift test --filter EventRing`
 
 ## 11. Shutdown propre
 
-- [ ] Ctrl-C (SIGINT) sur le daemon : log `Proxy stopping`, le processus rend la main < 2s
+> Phase 2 : pas de graceful shutdown. SIGINT/SIGTERM coupent le processus via la disposition POSIX par défaut. NIO + Keychain sont libérés implicitement par l'OS. Un teardown propre (log `Proxy stopping`, flush des events SQLite) arrive avec Phase 3+ (IPC).
+
+- [ ] `kill -INT <pid>` (Ctrl-C équivalent) : le processus disparaît < 2s
+- [ ] `kill -TERM <pid>` : le processus disparaît < 2s
 - [ ] Aucune socket leak (`lsof -i :8888` vide après stop)
 - [ ] Aucun thread NIO en limbo (le process disparaît de `ps`)
 
