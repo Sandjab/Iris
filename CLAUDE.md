@@ -98,12 +98,37 @@ Si une API est dépréciée dans macOS 13+ : ne pas l'utiliser. Confirmer la ver
 
 ---
 
-## 8. Workflow git
+## 8. Workflow git & PR
 
-- Branche par feature : `feat/<nom>`, `fix/<nom>`, `chore/<nom>`.
+### Branche & commits
+
+- **Une phase = une branche dédiée.** Nommage : `feat/phase-<N>-<slug>` (ex. `feat/phase-3-ipc`). Hors phasage : `feat/<slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>`.
+- **Pas de push direct sur `main`.** Toute modification passe par une PR.
 - Commits conventional : `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`.
 - Un commit = un changement cohérent. Pas de méga-commits "wip".
-- PR (ou commit sur main si solo) doit passer : `swift build`, `swift test`, lint.
+
+### PR
+
+- En fin de développement d'une feature ou d'une phase, créer une PR depuis la branche dédiée vers `main`.
+- **La description de la PR doit contenir une checklist de smoke testing explicite** (cases `- [ ]`) couvrant les critères de réussite de la phase. Sans cette checklist, la PR n'est pas mergeable.
+- Pré-requis avant ouverture : `swift build`, `swift test` et `swift-format` passent localement.
+
+### Revue Gemini Code Assist
+
+- Toute PR est revue automatiquement par **Gemini Code Assist** (GitHub App). Après ouverture, Claude attend les commentaires de revue pendant **10 minutes maximum** (polling via `gh pr view <n> --json reviews` ou `gh api repos/:owner/:repo/pulls/{number}/comments`).
+- Pour chaque commentaire de Gemini, Claude doit faire **un et un seul** des deux choix :
+  - **Appliquer le fix**, commit sur la branche de PR, puis répondre au commentaire en référençant le commit.
+  - **Refuser** avec une justification **factuelle** (citation de doc, spec, test, comportement observable). Jamais de "je pense que" ou pushback vague.
+- Au-delà de 10 min sans nouveau commentaire : considérer la revue terminée.
+
+### Merge
+
+- Conditions cumulatives avant merge :
+  1. Tous les commentaires Gemini sont soit appliqués, soit refusés factuellement.
+  2. Tous les tests et le lint passent (`swift build` + `swift test` + `swift-format`).
+  3. Tous les items de la checklist de smoke testing sont cochés.
+- **Confirmation explicite de l'utilisateur requise avant `gh pr merge`.** Jamais de merge automatique.
+- Stratégie : **squash and merge** (`gh pr merge --squash`). Un commit propre par PR sur `main`.
 
 ---
 
