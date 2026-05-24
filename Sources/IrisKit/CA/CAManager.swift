@@ -33,11 +33,70 @@ public actor CAManager {
 
     public func ensureCA() async throws -> CACertificate {
         let key = try await keyStore.loadOrGenerateKey()
+
+        // Reuse the on-disk certificate when it still matches our signing
+        // key and hasn't expired. Without this, every restart rebuilt the
+        // certificate (random serial + fresh notBefore + ECDSA nonce),
+        // producing a new fingerprint and silently invalidating any trust
+        // store entry the user had set up.
+        if let existing = try? loadCertificateMatching(key: key) {
+            return existing
+        }
+
         let cert = try makeSelfSignedCertificate(signingKey: key)
         if let path = options.publicCertPath {
             try writePEM(cert.pem, to: path)
         }
         return cert
+    }
+
+    private func loadCertificateMatching(
+        key: P256.Signing.PrivateKey
+    ) throws -> CACertificate? {
+        guard let path = options.publicCertPath,
+            FileManager.default.fileExists(atPath: path.path),
+            let pemString = try? String(contentsOf: path, encoding: .utf8)
+        else {
+            return nil
+        }
+
+        let cert: Certificate
+        do {
+            let pemDoc = try PEMDocument(pemString: pemString)
+            cert = try Certificate(pemDocument: pemDoc)
+        } catch {
+            return nil
+        }
+
+        // Reject if the cert was issued for a different key — the key store
+        // and the on-disk PEM are out of sync, regenerate to recover.
+        guard cert.publicKey == Certificate.PublicKey(key.publicKey) else {
+            return nil
+        }
+
+        // Reject if expired or not yet valid (clock skew aside, we leave
+        // the 1h backdate margin in the freshly-generated path).
+        let now = Date()
+        guard cert.notValidBefore <= now, cert.notValidAfter > now else {
+            return nil
+        }
+
+        var serializer = DER.Serializer()
+        try serializer.serialize(cert)
+        let der = Data(serializer.serializedBytes)
+        let fingerprint =
+            SHA256.hash(data: der)
+            .map { String(format: "%02x", $0) }
+            .joined(separator: ":")
+
+        return CACertificate(
+            derBytes: der,
+            pem: pemString,
+            fingerprintSHA256: fingerprint,
+            notBefore: cert.notValidBefore,
+            notAfter: cert.notValidAfter,
+            commonName: options.commonName
+        )
     }
 
     /// Returns the persistent CA signing key, generating it if absent. Used by

@@ -99,4 +99,59 @@ final class CAManagerTests: XCTestCase {
         let expected = Certificate.PublicKey(key.publicKey)
         XCTAssertEqual(parsed.publicKey, expected)
     }
+
+    func testEnsureCAIsIdempotentWithinSameManager() async throws {
+        let tempPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iris-test-\(UUID()).pem")
+        addTeardownBlock { try? FileManager.default.removeItem(at: tempPath) }
+        let manager = CAManager(
+            keyStore: InMemoryCAKeyStore(),
+            options: .init(publicCertPath: tempPath)
+        )
+        let first = try await manager.ensureCA()
+        let second = try await manager.ensureCA()
+        XCTAssertEqual(first.fingerprintSHA256, second.fingerprintSHA256)
+        XCTAssertEqual(first.derBytes, second.derBytes)
+    }
+
+    func testEnsureCAIsIdempotentAcrossManagerInstances() async throws {
+        let tempPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iris-test-\(UUID()).pem")
+        addTeardownBlock { try? FileManager.default.removeItem(at: tempPath) }
+        let key = P256.Signing.PrivateKey()
+        let store = InMemoryCAKeyStore(initial: key)
+        let first = try await CAManager(
+            keyStore: store,
+            options: .init(publicCertPath: tempPath)
+        ).ensureCA()
+        // Same key store + same on-disk PEM = same cert. Simulates daemon restart.
+        let second = try await CAManager(
+            keyStore: store,
+            options: .init(publicCertPath: tempPath)
+        ).ensureCA()
+        XCTAssertEqual(first.fingerprintSHA256, second.fingerprintSHA256)
+    }
+
+    func testEnsureCARegeneratesWhenOnDiskCertHasMismatchingKey() async throws {
+        let tempPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iris-test-\(UUID()).pem")
+        addTeardownBlock { try? FileManager.default.removeItem(at: tempPath) }
+        // Seed disk with a cert signed by a different key.
+        let firstKey = P256.Signing.PrivateKey()
+        _ = try await CAManager(
+            keyStore: InMemoryCAKeyStore(initial: firstKey),
+            options: .init(publicCertPath: tempPath)
+        ).ensureCA()
+
+        // Run a second manager with a different key — must regenerate, not
+        // serve the stale on-disk cert (which would no longer chain to its
+        // signing key).
+        let secondKey = P256.Signing.PrivateKey()
+        let regenerated = try await CAManager(
+            keyStore: InMemoryCAKeyStore(initial: secondKey),
+            options: .init(publicCertPath: tempPath)
+        ).ensureCA()
+        let parsed = try Certificate(derEncoded: Array(regenerated.derBytes))
+        XCTAssertEqual(parsed.publicKey, Certificate.PublicKey(secondKey.publicKey))
+    }
 }
