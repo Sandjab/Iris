@@ -54,15 +54,15 @@ public actor CAManager {
         key: P256.Signing.PrivateKey
     ) throws -> CACertificate? {
         guard let path = options.publicCertPath,
-            FileManager.default.fileExists(atPath: path.path),
             let pemString = try? String(contentsOf: path, encoding: .utf8)
         else {
             return nil
         }
 
+        let pemDoc: PEMDocument
         let cert: Certificate
         do {
-            let pemDoc = try PEMDocument(pemString: pemString)
+            pemDoc = try PEMDocument(pemString: pemString)
             cert = try Certificate(pemDocument: pemDoc)
         } catch {
             return nil
@@ -74,6 +74,17 @@ public actor CAManager {
             return nil
         }
 
+        // Reject if the cert's subject no longer matches our options (e.g.
+        // commonName/organization were reconfigured). Without this, the
+        // returned CACertificate metadata could lie about the bytes.
+        let expectedSubject = try DistinguishedName {
+            CommonName(options.commonName)
+            OrganizationName(options.organization)
+        }
+        guard cert.subject == expectedSubject else {
+            return nil
+        }
+
         // Reject if expired or not yet valid (clock skew aside, we leave
         // the 1h backdate margin in the freshly-generated path).
         let now = Date()
@@ -81,13 +92,10 @@ public actor CAManager {
             return nil
         }
 
-        var serializer = DER.Serializer()
-        try serializer.serialize(cert)
-        let der = Data(serializer.serializedBytes)
-        let fingerprint =
-            SHA256.hash(data: der)
-            .map { String(format: "%02x", $0) }
-            .joined(separator: ":")
+        let der = Data(pemDoc.derBytes)
+        let hash = SHA256.hash(data: der)
+        let hexBytes = hash.map { String(format: "%02x", $0) }
+        let fingerprint = hexBytes.joined(separator: ":")
 
         return CACertificate(
             derBytes: der,
