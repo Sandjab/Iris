@@ -63,8 +63,8 @@ Si une API est dépréciée dans macOS 13+ : ne pas l'utiliser. Confirmer la ver
 
 ## 5. Conventions code Swift
 
-- Indentation 4 espaces.
-- `swift-format` config par défaut, exécuté avant chaque commit (cible CI à prévoir).
+- Indentation 4 espaces, ligne max 120 caractères.
+- `swift-format` exécuté avant chaque commit. Config à la racine (`.swift-format`) — ne pas modifier sans justifier dans le commit. Cible CI à prévoir.
 - `// MARK:` pour structurer les fichiers > 200 lignes.
 - Pas de force-unwrap (`!`) hors tests. Toujours `guard let` / `if let` / nil-coalescing.
 - `Sendable` partout où c'est demandé par concurrency Swift 6 (le projet doit compiler `-strict-concurrency=complete`).

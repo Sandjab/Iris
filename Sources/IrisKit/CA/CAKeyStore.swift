@@ -1,5 +1,5 @@
-import Foundation
 import Crypto
+import Foundation
 
 public protocol CAKeyStore: Sendable {
     func loadKey() async throws -> P256.Signing.PrivateKey?

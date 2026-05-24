@@ -1,29 +1,30 @@
 import XCTest
+
 @testable import IrisKit
 
 final class ConfigTests: XCTestCase {
     private let validTOML = """
-    [broker]
-    listen        = "127.0.0.1:8888"
-    events_listen = "127.0.0.1:8889"
-    admin_socket  = "~/Library/Application Support/iris/admin.sock"
-    log_level     = "info"
-    event_retention_days = 7
-    event_ring_size = 10000
+        [broker]
+        listen        = "127.0.0.1:8888"
+        events_listen = "127.0.0.1:8889"
+        admin_socket  = "~/Library/Application Support/iris/admin.sock"
+        log_level     = "info"
+        event_retention_days = 7
+        event_ring_size = 10000
 
-    [security]
-    on_exfil_attempt = "block_and_notify"
-    max_substitutions_per_minute = 60
+        [security]
+        on_exfil_attempt = "block_and_notify"
+        max_substitutions_per_minute = 60
 
-    [[mitm_host]]
-    host = "api.anthropic.com"
+        [[mitm_host]]
+        host = "api.anthropic.com"
 
-    [[mitm_host]]
-    host = "api.github.com"
+        [[mitm_host]]
+        host = "api.github.com"
 
-    [[mitm_host]]
-    host = "api.openai.com"
-    """
+        [[mitm_host]]
+        host = "api.openai.com"
+        """
 
     func testParsesSPECSExample() throws {
         let config = try ConfigLoader.load(toml: validTOML)
@@ -35,11 +36,14 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.security.onExfilAttempt, .blockAndNotify)
         XCTAssertEqual(config.security.maxSubstitutionsPerMinute, 60)
         XCTAssertEqual(config.mitmHosts.count, 3)
-        XCTAssertEqual(config.mitmHosts.map(\.host), [
-            "api.anthropic.com",
-            "api.github.com",
-            "api.openai.com",
-        ])
+        XCTAssertEqual(
+            config.mitmHosts.map(\.host),
+            [
+                "api.anthropic.com",
+                "api.github.com",
+                "api.openai.com",
+            ]
+        )
     }
 
     func testAdminSocketTildeExpansion() throws {
@@ -99,11 +103,12 @@ final class ConfigTests: XCTestCase {
     }
 
     func testRejectsInvalidMITMHost() {
-        let toml = validTOML + """
+        let toml =
+            validTOML + """
 
-        [[mitm_host]]
-        host = "_not_a_host_"
-        """
+                [[mitm_host]]
+                host = "_not_a_host_"
+                """
         XCTAssertThrowsError(try ConfigLoader.load(toml: toml)) { error in
             guard case ConfigError.invalidValue(let field, _) = error else {
                 return XCTFail("expected ConfigError.invalidValue, got \(error)")

@@ -76,7 +76,7 @@ public actor KeychainSecretStore: SecretStore {
         _ = try fetchSecret(named: name)
         let query: [String: Any] = baseQuery(for: name)
         let attrs: [String: Any] = [
-            kSecValueData as String: newValue,
+            kSecValueData as String: newValue
         ]
         let status = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
         switch status {
@@ -143,7 +143,7 @@ public actor KeychainSecretStore: SecretStore {
             }
             return try items.compactMap { item in
                 guard let name = item[kSecAttrAccount as String] as? String,
-                      let blob = item[kSecAttrGeneric as String] as? Data
+                    let blob = item[kSecAttrGeneric as String] as? Data
                 else { return nil }
                 let metadata = try decode(blob)
                 return Secret(
@@ -206,7 +206,7 @@ public actor KeychainSecretStore: SecretStore {
         switch status {
         case errSecSuccess:
             guard let item = result as? [String: Any],
-                  let blob = item[kSecAttrGeneric as String] as? Data
+                let blob = item[kSecAttrGeneric as String] as? Data
             else {
                 throw SecretStoreError.dataCorruption("missing metadata blob for \(name)")
             }
@@ -229,7 +229,7 @@ public actor KeychainSecretStore: SecretStore {
         let blob = try encode(metadata)
         let query: [String: Any] = baseQuery(for: name)
         let attrs: [String: Any] = [
-            kSecAttrGeneric as String: blob,
+            kSecAttrGeneric as String: blob
         ]
         let status = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
         switch status {

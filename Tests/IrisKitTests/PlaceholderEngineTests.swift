@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import IrisKit
 
 final class PlaceholderEngineTests: XCTestCase {
@@ -100,7 +101,8 @@ final class PlaceholderEngineTests: XCTestCase {
 
         let second = try await engine.substituteString("{{kc:tok}}")
         XCTAssertEqual(
-            String(data: second.output, encoding: .utf8), "v1",
+            String(data: second.output, encoding: .utf8),
+            "v1",
             "LRU cache must serve the first resolved value within TTL"
         )
     }

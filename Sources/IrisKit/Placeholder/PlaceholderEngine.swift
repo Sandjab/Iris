@@ -131,7 +131,7 @@ public actor PlaceholderEngine {
         var order: [String] = []
         for match in matches {
             guard match.numberOfRanges >= 2,
-                  let captured = Range(match.range(at: 1), in: text)
+                let captured = Range(match.range(at: 1), in: text)
             else { continue }
             let name = String(text[captured])
             if seen.insert(name).inserted {

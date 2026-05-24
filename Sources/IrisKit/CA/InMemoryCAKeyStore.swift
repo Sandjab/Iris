@@ -1,5 +1,5 @@
-import Foundation
 import Crypto
+import Foundation
 
 public actor InMemoryCAKeyStore: CAKeyStore {
     private var key: P256.Signing.PrivateKey?

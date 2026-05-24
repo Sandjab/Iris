@@ -1,6 +1,7 @@
-import XCTest
 import Crypto
 import X509
+import XCTest
+
 @testable import IrisKit
 
 final class LeafCertCacheTests: XCTestCase {

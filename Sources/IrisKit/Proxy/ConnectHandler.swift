@@ -55,7 +55,7 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
         case .body:
             break
         case .end:
-            guard case let .awaitingEnd(host, port) = state else {
+            guard case .awaitingEnd(let host, let port) = state else {
                 respondAndClose(context: context, status: .badRequest)
                 return
             }
@@ -196,9 +196,9 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
     private static func parseAuthority(_ uri: String) -> (String, Int)? {
         let parts = uri.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2,
-              !parts[0].isEmpty,
-              let port = Int(parts[1]),
-              (1...65535).contains(port)
+            !parts[0].isEmpty,
+            let port = Int(parts[1]),
+            (1...65535).contains(port)
         else { return nil }
         return (String(parts[0]), port)
     }

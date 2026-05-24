@@ -128,9 +128,9 @@ extension BrokerConfig {
     static func validateListenAddress(_ address: String, field: String) throws {
         let parts = address.split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count == 2,
-              !parts[0].isEmpty,
-              let port = Int(parts[1]),
-              (1...65535).contains(port)
+            !parts[0].isEmpty,
+            let port = Int(parts[1]),
+            (1...65535).contains(port)
         else {
             throw ConfigError.invalidValue(field: field, value: address)
         }
