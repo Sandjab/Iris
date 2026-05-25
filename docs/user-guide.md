@@ -140,12 +140,13 @@ cat >> ~/.zshrc <<'EOF'
 # IRIS — local credential broker
 export HTTPS_PROXY="http://127.0.0.1:8888"
 export NODE_EXTRA_CA_CERTS="$HOME/Library/Application Support/iris/ca.pem"
-export SSL_CERT_FILE="$NODE_EXTRA_CA_CERTS"
 EOF
 
 # 4. Recharger
 source ~/.zshrc
 ```
+
+> ℹ️ **Pourquoi pas de `SSL_CERT_FILE`** : contrairement à `NODE_EXTRA_CA_CERTS` qui *ajoute* le cert IRIS au bundle Node.js, `SSL_CERT_FILE` **remplace** tout le bundle CA pour les outils OpenSSL/LibreSSL (Python, Ruby, curl…). Le pointer sur le seul `ca.pem` d'IRIS casserait la validation TLS pour tous les domaines non whitelistés. Pour couvrir ces outils, faites `iris ca install` à l'étape 2 ci-dessus : le CA est ajouté au trust store système et toutes les libs OpenSSL le respectent automatiquement.
 
 > ⚠️ `HTTPS_PROXY` ne s'applique qu'aux processus lancés depuis un shell (terminal, scripts). Les apps GUI lancées depuis le Finder/Dock/Spotlight ne sont **pas** interceptées — c'est intentionnel.
 
@@ -508,7 +509,7 @@ et vérifiez `Keychain ACL : ok`. Si KO, contactez le support / réinstallez le 
 
 ### MCP server qui ne respecte pas `HTTPS_PROXY`
 
-Certains serveurs MCP utilisent des libs HTTP qui ignorent les variables d'environnement (Go par exemple). Vérifiez la doc du serveur ou utilisez `iris mcp wrap` qui patche directement le fichier de config (`HTTPS_PROXY` ajouté en `env` du serveur MCP).
+Certains serveurs MCP utilisent des clients HTTP qui ignorent les variables d'environnement (par exemple si un binaire Go utilise un `http.Transport` personnalisé sans configuration de proxy — le transport par défaut `net/http`, lui, honore bien `HTTPS_PROXY` via `http.ProxyFromEnvironment`). Vérifiez la doc du serveur ou utilisez `iris mcp wrap` qui patche directement le fichier de config (`HTTPS_PROXY` ajouté en `env` du serveur MCP).
 
 ---
 
