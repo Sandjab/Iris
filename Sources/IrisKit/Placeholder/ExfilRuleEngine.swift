@@ -33,6 +33,7 @@ struct SlidingMinuteCounter: Sendable {
     }
 
     private mutating func prune(before now: Date) {
+        // Inclusive window: keep timestamps t with now-60 <= t <= now.
         let cutoff = now.addingTimeInterval(-60)
         timestamps.removeAll { $0 < cutoff }
     }
@@ -59,9 +60,11 @@ public actor ExfilRuleEngine {
 
     private func wouldExceedVolumeLimit(name: String) -> Bool {
         let now = Date()
-        var counter = volumeCounters[name] ?? SlidingMinuteCounter()
+        guard var counter = volumeCounters[name] else {
+            return 1 > maxSubstitutionsPerMinute
+        }
         let willBe = counter.count(at: now) + 1
-        volumeCounters[name] = counter  // persist any prune
+        volumeCounters[name] = counter  // persist prune
         return willBe > maxSubstitutionsPerMinute
     }
 
