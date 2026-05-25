@@ -14,7 +14,7 @@
 - Langage : Swift 5.9+
 - Plateforme : macOS 13 Ventura minimum
 - Build : SwiftPM (`Package.swift` à la racine)
-- Dépendances tierces autorisées : `swift-nio`, `swift-nio-ssl`, `swift-nio-http2`, `swift-argument-parser`, `swift-log`, `swift-certificates`, `swift-asn1`, `TOMLKit`. **Pas d'autres dépendances sans justification écrite dans le commit.**
+- Dépendances tierces autorisées : `swift-nio`, `swift-nio-ssl`, `swift-argument-parser`, `swift-log`, `swift-crypto`, `swift-certificates`, `swift-asn1`, `TOMLKit`. **Pas d'autres dépendances sans justification écrite dans le commit.**
 - UI : SwiftUI + AppKit (NSStatusItem pour la menu bar)
 - Distribution : `.pkg` signé + notarisé
 
