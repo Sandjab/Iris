@@ -117,4 +117,84 @@ final class PlaceholderEngineTests: XCTestCase {
         )
         XCTAssertEqual(outcome.substituted, ["k"])
     }
+
+    // MARK: - substituteResolvable
+
+    func testSubstituteResolvableReplacesOnlyAuthorizedHits() async throws {
+        let engine = try await makeEngine(with: ["foo": "VALUE_FOO", "bar": "VALUE_BAR"])
+        let authorizedHit = PlaceholderHit(
+            name: "foo",
+            location: .header(name: "authorization"),
+            snippet: ""
+        )
+        let payload = try await engine.substituteResolvable(
+            headers: [("Authorization", "Bearer {{kc:foo}}"), ("X-Other", "{{kc:bar}}")],
+            uri: "/v1/messages",
+            body: nil,
+            resolvableHits: [authorizedHit]
+        )
+        XCTAssertEqual(payload.substituted, ["foo"])
+        XCTAssertEqual(payload.headers[0].value, "Bearer VALUE_FOO")
+        XCTAssertEqual(payload.headers[1].value, "{{kc:bar}}")  // not authorized
+    }
+
+    func testSubstituteResolvableEmptyHitsReturnsVerbatim() async throws {
+        let engine = try await makeEngine(with: ["foo": "VALUE_FOO"])
+        let payload = try await engine.substituteResolvable(
+            headers: [("Authorization", "Bearer {{kc:foo}}")],
+            uri: "/v1/messages",
+            body: nil,
+            resolvableHits: []
+        )
+        XCTAssertEqual(payload.substituted, [])
+        XCTAssertEqual(payload.headers[0].value, "Bearer {{kc:foo}}")
+    }
+
+    func testSubstituteResolvableSubstitutesInBody() async throws {
+        let engine = try await makeEngine(with: ["foo": "VALUE_FOO"])
+        let body = Data(#"{"key":"{{kc:foo}}"}"#.utf8)
+        let hit = PlaceholderHit(name: "foo", location: .body, snippet: "")
+        let payload = try await engine.substituteResolvable(
+            headers: [],
+            uri: "/",
+            body: body,
+            resolvableHits: [hit]
+        )
+        XCTAssertEqual(payload.substituted, ["foo"])
+        XCTAssertEqual(
+            String(data: payload.body!, encoding: .utf8),
+            #"{"key":"VALUE_FOO"}"#
+        )
+    }
+
+    func testSubstituteResolvableSubstitutesInURI() async throws {
+        let engine = try await makeEngine(with: ["foo": "VALUE_FOO"])
+        let hit = PlaceholderHit(name: "foo", location: .queryString, snippet: "")
+        let payload = try await engine.substituteResolvable(
+            headers: [],
+            uri: "/v1?x={{kc:foo}}",
+            body: nil,
+            resolvableHits: [hit]
+        )
+        XCTAssertEqual(payload.substituted, ["foo"])
+        XCTAssertEqual(payload.uri, "/v1?x=VALUE_FOO")
+    }
+
+    func testSubstituteResolvableUnresolvedNameReportedInPayload() async throws {
+        let engine = try await makeEngine(with: ["foo": "VALUE_FOO"])  // bar absent
+        let hit = PlaceholderHit(
+            name: "bar",
+            location: .header(name: "authorization"),
+            snippet: ""
+        )
+        let payload = try await engine.substituteResolvable(
+            headers: [("Authorization", "Bearer {{kc:bar}}")],
+            uri: "/v1",
+            body: nil,
+            resolvableHits: [hit]
+        )
+        XCTAssertEqual(payload.substituted, [])
+        XCTAssertEqual(payload.unresolved, ["bar"])
+        XCTAssertEqual(payload.headers[0].value, "Bearer {{kc:bar}}")
+    }
 }
