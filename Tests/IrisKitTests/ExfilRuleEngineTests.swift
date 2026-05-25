@@ -36,9 +36,10 @@ final class ExfilRuleEngineTests: XCTestCase {
             PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}")
         ]
         let decision = try await ev.evaluate(hits: hits, context: ctx(host: "api.github.com"))
-        guard case .block(let alert, _) = decision else {
+        guard case .block(let alert, let allHits) = decision else {
             return XCTFail("expected block")
         }
+        XCTAssertEqual(allHits.map(\.name), ["foo"])
         XCTAssertEqual(alert.rule, .hostMismatch)
         XCTAssertEqual(alert.severity, .high)
         XCTAssertEqual(alert.secretName, "foo")
