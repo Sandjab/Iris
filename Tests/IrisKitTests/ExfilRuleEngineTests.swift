@@ -77,4 +77,73 @@ final class ExfilRuleEngineTests: XCTestCase {
         let decision = try await ev.evaluate(hits: hits, context: ctx(host: "API.Anthropic.com"))
         guard case .allow = decision else { return XCTFail("expected allow") }
     }
+
+    // MARK: R2
+
+    func testR2NonCanonicalHeaderBlocks() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [
+            PlaceholderHit(name: "foo", location: .header(name: "x-custom"), snippet: "{{kc:foo}}")
+        ]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
+        XCTAssertEqual(alert.severity, .high)
+    }
+
+    func testR2CanonicalAuthHeadersAllowed() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        for header in ["authorization", "x-api-key", "api-key", "x-auth-token"] {
+            let hits = [
+                PlaceholderHit(name: "foo", location: .header(name: header), snippet: "{{kc:foo}}")
+            ]
+            let decision = try await ev.evaluate(hits: hits, context: ctx())
+            guard case .allow = decision else {
+                return XCTFail("\(header) should be canonical")
+            }
+        }
+    }
+
+    func testR2HitInURLPathBlocks() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .urlPath, snippet: "/{{kc:foo}}")]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
+        XCTAssertEqual(alert.detectedAt, .urlPath)
+    }
+
+    func testR2HitInQueryStringBlocks() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .queryString, snippet: "?x={{kc:foo}}")]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
+        XCTAssertEqual(alert.detectedAt, .queryString)
+    }
+
+    func testR2BodyOnGETBlocks() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(hits: hits, context: ctx(method: "GET"))
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
+    }
+
+    func testR2BodyOnPOSTAllowed() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(hits: hits, context: ctx(method: "POST"))
+        guard case .allow = decision else {
+            return XCTFail("R2 should not fire on POST body")
+        }
+    }
 }

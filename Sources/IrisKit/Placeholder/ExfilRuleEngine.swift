@@ -70,6 +70,20 @@ public actor ExfilRuleEngine {
             }
         }
 
+        // R2 — non-canonical location (high)
+        for hit in knownHits {
+            if Self.isNonCanonicalLocation(hit: hit, method: context.method) {
+                let alert = Alert(
+                    severity: .high,
+                    rule: .nonCanonicalLocation,
+                    secretName: hit.name,
+                    detectedAt: alertLocation(from: hit.location),
+                    snippet: hit.snippet
+                )
+                return .block(alert: alert, allHits: hits)
+            }
+        }
+
         return .allow(resolvable: knownHits)
     }
 
@@ -79,6 +93,24 @@ public actor ExfilRuleEngine {
         case .urlPath: return .urlPath
         case .queryString: return .queryString
         case .body: return .body
+        }
+    }
+
+    private static let canonicalAuthHeaders: Set<String> = [
+        "authorization", "x-api-key", "api-key", "x-auth-token",
+    ]
+
+    private static func isNonCanonicalLocation(
+        hit: PlaceholderHit,
+        method: String
+    ) -> Bool {
+        switch hit.location {
+        case .header(let name):
+            return !canonicalAuthHeaders.contains(name)
+        case .urlPath, .queryString:
+            return true
+        case .body:
+            return method.uppercased() == "GET"
         }
     }
 }
