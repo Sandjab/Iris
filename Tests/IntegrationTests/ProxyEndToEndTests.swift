@@ -198,4 +198,44 @@ final class ProxyEndToEndTests: XCTestCase {
         )
         XCTAssertEqual(passThroughEvents.first?.host, "localhost")
     }
+
+    func testNonWhitelistedHostWithUnreachableUpstreamReturns502() async throws {
+        // Regression: previously, a CONNECT to a host whose passthrough TCP
+        // dial fails (DNS NXDOMAIN, refused, etc.) crashed the daemon with a
+        // NIO precondition failure because the 502 response was written via
+        // `ChannelHandlerContext` from inside a `makeFutureWithTask` Task,
+        // which is not guaranteed to run on the channel's EventLoop. The fix
+        // performs the write directly on the `Channel`, which is thread-safe.
+
+        let proxyCAManager = CAManager(keyStore: InMemoryCAKeyStore())
+        _ = try await proxyCAManager.ensureCA()
+
+        let proxyConfig = ProxyServer.Configuration(
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+            // localhost is not whitelisted → passthrough path
+            allowedHosts: ["api.anthropic.com"]
+        )
+        let proxy = ProxyServer(
+            configuration: proxyConfig,
+            secretStore: InMemorySecretStore(),
+            caManager: proxyCAManager
+        )
+        let address = try await proxy.start()
+        guard let port = address.port else {
+            try? await proxy.stop()
+            return XCTFail("proxy did not bind")
+        }
+
+        // RFC 6761: .invalid is guaranteed not to resolve. The passthrough
+        // ClientBootstrap.connect() must fail and the proxy must respond 502
+        // instead of crashing.
+        let status = try await TestProxyClient.sendConnectOnly(
+            proxyHost: "127.0.0.1",
+            proxyPort: port,
+            targetAuthority: "this-host-does-not-exist.invalid:443"
+        )
+        try? await proxy.stop()
+        XCTAssertEqual(status, .badGateway, "unreachable passthrough upstream must yield 502")
+    }
 }

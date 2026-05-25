@@ -168,7 +168,19 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
             } catch {
                 // Cannot reach upstream — surface a 502 to the client before
                 // closing, matching standard forward-proxy semantics.
-                selfRef.respondAndClose(context: context, status: .badGateway)
+                //
+                // Must write via `clientChannel`, NOT `context`: this closure
+                // runs inside a `makeFutureWithTask` Task which is not bound
+                // to the channel's EventLoop. `ChannelHandlerContext` methods
+                // assert `inEventLoop` and would trap. `Channel.write` is
+                // thread-safe (schedules onto the EL internally).
+                var headers = HTTPHeaders()
+                headers.add(name: "Content-Length", value: "0")
+                let errHead = HTTPResponseHead(version: .http1_1, status: .badGateway, headers: headers)
+                clientChannel.write(selfRef.wrapOutboundOut(.head(errHead)), promise: nil)
+                let p = eventLoop.makePromise(of: Void.self)
+                clientChannel.writeAndFlush(selfRef.wrapOutboundOut(.end(nil)), promise: p)
+                p.futureResult.whenComplete { _ in clientChannel.close(promise: nil) }
                 throw error
             }
 
