@@ -108,6 +108,48 @@ final class CLIDaemonHarness {
 
     // MARK: - iris invocation
 
+    /// Invokes `iris` with the exact `args` provided — no `--socket-path`
+    /// injection. Use for subcommands that have no `ConnectionOptions`
+    /// (e.g. `mcp unwrap`).
+    @discardableResult
+    func runIrisRaw(
+        _ args: [String],
+        stdin: Data? = nil,
+        timeout: TimeInterval = 10.0
+    ) throws -> (stdout: String, stderr: String, code: Int32) {
+        let p = Process()
+        p.executableURL = ExecutableLocator.iris
+        p.arguments = args
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        p.standardOutput = outPipe
+        p.standardError = errPipe
+        let inPipe = Pipe()
+        if stdin != nil {
+            p.standardInput = inPipe
+        }
+        try p.run()
+        if let stdinData = stdin {
+            inPipe.fileHandleForWriting.write(stdinData)
+            try inPipe.fileHandleForWriting.close()
+        }
+
+        let limitDate = Date().addingTimeInterval(timeout)
+        while p.isRunning && Date() < limitDate {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if p.isRunning {
+            p.terminate()
+        }
+        p.waitUntilExit()
+
+        let out =
+            String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let err =
+            String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return (out, err, p.terminationStatus)
+    }
+
     /// Invokes `iris` with `--socket-path <adminSocket>` injected immediately
     /// after the first element of `args` (the subcommand chain). Example:
     ///
@@ -129,6 +171,7 @@ final class CLIDaemonHarness {
         let subcommandWords: Set<String> = [
             "secret", "add", "list", "show", "edit", "rotate", "rm",
             "status", "pause", "resume", "ca", "config", "rule", "logs", "doctor",
+            "mcp", "wrap",
         ]
         var insertAt = 0
         while insertAt < args.count && subcommandWords.contains(args[insertAt]) {
@@ -153,7 +196,16 @@ final class CLIDaemonHarness {
             inPipe.fileHandleForWriting.write(stdinData)
             try inPipe.fileHandleForWriting.close()
         }
+
+        let limitDate = Date().addingTimeInterval(timeout)
+        while p.isRunning && Date() < limitDate {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if p.isRunning {
+            p.terminate()
+        }
         p.waitUntilExit()
+
         let out =
             String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let err =
