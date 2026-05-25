@@ -91,6 +91,26 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         head: HTTPRequestHead,
         body: ByteBuffer?
     ) {
+        // Reserved diagnostic endpoint: bypass all proxy logic, emit no event.
+        // Used by `iris doctor` check #6 to verify the proxy is alive.
+        if head.uri == "/__iris_ping" && head.method == .GET {
+            let responseHead = HTTPResponseHead(
+                version: .init(major: 1, minor: 1),
+                status: .ok,
+                headers: HTTPHeaders([
+                    ("Content-Type", "text/plain"),
+                    ("Content-Length", "3"),
+                    ("Cache-Control", "no-store"),
+                ])
+            )
+            context.write(self.wrapOutboundOut(.head(responseHead)), promise: nil)
+            var buf = context.channel.allocator.buffer(capacity: 3)
+            buf.writeString("ok\n")
+            context.write(self.wrapOutboundOut(.body(.byteBuffer(buf))), promise: nil)
+            context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
+            return
+        }
+
         let server = self.server
         let host = self.host
         let channel = context.channel
