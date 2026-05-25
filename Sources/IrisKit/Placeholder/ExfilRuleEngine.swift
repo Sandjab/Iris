@@ -76,7 +76,14 @@ public actor ExfilRuleEngine {
             return .allow(resolvable: [])
         }
 
-        let normalizedHost = context.host.lowercased()
+        // SPECS §8.2: host comparison must ignore port. Strip at the
+        // evaluator boundary as defense-in-depth in case a caller forwards
+        // an `:authority`-style value (`host:port`).
+        let hostWithoutPort =
+            context.host
+            .split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            .first.map(String.init) ?? context.host
+        let normalizedHost = hostWithoutPort.lowercased()
 
         // Look up metadata for each hit name once.
         var metadataByName: [String: Secret] = [:]

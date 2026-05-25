@@ -69,6 +69,20 @@ final class ExfilRuleEngineTests: XCTestCase {
         XCTAssertTrue(resolvable.isEmpty)
     }
 
+    func testR1HostWithPortIsStrippedBeforeCompare() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [
+            PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}")
+        ]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(host: "api.anthropic.com:443")
+        )
+        guard case .allow = decision else {
+            return XCTFail("host with port should match allowed_hosts entry without port")
+        }
+    }
+
     func testR1HostMatchIsCaseInsensitive() async throws {
         let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
         let hits = [
