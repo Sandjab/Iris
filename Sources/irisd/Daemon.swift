@@ -82,7 +82,9 @@ public actor Daemon {
         let proxyConfig = ProxyServer.Configuration(
             listenHost: listenHost,
             listenPort: listenPort,
-            allowedHosts: allowedHosts
+            allowedHosts: allowedHosts,
+            maxSubstitutionsPerMinute: config.security.maxSubstitutionsPerMinute,
+            onExfilAttempt: config.security.onExfilAttempt
         )
         let proxy = ProxyServer(
             configuration: proxyConfig,

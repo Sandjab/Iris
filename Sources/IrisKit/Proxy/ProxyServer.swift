@@ -19,19 +19,25 @@ public final class ProxyServer: @unchecked Sendable {
         public var allowedHosts: Set<String>
         public var upstreamPort: Int
         public var upstreamTrustRoots: NIOSSLTrustRoots
+        public var maxSubstitutionsPerMinute: Int
+        public var onExfilAttempt: ExfilAttemptPolicy
 
         public init(
             listenHost: String = "127.0.0.1",
             listenPort: Int = 8888,
             allowedHosts: Set<String>,
             upstreamPort: Int = 443,
-            upstreamTrustRoots: NIOSSLTrustRoots = .default
+            upstreamTrustRoots: NIOSSLTrustRoots = .default,
+            maxSubstitutionsPerMinute: Int = 60,
+            onExfilAttempt: ExfilAttemptPolicy = .blockAndNotify
         ) {
             self.listenHost = listenHost
             self.listenPort = listenPort
             self.allowedHosts = allowedHosts
             self.upstreamPort = upstreamPort
             self.upstreamTrustRoots = upstreamTrustRoots
+            self.maxSubstitutionsPerMinute = maxSubstitutionsPerMinute
+            self.onExfilAttempt = onExfilAttempt
         }
     }
 
@@ -39,6 +45,7 @@ public final class ProxyServer: @unchecked Sendable {
     public let logger: Logger
     public let eventRing: EventRing
     let placeholderEngine: PlaceholderEngine
+    let exfilRuleEngine: ExfilRuleEngine
     let leafCertCache: LeafCertCache
     let upstreamClient: UpstreamClient
 
@@ -58,6 +65,10 @@ public final class ProxyServer: @unchecked Sendable {
         self.logger = logger
         self.eventRing = EventRing()
         self.placeholderEngine = PlaceholderEngine(secretStore: secretStore)
+        self.exfilRuleEngine = ExfilRuleEngine(
+            secretStore: secretStore,
+            maxSubstitutionsPerMinute: configuration.maxSubstitutionsPerMinute
+        )
         self.leafCertCache = LeafCertCache(caManager: caManager)
         if let group = group {
             self.group = group
