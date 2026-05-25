@@ -14,6 +14,8 @@ final class CLIDaemonHarness {
     let tmpDir: URL
     let configPath: String
     let adminSocket: String
+    /// The port on which irisd's broker proxy is listening.
+    let brokerPort: Int
     private(set) var process: Process?
 
     init() throws {
@@ -33,6 +35,7 @@ final class CLIDaemonHarness {
         let basePort = 49152 + Int(seed % 15848)
         let proxyPort = basePort
         let eventsPort = basePort + 1
+        self.brokerPort = proxyPort
 
         let toml = """
             [broker]
