@@ -20,6 +20,24 @@ final class CLIExitCodesTests: XCTestCase {
         XCTAssertTrue(stderr.contains("launchctl kickstart"), "stderr=\(stderr)")
     }
 
+    func testSecretListAlsoExitsTwoWhenDaemonUnreachable() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iris-noexist-\(UUID().uuidString).sock").path
+        let process = Process()
+        process.executableURL = ExecutableLocator.iris
+        process.arguments = ["secret", "list", "--socket-path", tmp]
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        try process.run()
+        process.waitUntilExit()
+
+        XCTAssertEqual(process.terminationStatus, 2)
+        let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertTrue(stderr.contains("irisd not running"), "stderr=\(stderr)")
+    }
+
     func testRuleAddExitsUsage() throws {
         let process = Process()
         process.executableURL = ExecutableLocator.iris

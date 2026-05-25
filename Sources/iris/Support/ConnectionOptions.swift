@@ -50,10 +50,11 @@ struct ConnectionOptions: ParsableArguments {
     }
 }
 
-/// Wraps the lifecycle of an `AdminClient`. Translates connection failures
-/// into `DaemonUnreachable` so callers can return `ExitCode(2)`. Single
-/// outer do-catch: success path shuts down then returns; error path
-/// shuts down (best-effort) then maps `connectFailed` before rethrowing.
+/// Wraps the lifecycle of an `AdminClient`. On connect failure, prints the
+/// canonical "irisd not running" message to stderr and throws
+/// `ExitCode(IrisExitCode.daemonUnreachable)` so every subcommand exits 2
+/// without any local catch. Single outer do-catch: success path shuts down
+/// then returns; error path shuts down (best-effort) then maps errors.
 func withAdminClient<T: Sendable>(
     _ options: ConnectionOptions,
     body: (AdminClient) async throws -> T
@@ -67,7 +68,9 @@ func withAdminClient<T: Sendable>(
     } catch {
         try? await client.shutdown()
         if let adminErr = error as? AdminClientError, case .connectFailed = adminErr {
-            throw DaemonUnreachable(socketPath: path)
+            let unreachable = DaemonUnreachable(socketPath: path)
+            FileHandle.standardError.write(Data("\(unreachable.description)\n".utf8))
+            throw ExitCode(IrisExitCode.daemonUnreachable)
         }
         throw error
     }
