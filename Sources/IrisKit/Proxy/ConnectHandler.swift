@@ -180,18 +180,30 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
             clientChannel.write(selfRef.wrapOutboundOut(.head(head)), promise: nil)
             try await clientChannel.writeAndFlush(selfRef.wrapOutboundOut(.end(nil))).get()
 
-            // 4. Atomic pipeline swap on the EL: drop the HTTP codec and this
-            //    handler from the client side, install matched GlueHandlers
-            //    on both channels.
+            // 4. Atomic pipeline swap on the EL.
+            //
+            // Order matters: `HTTPRequestDecoder(leftOverBytesStrategy:
+            // .forwardBytes)` flushes any TLS ClientHello bytes that arrived
+            // in the same TCP segment as the CONNECT request *synchronously*
+            // from `handlerRemoved`. Those bytes must land on `clientGlue`,
+            // not on this still-installed `ConnectHandler` (which would drop
+            // them in its `.upgrading` state). So:
+            //   1. install `upstreamGlue` first — partner ready to receive.
+            //   2. remove `selfRef` so it does not eat the flushed bytes.
+            //   3. install `clientGlue` at the tail.
+            //   4. remove `plainDecoder` — leftover bytes now flow through
+            //      `plainEncoder` (outbound only, forwards inbound) and
+            //      reach `clientGlue`.
+            //   5. remove `plainEncoder`.
             let (clientGlue, upstreamGlue) = GlueHandler.matchedPair()
+            try await upstreamChannel.pipeline.addHandler(upstreamGlue).get()
             try await eventLoop.submit {
                 let sync = clientChannel.pipeline.syncOperations
-                try sync.removeHandler(plainDecoder)
-                try sync.removeHandler(plainEncoder)
                 try sync.removeHandler(selfRef)
                 try sync.addHandler(clientGlue)
+                try sync.removeHandler(plainDecoder)
+                try sync.removeHandler(plainEncoder)
             }.get()
-            try await upstreamChannel.pipeline.addHandler(upstreamGlue).get()
 
             // 5. Resume client reads. Both ends of the tunnel are now wired.
             try await clientChannel.setOption(ChannelOptions.autoRead, value: true).get()

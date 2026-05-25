@@ -11,7 +11,12 @@ final class GlueHandler: ChannelDuplexHandler, @unchecked Sendable {
     typealias OutboundIn = ByteBuffer
     typealias OutboundOut = ByteBuffer
 
-    private var partner: GlueHandler?
+    // `weak` breaks the A↔B reference cycle between the matched pair so the
+    // handlers can deallocate cleanly even if `handlerRemoved` is missed on
+    // one side. Safe because each handler is independently retained by its
+    // own `ChannelPipeline`, and both channels share the same `EventLoop`
+    // (the upstream is opened via `ClientBootstrap(group: clientEventLoop)`).
+    private weak var partner: GlueHandler?
     private var context: ChannelHandlerContext?
 
     private init() {}
@@ -47,6 +52,7 @@ final class GlueHandler: ChannelDuplexHandler, @unchecked Sendable {
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         partner?.partnerClose()
+        context.close(promise: nil)
     }
 
     private func partnerWrite(_ data: NIOAny) {
