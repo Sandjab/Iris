@@ -69,9 +69,13 @@ public struct BrokerConfig: Codable, Sendable, Hashable {
         self.eventRingSize = eventRingSize
     }
 
+    /// Tilde-expanded admin socket path, usable as-is for bind/connect.
+    public var expandedAdminSocket: String {
+        (adminSocket as NSString).expandingTildeInPath
+    }
+
     public var resolvedAdminSocketURL: URL {
-        let expanded = (adminSocket as NSString).expandingTildeInPath
-        return URL(fileURLWithPath: expanded)
+        URL(fileURLWithPath: expandedAdminSocket)
     }
 }
 
