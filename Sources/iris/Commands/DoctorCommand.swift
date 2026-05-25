@@ -107,7 +107,7 @@ struct DoctorCommand: AsyncParsableCommand {
         // 5. shell-env-vars (warn, not fail, when any are absent)
         let env = ProcessInfo.processInfo.environment
         let expected = ["HTTPS_PROXY", "HTTP_PROXY", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"]
-        let missing = expected.filter { env[$0]?.isEmpty != false }
+        let missing = expected.filter { env[$0]?.isEmpty ?? true }
         if missing.isEmpty {
             results.append(.init(name: "shell-env-vars", severity: .ok, detail: "all set"))
         } else {
@@ -144,7 +144,8 @@ struct DoctorCommand: AsyncParsableCommand {
         }
 
         // 7. claude-apikeyhelper-absent — fail if ~/.claude/settings.json contains "apiKeyHelper"
-        let claudeSettings = (NSString(string: "~/.claude/settings.json")).expandingTildeInPath
+        let claudeSettings = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/settings.json").path
         if FileManager.default.fileExists(atPath: claudeSettings) {
             if let data = try? Data(contentsOf: URL(fileURLWithPath: claudeSettings)),
                 let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -179,20 +180,17 @@ struct DoctorCommand: AsyncParsableCommand {
     // MARK: - Helpers
 
     private func performPing(url: URL) async -> (ok: Bool, detail: String) {
-        await withCheckedContinuation { continuation in
-            var req = URLRequest(url: url)
-            req.timeoutInterval = 2
-            URLSession.shared.dataTask(with: req) { data, resp, err in
-                if let err = err {
-                    continuation.resume(returning: (false, "\(err)"))
-                    return
-                }
-                let http = resp as? HTTPURLResponse
-                let body = String(data: data ?? Data(), encoding: .utf8) ?? ""
-                let ok = http?.statusCode == 200 && body == "ok\n"
-                let detail = ok ? "200 ok" : "got status=\(http?.statusCode ?? -1)"
-                continuation.resume(returning: (ok, detail))
-            }.resume()
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 2
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let http = resp as? HTTPURLResponse
+            let body = String(data: data, encoding: .utf8) ?? ""
+            let ok = http?.statusCode == 200 && body == "ok\n"
+            let detail = ok ? "200 ok" : "got status=\(http?.statusCode ?? -1)"
+            return (ok, detail)
+        } catch {
+            return (false, "\(error)")
         }
     }
 

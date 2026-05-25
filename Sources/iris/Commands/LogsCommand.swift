@@ -115,11 +115,12 @@ struct LogsCommand: AsyncParsableCommand {
             try await streamEvents(from: client, kinds: kinds)
         }
 
-        SignalHandling.onSIGINTOnce {
+        let sigintToken = SignalHandling.onSIGINTOnce {
             streamTask.cancel()
         }
 
         do {
+            defer { withExtendedLifetime(sigintToken) {} }
             try await streamTask.value
         } catch is CancellationError {
             // clean exit on SIGINT — no error message needed

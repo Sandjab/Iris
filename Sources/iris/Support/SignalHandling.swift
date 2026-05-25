@@ -2,10 +2,12 @@ import Darwin
 import Foundation
 
 /// Installs a one-shot SIGINT handler that invokes the provided callback
-/// asynchronously. After firing, restores `SIG_DFL` so a subsequent
-/// Ctrl-C terminates immediately ("press Ctrl-C twice to force quit").
+/// asynchronously. Returns a token that, when held, keeps the handler
+/// armed. Drop the token (or let it deinit) to restore default SIGINT
+/// behavior — prevents handler residue and reference cycles when the
+/// caller's loop finishes normally instead of via Ctrl-C.
 enum SignalHandling {
-    static func onSIGINTOnce(_ callback: @escaping @Sendable () -> Void) {
+    static func onSIGINTOnce(_ callback: @escaping @Sendable () -> Void) -> SignalToken {
         let box = SignalBox(callback: callback)
         sigintBox = box
         signal(SIGINT) { _ in
@@ -18,6 +20,24 @@ enum SignalHandling {
                 }
             }
         }
+        return SignalToken {
+            if sigintBox === box {
+                sigintBox = nil
+                signal(SIGINT, SIG_DFL)
+            }
+        }
+    }
+}
+
+final class SignalToken: @unchecked Sendable {
+    private let cleanup: @Sendable () -> Void
+
+    init(cleanup: @escaping @Sendable () -> Void) {
+        self.cleanup = cleanup
+    }
+
+    deinit {
+        cleanup()
     }
 }
 
