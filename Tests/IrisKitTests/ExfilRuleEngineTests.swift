@@ -166,6 +166,7 @@ final class ExfilRuleEngineTests: XCTestCase {
         XCTAssertEqual(alert.severity, .medium)
         XCTAssertEqual(alert.secretName, "bar")  // alphabetically first
         XCTAssertEqual(allHits.count, 2)
+        XCTAssertEqual(allHits.map(\.name), ["foo", "bar"])
     }
 
     func testR3SameNameMultipleHitsAllowed() async throws {
@@ -192,5 +193,24 @@ final class ExfilRuleEngineTests: XCTestCase {
             return XCTFail("expected block")
         }
         XCTAssertEqual(alert.rule, .multipleSecrets)
+        XCTAssertEqual(alert.secretName, "foo")  // alphabetical winner over { foo, ghost }
+        XCTAssertEqual(alert.detectedAt, .header)
+    }
+
+    func testR3TiebreakWinnerCanBeUnknownName() async throws {
+        // Known "zeta" and unknown "alpha" — alphabetical winner is the unknown.
+        // Asserts the triggering hit lookup uses original `hits`, not `knownHits`.
+        let ev = try await makeEvaluator(secrets: [("zeta", ["api.anthropic.com"])])
+        let hits = [
+            PlaceholderHit(name: "zeta", location: .header(name: "authorization"), snippet: "{{kc:zeta}}"),
+            PlaceholderHit(name: "alpha", location: .queryString, snippet: "?x={{kc:alpha}}"),
+        ]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .multipleSecrets)
+        XCTAssertEqual(alert.secretName, "alpha")
+        XCTAssertEqual(alert.detectedAt, .queryString)
     }
 }
