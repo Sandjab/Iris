@@ -1,11 +1,11 @@
 # Smoke testing Phase 2 — proxy MITM single-host
 
-> Checklist opérationnelle pour valider manuellement le daemon `irisd` tel qu'il existe à la fin de la Phase 2 (proxy MITM monothread, 1 host whitelisté hardcodé `api.anthropic.com`, substitution naïve sans scoping, pas d'IPC).
+> Checklist opérationnelle pour valider manuellement le daemon `irisd` tel qu'il existe à la fin de la Phase 2 (proxy MITM monothread, 1 host whitelisté hardcodé `api.anthropic.com`, substitution naïve sans scoping, CONNECT-tunnel passthrough pour les autres hosts, pas d'IPC).
 
 ## Prérequis
 
 - [ ] `swift build -c release` passe sans warning bloquant
-- [ ] `swift test` : 59/59 ✅
+- [ ] `swift test` : 71/71 ✅
 - [ ] Clé Anthropic réelle disponible pour l'export `IRIS_SECRET_ANTHROPIC_KEY` (sinon, voir variante mock plus bas)
 - [ ] Aucun `irisd` en cours sur le port 8888 (`lsof -i :8888` vide)
 - [ ] `~/Library/Application Support/iris/ca.pem` absent OU prêt à être écrasé
@@ -66,14 +66,16 @@ curl -v -x http://127.0.0.1:8888 -H "x-api-key: real-key-no-placeholder" \
 - [ ] **Pas** de log `Substituted secrets` pour cette requête (no-match → aucune substitution emit)
 - [ ] Requête forwardée telle quelle (la réponse upstream confirme — code HTTP attendu selon validité du header `x-api-key`)
 
-## 5. Non-whitelisted host
+## 5. Non-whitelisted host — CONNECT passthrough (SPECS §8.3)
 
 ```bash
 curl -v -x http://127.0.0.1:8888 https://example.com/
 ```
 
-- [ ] Daemon log : `Refusing non-whitelisted host host=example.com` OU CONNECT tunnel passthrough sans MITM (selon impl actuelle — vérifier comportement)
-- [ ] Connexion soit refusée, soit établie sans interception (cert serveur = vrai cert example.com, pas CA Iris)
+- [ ] Daemon log : `Passthrough tunnel established host=example.com port=443`
+- [ ] Connexion HTTPS établie **sans interception** : `curl -v` montre `subject: CN=example.com` et un `issuer` *publique* (Let's Encrypt, DigiCert…), **pas** la CA Iris
+- [ ] Réponse HTTP 200 reçue (curl affiche le HTML d'`example.com`)
+- [ ] Pas de log `Substituted secrets` pour cet host (le proxy ne déchiffre rien)
 
 ## 6. Body cap 4 MiB
 
@@ -100,7 +102,7 @@ curl -v -x http://127.0.0.1:8888 \
 ```
 
 - [ ] Réponse non-compressée (curl log : `Content-Encoding:` absent ou `identity`)
-- [ ] Si daemon log inclut headers upstream : `Accept-Encoding` retiré avant transmission
+- [ ] Strip `Accept-Encoding` côté daemon : **non observable en boîte noire** (pas de log des headers upstream). Couvert par `ProxyEndToEndTests.testSubstitutedValueReachesUpstream` et inspection visuelle de `MITMHandler.swift:170`.
 
 ## 8. LRU cache des valeurs (TTL 5 min)
 
@@ -128,11 +130,12 @@ curl -v -x http://127.0.0.1:8888 \
 
 ## 10. EventRing (10 000 entrées)
 
-> **Non observable en Phase 2** (pas d'IPC, pas de dump CLI). `EventRing.append` est silencieux par design — aucun log `Event kind=...` n'est émis sur stdout. Couvert :
-> - Capacité ring : test unitaire `EventRingTests` si présent (sinon, à ajouter Phase 3)
-> - Émission par requête : observable indirectement via les logs `Substituted secrets` (§3, §7, §9) et `Refusing non-whitelisted host` (§5)
+> **Non observable directement en Phase 2** (pas d'IPC, pas de dump CLI). `EventRing.append` est silencieux par design — aucun log `Event kind=...` n'est émis sur stdout. Couvert :
+> - Capacité ring + ordering + concurrence : `EventRingTests` (9 tests, PR #6 `2f9f0c1`)
+> - Émission `.substituted` / `.noMatch` / `.error` par requête MITM : `ProxyEndToEndTests.testSubstitutedValueReachesUpstream`
+> - Émission `.passThrough` par CONNECT non-whitelisté : `ProxyEndToEndTests.testNonWhitelistedHostTunnelsTLSAndPreservesUpstreamCertificate`
 
-- [ ] Tests unitaires `EventRing` présents et verts : `swift test --filter EventRing`
+- [ ] `swift test --filter EventRing` : 9/9 verts
 
 ## 11. Shutdown propre
 
@@ -163,4 +166,4 @@ Si tu ne veux pas exposer une vraie clé : remplacer `api.anthropic.com` par un 
 ## Notes
 
 - Les points 6, 8, 10 sont **partiellement opaques** sans IPC. Phase 3 (admin socket + SSE) les rendra triviaux à smoke tester. Pour l'instant, ils reposent sur les tests unitaires (`EventRingTests`, `PlaceholderEngineTests`).
-- Le point 5 (non-whitelisted host) doit être confirmé sur le comportement actuel : SPECS §8.3 dit "CONNECT-tunnel passthrough", mais l'impl actuelle pourrait simplement refuser. À observer.
+- Le point 5 (passthrough) est désormais conforme à SPECS §8.3 — voir `Sources/IrisKit/Proxy/ConnectHandler.swift::performPassthrough` et `Sources/IrisKit/Proxy/GlueHandler.swift`.

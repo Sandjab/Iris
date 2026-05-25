@@ -5,7 +5,7 @@ import NIOSSL
 
 /// First handler in the per-connection pipeline. Accepts a single
 /// `CONNECT host:port` request and either upgrades to MITM (whitelisted) or
-/// closes (non-whitelisted; pass-through tunnelling is deferred).
+/// splices a raw TCP tunnel to the upstream (non-whitelisted; SPECS §8.3).
 final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unchecked Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
@@ -73,8 +73,11 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
 
     private func performUpgrade(context: ChannelHandlerContext, host: String, port: Int) {
         guard server.configuration.allowedHosts.contains(host) else {
-            server.logger.info("Refusing non-whitelisted host", metadata: ["host": "\(host)"])
-            respondAndClose(context: context, status: .badGateway)
+            // SPECS §8.3: non-whitelisted hosts are CONNECT-tunneled
+            // byte-for-byte. The proxy never decrypts the bytes, so any
+            // placeholders inside the tunneled TLS are sent encrypted to
+            // upstream unchanged.
+            performPassthrough(context: context, host: host, port: port)
             return
         }
 
@@ -136,6 +139,115 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
             }
         }
     }
+
+    // MARK: - Passthrough
+
+    private func performPassthrough(context: ChannelHandlerContext, host: String, port: Int) {
+        let server = self.server
+        let clientChannel = context.channel
+        let eventLoop = context.eventLoop
+        let selfRef = self
+        let plainDecoder = self.plainDecoder
+        let plainEncoder = self.plainEncoder
+        let startTime = Date()
+
+        eventLoop.makeFutureWithTask { () async throws -> Void in
+            // 1. Pause client autoRead until the glue pipeline is wired so
+            //    any bytes sent right after our 200 do not hit the still-
+            //    installed HTTP request decoder.
+            try await clientChannel.setOption(ChannelOptions.autoRead, value: false).get()
+
+            // 2. Open a TCP connection to the CONNECT target. The CONNECT URI
+            //    port is honored verbatim; `configuration.upstreamPort` is
+            //    MITM-only (the daemon forwards plaintext over its own TLS).
+            let upstreamChannel: Channel
+            do {
+                upstreamChannel = try await ClientBootstrap(group: eventLoop)
+                    .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
+                    .connect(host: host, port: port).get()
+            } catch {
+                // Cannot reach upstream — surface a 502 to the client before
+                // closing, matching standard forward-proxy semantics.
+                //
+                // Must write via `clientChannel`, NOT `context`: this closure
+                // runs inside a `makeFutureWithTask` Task which is not bound
+                // to the channel's EventLoop. `ChannelHandlerContext` methods
+                // assert `inEventLoop` and would trap. `Channel.write` is
+                // thread-safe (schedules onto the EL internally).
+                var headers = HTTPHeaders()
+                headers.add(name: "Content-Length", value: "0")
+                let errHead = HTTPResponseHead(version: .http1_1, status: .badGateway, headers: headers)
+                clientChannel.write(selfRef.wrapOutboundOut(.head(errHead)), promise: nil)
+                let p = eventLoop.makePromise(of: Void.self)
+                clientChannel.writeAndFlush(selfRef.wrapOutboundOut(.end(nil)), promise: p)
+                p.futureResult.whenComplete { _ in clientChannel.close(promise: nil) }
+                throw error
+            }
+
+            // 3. Send 200 Connection Established to the client through the
+            //    still-installed HTTPResponseEncoder.
+            var headers = HTTPHeaders()
+            headers.add(name: "Content-Length", value: "0")
+            let head = HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)
+            clientChannel.write(selfRef.wrapOutboundOut(.head(head)), promise: nil)
+            try await clientChannel.writeAndFlush(selfRef.wrapOutboundOut(.end(nil))).get()
+
+            // 4. Atomic pipeline swap on the EL.
+            //
+            // Order matters: `HTTPRequestDecoder(leftOverBytesStrategy:
+            // .forwardBytes)` flushes any TLS ClientHello bytes that arrived
+            // in the same TCP segment as the CONNECT request *synchronously*
+            // from `handlerRemoved`. Those bytes must land on `clientGlue`,
+            // not on this still-installed `ConnectHandler` (which would drop
+            // them in its `.upgrading` state). So:
+            //   1. install `upstreamGlue` first — partner ready to receive.
+            //   2. remove `selfRef` so it does not eat the flushed bytes.
+            //   3. install `clientGlue` at the tail.
+            //   4. remove `plainDecoder` — leftover bytes now flow through
+            //      `plainEncoder` (outbound only, forwards inbound) and
+            //      reach `clientGlue`.
+            //   5. remove `plainEncoder`.
+            let (clientGlue, upstreamGlue) = GlueHandler.matchedPair()
+            try await upstreamChannel.pipeline.addHandler(upstreamGlue).get()
+            try await eventLoop.submit {
+                let sync = clientChannel.pipeline.syncOperations
+                try sync.removeHandler(selfRef)
+                try sync.addHandler(clientGlue)
+                try sync.removeHandler(plainDecoder)
+                try sync.removeHandler(plainEncoder)
+            }.get()
+
+            // 5. Resume client reads. Both ends of the tunnel are now wired.
+            try await clientChannel.setOption(ChannelOptions.autoRead, value: true).get()
+        }.whenComplete { result in
+            let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
+            switch result {
+            case .success:
+                clientChannel.read()
+                let event = Event(
+                    timestamp: startTime,
+                    kind: .passThrough,
+                    host: host,
+                    method: "CONNECT",
+                    path: "\(host):\(port)",
+                    durationMs: duration
+                )
+                Task { await server.eventRing.append(event) }
+                server.logger.info(
+                    "Passthrough tunnel established",
+                    metadata: ["host": "\(host)", "port": "\(port)"]
+                )
+            case .failure(let error):
+                server.logger.warning(
+                    "Passthrough setup failed",
+                    metadata: ["host": "\(host)", "port": "\(port)", "error": "\(error)"]
+                )
+                clientChannel.close(promise: nil)
+            }
+        }
+    }
+
+    // MARK: - MITM
 
     private static func makeServerTLSHandler(leaf: LeafCertCache.Leaf) throws -> NIOSSLServerHandler {
         var config = TLSConfiguration.makeServerConfiguration(
