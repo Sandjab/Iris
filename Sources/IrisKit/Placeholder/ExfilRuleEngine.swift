@@ -19,13 +19,50 @@ public enum ExfilDecision: Sendable {
     case block(alert: Alert, allHits: [PlaceholderHit])
 }
 
+struct SlidingMinuteCounter: Sendable {
+    private var timestamps: [Date] = []
+
+    mutating func record(at now: Date) {
+        prune(before: now)
+        timestamps.append(now)
+    }
+
+    mutating func count(at now: Date) -> Int {
+        prune(before: now)
+        return timestamps.count
+    }
+
+    private mutating func prune(before now: Date) {
+        let cutoff = now.addingTimeInterval(-60)
+        timestamps.removeAll { $0 < cutoff }
+    }
+}
+
 public actor ExfilRuleEngine {
     private let secretStore: any SecretStore
     private let maxSubstitutionsPerMinute: Int
+    private var volumeCounters: [String: SlidingMinuteCounter] = [:]
 
     public init(secretStore: any SecretStore, maxSubstitutionsPerMinute: Int) {
         self.secretStore = secretStore
         self.maxSubstitutionsPerMinute = maxSubstitutionsPerMinute
+    }
+
+    public func recordSubstitution(secretNames: [String]) {
+        let now = Date()
+        for name in secretNames {
+            var counter = volumeCounters[name] ?? SlidingMinuteCounter()
+            counter.record(at: now)
+            volumeCounters[name] = counter
+        }
+    }
+
+    private func wouldExceedVolumeLimit(name: String) -> Bool {
+        let now = Date()
+        var counter = volumeCounters[name] ?? SlidingMinuteCounter()
+        let willBe = counter.count(at: now) + 1
+        volumeCounters[name] = counter  // persist any prune
+        return willBe > maxSubstitutionsPerMinute
     }
 
     public func evaluate(
@@ -113,6 +150,21 @@ public actor ExfilRuleEngine {
                 snippet: triggeringHit.snippet
             )
             return .block(alert: alert, allHits: hits)
+        }
+
+        // R5 — volume anomaly (low). Checks only KNOWN hits because we count
+        // successful substitutions, which only happen for known secrets.
+        for hit in knownHits {
+            if wouldExceedVolumeLimit(name: hit.name) {
+                let alert = Alert(
+                    severity: .low,
+                    rule: .volumeAnomaly,
+                    secretName: hit.name,
+                    detectedAt: alertLocation(from: hit.location),
+                    snippet: hit.snippet
+                )
+                return .block(alert: alert, allHits: hits)
+            }
         }
 
         return .allow(resolvable: knownHits)

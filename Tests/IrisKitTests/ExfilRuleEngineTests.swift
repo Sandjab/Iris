@@ -344,4 +344,84 @@ final class ExfilRuleEngineTests: XCTestCase {
             return XCTFail("missing content-type → R4 should not fire")
         }
     }
+
+    func testR4SuspiciousCTNonSuspiciousPathAllowed() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(
+                host: "api.anthropic.com",
+                method: "POST",
+                path: "/v1/complete",
+                contentType: "text/plain"
+            )
+        )
+        guard case .allow = decision else {
+            return XCTFail("suspicious CT alone shouldn't fire R4")
+        }
+    }
+
+    func testR4NonSuspiciousCTSuspiciousPathAllowed() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.github.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(
+                host: "api.github.com",
+                method: "POST",
+                path: "/issues",
+                contentType: "application/json"
+            )
+        )
+        guard case .allow = decision else {
+            return XCTFail("suspicious path alone shouldn't fire R4")
+        }
+    }
+
+    // MARK: R5
+
+    func testR5VolumeAnomalyFiresAtThreshold() async throws {
+        let ev = try await makeEvaluator(
+            secrets: [("foo", ["api.anthropic.com"])],
+            maxPerMinute: 3
+        )
+        let hits = [
+            PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}")
+        ]
+        // 3 successful substitutions recorded.
+        for _ in 0..<3 {
+            let decision = try await ev.evaluate(hits: hits, context: ctx())
+            guard case .allow = decision else { return XCTFail("expected allow") }
+            await ev.recordSubstitution(secretNames: ["foo"])
+        }
+        // 4th evaluate must block via R5.
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected R5 block")
+        }
+        XCTAssertEqual(alert.rule, .volumeAnomaly)
+        XCTAssertEqual(alert.severity, .low)
+        XCTAssertEqual(alert.secretName, "foo")
+    }
+
+    func testR5DoesNotIncrementOnBlock() async throws {
+        let ev = try await makeEvaluator(
+            secrets: [("foo", ["api.anthropic.com"])],
+            maxPerMinute: 2
+        )
+        let blockedHits = [
+            PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}")
+        ]
+        // 5 blocked attempts via host mismatch should not bump R5 counter.
+        for _ in 0..<5 {
+            _ = try await ev.evaluate(hits: blockedHits, context: ctx(host: "api.evil.com"))
+            // Caller does NOT call recordSubstitution on block.
+        }
+        // Now an allowed substitution should still go through (counter == 0).
+        let decision = try await ev.evaluate(hits: blockedHits, context: ctx())
+        guard case .allow = decision else {
+            return XCTFail("counter must remain 0 after blocks")
+        }
+    }
 }
