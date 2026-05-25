@@ -85,8 +85,11 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
         let channel = context.channel
         let eventLoop = context.eventLoop
         let selfRef = self
-        let plainDecoder = self.plainDecoder
-        let plainEncoder = self.plainEncoder
+        // EL-confined captures: NIO handler types are explicitly non-Sendable,
+        // so wrap in NIOLoopBound for the @Sendable flatMap closures below.
+        // Unwrapping (.value) only happens on the channel's EventLoop.
+        let boundDecoder = NIOLoopBound(self.plainDecoder, eventLoop: eventLoop)
+        let boundEncoder = NIOLoopBound(self.plainEncoder, eventLoop: eventLoop)
 
         // 1. Pause autoRead so any TLS bytes the client sends after our 200
         //    accumulate at the socket instead of being parsed by the (still
@@ -99,9 +102,11 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
             var responseHeaders = HTTPHeaders()
             responseHeaders.add(name: "Content-Length", value: "0")
             let head = HTTPResponseHead(version: .http1_1, status: .ok, headers: responseHeaders)
-            context.write(self.wrapOutboundOut(.head(head)), promise: nil)
+            let headPart: HTTPServerResponsePart = .head(head)
+            channel.write(headPart, promise: nil)
             let flushPromise = eventLoop.makePromise(of: Void.self)
-            context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: flushPromise)
+            let endPart: HTTPServerResponsePart = .end(nil)
+            channel.writeAndFlush(endPart, promise: flushPromise)
             return flushPromise.futureResult
         }.flatMap { _ -> EventLoopFuture<LeafCertCache.Leaf> in
             return eventLoop.makeFutureWithTask {
@@ -110,11 +115,12 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
         }.flatMap { leaf -> EventLoopFuture<Void> in
             do {
                 let sslHandler = try Self.makeServerTLSHandler(leaf: leaf)
+                let boundSSL = NIOLoopBound(sslHandler, eventLoop: eventLoop)
                 return Self.installMITMPipeline(
                     on: channel,
-                    sslHandler: sslHandler,
-                    plainDecoder: plainDecoder,
-                    plainEncoder: plainEncoder,
+                    sslHandler: boundSSL,
+                    plainDecoder: boundDecoder,
+                    plainEncoder: boundEncoder,
                     connectHandler: selfRef,
                     server: server,
                     host: host
@@ -147,8 +153,9 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
         let clientChannel = context.channel
         let eventLoop = context.eventLoop
         let selfRef = self
-        let plainDecoder = self.plainDecoder
-        let plainEncoder = self.plainEncoder
+        // EL-confined captures (non-Sendable NIO handler types).
+        let boundDecoder = NIOLoopBound(self.plainDecoder, eventLoop: eventLoop)
+        let boundEncoder = NIOLoopBound(self.plainEncoder, eventLoop: eventLoop)
         let startTime = Date()
 
         eventLoop.makeFutureWithTask { () async throws -> Void in
@@ -177,9 +184,9 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
                 var headers = HTTPHeaders()
                 headers.add(name: "Content-Length", value: "0")
                 let errHead = HTTPResponseHead(version: .http1_1, status: .badGateway, headers: headers)
-                clientChannel.write(selfRef.wrapOutboundOut(.head(errHead)), promise: nil)
+                clientChannel.write(HTTPServerResponsePart.head(errHead), promise: nil)
                 let p = eventLoop.makePromise(of: Void.self)
-                clientChannel.writeAndFlush(selfRef.wrapOutboundOut(.end(nil)), promise: p)
+                clientChannel.writeAndFlush(HTTPServerResponsePart.end(nil), promise: p)
                 p.futureResult.whenComplete { _ in clientChannel.close(promise: nil) }
                 throw error
             }
@@ -189,8 +196,8 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
             var headers = HTTPHeaders()
             headers.add(name: "Content-Length", value: "0")
             let head = HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)
-            clientChannel.write(selfRef.wrapOutboundOut(.head(head)), promise: nil)
-            try await clientChannel.writeAndFlush(selfRef.wrapOutboundOut(.end(nil))).get()
+            clientChannel.write(HTTPServerResponsePart.head(head), promise: nil)
+            try await clientChannel.writeAndFlush(HTTPServerResponsePart.end(nil)).get()
 
             // 4. Atomic pipeline swap on the EL.
             //
@@ -211,10 +218,10 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
             try await upstreamChannel.pipeline.addHandler(upstreamGlue).get()
             try await eventLoop.submit {
                 let sync = clientChannel.pipeline.syncOperations
-                try sync.removeHandler(selfRef)
+                _ = sync.removeHandler(selfRef)
                 try sync.addHandler(clientGlue)
-                try sync.removeHandler(plainDecoder)
-                try sync.removeHandler(plainEncoder)
+                _ = sync.removeHandler(boundDecoder.value)
+                _ = sync.removeHandler(boundEncoder.value)
             }.get()
 
             // 5. Resume client reads. Both ends of the tunnel are now wired.
@@ -262,9 +269,9 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
 
     private static func installMITMPipeline(
         on channel: Channel,
-        sslHandler: NIOSSLServerHandler,
-        plainDecoder: ByteToMessageHandler<HTTPRequestDecoder>,
-        plainEncoder: HTTPResponseEncoder,
+        sslHandler: NIOLoopBound<NIOSSLServerHandler>,
+        plainDecoder: NIOLoopBound<ByteToMessageHandler<HTTPRequestDecoder>>,
+        plainEncoder: NIOLoopBound<HTTPResponseEncoder>,
         connectHandler: ConnectHandler,
         server: ProxyServer,
         host: String
@@ -277,10 +284,10 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
         channel.eventLoop.execute {
             do {
                 let sync = channel.pipeline.syncOperations
-                try sync.removeHandler(plainDecoder)
-                try sync.removeHandler(plainEncoder)
-                try sync.removeHandler(connectHandler)
-                try sync.addHandler(sslHandler, position: .first)
+                _ = sync.removeHandler(plainDecoder.value)
+                _ = sync.removeHandler(plainEncoder.value)
+                _ = sync.removeHandler(connectHandler)
+                try sync.addHandler(sslHandler.value, position: .first)
                 // Add HTTP server handlers explicitly (no HTTPServerPipelineHandler
                 // — its pipelining guards interact badly with our MITM model
                 // where the request is consumed by MITMHandler and the response
@@ -297,12 +304,21 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
     }
 
     private func respondAndClose(context: ChannelHandlerContext, status: HTTPResponseStatus) {
+        // Route via Channel rather than ChannelHandlerContext: Channel.write
+        // resolves to the typed (Sendable) overload cleanly, while
+        // ChannelHandlerContext.write resolves to the deprecated NIOAny
+        // overload despite the Sendable variant existing. Behavior is
+        // identical here — the ConnectHandler is the only outbound consumer
+        // before HTTPResponseEncoder.
+        let channel = context.channel
         let head = HTTPResponseHead(version: .http1_1, status: status)
-        context.write(wrapOutboundOut(.head(head)), promise: nil)
+        let headPart: HTTPServerResponsePart = .head(head)
+        channel.write(headPart, promise: nil)
         let p = context.eventLoop.makePromise(of: Void.self)
-        context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: p)
+        let endPart: HTTPServerResponsePart = .end(nil)
+        channel.writeAndFlush(endPart, promise: p)
         p.futureResult.whenComplete { _ in
-            context.close(promise: nil)
+            channel.close(promise: nil)
         }
     }
 

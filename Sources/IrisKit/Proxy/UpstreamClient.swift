@@ -38,18 +38,13 @@ final class UpstreamClient: @unchecked Sendable {
         let bootstrap = ClientBootstrap(group: group)
             .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .channelInitializer { channel in
-                do {
+                channel.eventLoop.makeCompletedFuture(withResultOf: {
                     let sslHandler = try NIOSSLClientHandler(context: sslContext, serverHostname: host)
-                    return channel.pipeline.addHandler(sslHandler).flatMap {
-                        channel.pipeline.addHTTPClientHandlers().flatMap {
-                            channel.pipeline.addHandler(
-                                UpstreamResponseCollector(promise: responsePromise)
-                            )
-                        }
-                    }
-                } catch {
-                    return channel.eventLoop.makeFailedFuture(error)
-                }
+                    let sync = channel.pipeline.syncOperations
+                    try sync.addHandler(sslHandler)
+                    try sync.addHTTPClientHandlers()
+                    try sync.addHandler(UpstreamResponseCollector(promise: responsePromise))
+                })
             }
 
         let channel: Channel
