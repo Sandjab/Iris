@@ -133,7 +133,16 @@ final class CLIDaemonHarness {
             inPipe.fileHandleForWriting.write(stdinData)
             try inPipe.fileHandleForWriting.close()
         }
+
+        let limitDate = Date().addingTimeInterval(timeout)
+        while p.isRunning && Date() < limitDate {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if p.isRunning {
+            p.terminate()
+        }
         p.waitUntilExit()
+
         let out =
             String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let err =
@@ -187,7 +196,16 @@ final class CLIDaemonHarness {
             inPipe.fileHandleForWriting.write(stdinData)
             try inPipe.fileHandleForWriting.close()
         }
+
+        let limitDate = Date().addingTimeInterval(timeout)
+        while p.isRunning && Date() < limitDate {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if p.isRunning {
+            p.terminate()
+        }
         p.waitUntilExit()
+
         let out =
             String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let err =

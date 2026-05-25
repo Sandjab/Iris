@@ -104,10 +104,17 @@ struct MCPCommand: AsyncParsableCommand {
                 throw ExitCode(IrisExitCode.ioError)
             }
 
+            guard let patchedData = patchedSerialized.data(using: .utf8) else {
+                FileHandle.standardError.write(
+                    Data("failed to encode patched output as UTF-8\n".utf8)
+                )
+                throw ExitCode(IrisExitCode.logicError)
+            }
+
             // Sanity-validate the patched output before overwriting
             guard
                 (try? JSONSerialization.jsonObject(
-                    with: patchedSerialized.data(using: .utf8) ?? Data(),
+                    with: patchedData,
                     options: [.allowFragments]
                 )) != nil
             else {
@@ -117,10 +124,8 @@ struct MCPCommand: AsyncParsableCommand {
                 throw ExitCode(IrisExitCode.logicError)
             }
 
-            // Write patched file atomically
             do {
-                // swiftlint:disable:next force_unwrapping
-                try patchedSerialized.data(using: .utf8)!.write(to: fileURL, options: .atomic)
+                try patchedData.write(to: fileURL, options: .atomic)
             } catch {
                 FileHandle.standardError.write(Data("write failed: \(error)\n".utf8))
                 throw ExitCode(IrisExitCode.ioError)
@@ -186,15 +191,13 @@ struct MCPCommand: AsyncParsableCommand {
             let fileURL = URL(fileURLWithPath: expanded)
             let backupURL = fileURL.appendingPathExtension("iris.bak")
 
-            guard FileManager.default.fileExists(atPath: backupURL.path) else {
+            // Sanity: backup must exist, be readable, and parse as JSON
+            guard let backupData = try? Data(contentsOf: backupURL) else {
                 FileHandle.standardError.write(
-                    Data("no backup found at \(backupURL.path)\n".utf8)
+                    Data("no backup found or readable at \(backupURL.path)\n".utf8)
                 )
                 throw ExitCode(IrisExitCode.logicError)
             }
-
-            // Sanity: backup must parse as JSON
-            let backupData = (try? Data(contentsOf: backupURL)) ?? Data()
             guard
                 (try? JSONSerialization.jsonObject(
                     with: backupData,
@@ -216,7 +219,12 @@ struct MCPCommand: AsyncParsableCommand {
             }
 
             if json {
-                print(#"{"ok": true, "restored": "\#(expanded)"}"#)
+                let dict: [String: Any] = ["ok": true, "restored": expanded]
+                if let data = try? JSONSerialization.data(withJSONObject: dict, options: []),
+                    let jsonString = String(data: data, encoding: .utf8)
+                {
+                    print(jsonString)
+                }
             } else {
                 print("restored \(expanded)")
             }
