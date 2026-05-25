@@ -213,4 +213,135 @@ final class ExfilRuleEngineTests: XCTestCase {
         XCTAssertEqual(alert.secretName, "alpha")
         XCTAssertEqual(alert.detectedAt, .queryString)
     }
+
+    // MARK: R4
+
+    func testR4TextPlainToIssuesPathBlocks() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.github.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "body {{kc:foo}}")]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(
+                host: "api.github.com",
+                method: "POST",
+                path: "/repos/x/y/issues",
+                contentType: "text/plain"
+            )
+        )
+        guard case .block(let alert, let allHits) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .suspiciousContentType)
+        XCTAssertEqual(alert.severity, .medium)
+        XCTAssertEqual(alert.secretName, "foo")
+        XCTAssertEqual(alert.detectedAt, .body)
+        XCTAssertEqual(allHits.count, 1)
+    }
+
+    func testR4FormUrlencodedToCommentsBlocks() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.github.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(
+                host: "api.github.com",
+                method: "POST",
+                path: "/comments/123",
+                contentType: "application/x-www-form-urlencoded"
+            )
+        )
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .suspiciousContentType)
+    }
+
+    func testR4MultipartToBlobBlocks() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.github.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(
+                host: "api.github.com",
+                method: "POST",
+                path: "/repos/x/y/blob/main",
+                contentType: "multipart/form-data"
+            )
+        )
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .suspiciousContentType)
+    }
+
+    func testR4JSONAPIPathAllowed() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(
+                host: "api.anthropic.com",
+                method: "POST",
+                path: "/v1/messages",
+                contentType: "application/json"
+            )
+        )
+        guard case .allow = decision else {
+            return XCTFail("JSON API should not fire R4")
+        }
+    }
+
+    func testR4ContentTypeWithCharsetParameter() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.github.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(
+                host: "api.github.com",
+                method: "POST",
+                path: "/issues",
+                contentType: "text/plain; charset=utf-8"
+            )
+        )
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .suspiciousContentType)
+    }
+
+    func testR4DoesNotFireWithoutBodyHit() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.github.com"])])
+        let hits = [
+            PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}")
+        ]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(
+                host: "api.github.com",
+                method: "POST",
+                path: "/issues",
+                contentType: "text/plain"
+            )
+        )
+        guard case .allow = decision else {
+            return XCTFail("no body hit → R4 should not fire")
+        }
+    }
+
+    func testR4NoContentTypeDoesNotFire() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.github.com"])])
+        let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(
+                host: "api.github.com",
+                method: "POST",
+                path: "/issues",
+                contentType: nil
+            )
+        )
+        guard case .allow = decision else {
+            return XCTFail("missing content-type → R4 should not fire")
+        }
+    }
 }

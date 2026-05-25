@@ -103,6 +103,18 @@ public actor ExfilRuleEngine {
             return .block(alert: alert, allHits: hits)
         }
 
+        // R4 — suspicious content type (medium)
+        if let triggeringHit = Self.suspiciousContentTypeFires(hits: hits, context: context) {
+            let alert = Alert(
+                severity: .medium,
+                rule: .suspiciousContentType,
+                secretName: triggeringHit.name,
+                detectedAt: .body,
+                snippet: triggeringHit.snippet
+            )
+            return .block(alert: alert, allHits: hits)
+        }
+
         return .allow(resolvable: knownHits)
     }
 
@@ -131,5 +143,32 @@ public actor ExfilRuleEngine {
         case .body:
             return method.uppercased() == "GET"
         }
+    }
+
+    private static let suspiciousContentTypes: Set<String> = [
+        "text/plain",
+        "application/x-www-form-urlencoded",
+        "multipart/form-data",
+    ]
+
+    private static let suspiciousPathFragments: [String] = [
+        "/comments", "/issues", "/notes", "/messages", "/blob",
+    ]
+
+    private static func suspiciousContentTypeFires(
+        hits: [PlaceholderHit],
+        context: RequestContext
+    ) -> PlaceholderHit? {
+        guard let bodyHit = hits.first(where: { $0.location == .body }) else { return nil }
+        guard let rawCT = context.contentType else { return nil }
+        let baseType =
+            rawCT
+            .split(separator: ";", maxSplits: 1).first
+            .map { String($0).trimmingCharacters(in: .whitespaces).lowercased() }
+            ?? ""
+        guard suspiciousContentTypes.contains(baseType) else { return nil }
+        let path = context.path.lowercased()
+        guard suspiciousPathFragments.contains(where: path.contains) else { return nil }
+        return bodyHit
     }
 }
