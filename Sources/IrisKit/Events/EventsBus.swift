@@ -42,9 +42,14 @@ public actor EventsBus {
         // cleanup path is the next `publish` detecting `.terminated`,
         // which leaks the registration if no further events arrive.
         // `nonmutating set` on the continuation lets us assign even from
-        // an actor-isolated context.
+        // an actor-isolated context. We promote `weak self` to a strong
+        // `let bus` outside the `Task`'s capture list — Swift 6 strict
+        // concurrency rejects reading a captured `weak` var from inside
+        // a concurrent `Task` closure, but is happy with an immutable
+        // `let` whose type (the `EventsBus` actor) is `Sendable`.
         continuation.onTermination = { [weak self, id] _ in
-            Task { await self?.unsubscribe(id: id) }
+            guard let bus = self else { return }
+            Task { await bus.unsubscribe(id: id) }
         }
         return (id, stream)
     }
