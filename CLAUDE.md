@@ -115,9 +115,13 @@ Si une API est dépréciée dans macOS 13+ : ne pas l'utiliser. Confirmer la ver
 
 ### Revue Gemini Code Assist
 
-- Toute PR est revue automatiquement par **Gemini Code Assist** (GitHub App). Après ouverture, Claude attend les commentaires de revue pendant **10 minutes maximum** (polling via `gh pr view <n> --json reviews` ou `gh api repos/:owner/:repo/pulls/{number}/comments`).
+- Toute PR est revue automatiquement par **Gemini Code Assist** (GitHub App). Mécanisme d'attente côté Claude :
+  - **Cadence** : polling à **1 minute d'intervalle** (granularité minimale de cron et `ScheduleWakeup`), via `gh api repos/:owner/:repo/pulls/{number}/comments` + `gh pr view <n> --json reviews`. Filtre : `select(.user.login | test("gemini"; "i"))` côté inline comments, `.author.login | test("gemini"; "i")` côté reviews.
+  - **Fenêtre maximale** : **10 minutes** depuis l'ouverture de la PR OU depuis le dernier push significatif sur la branche (un nouveau push réamorce un cycle).
+  - **Arrêt anticipé** dès qu'au moins un commentaire ou une review émis par un compte matchant `gemini` (insensible à la casse) est détecté. Pas de double-polling après détection.
+  - **Implémentation** : `/loop 30s …` (arrondi automatiquement à 1 min) avec prompt auto-arrêtant — le prompt appelle `CronList` puis `CronDelete` sur le job courant dès la condition d'arrêt (match Gemini OU dépassement deadline) satisfaite. Pas de polling à intervalle plus serré : Gemini répond typiquement en 1–3 min, intervalles infra-minute ne réduisent pas la latence et saturent l'API GitHub.
 - Pour chaque commentaire de Gemini, Claude doit faire **un et un seul** des deux choix :
-  - **Appliquer le fix**, commit sur la branche de PR, puis répondre au commentaire en référençant le commit.
+  - **Appliquer le fix**, commit sur la branche de PR, puis répondre au commentaire en référençant le commit (via `gh api repos/:owner/:repo/pulls/{n}/comments/{id}/replies -X POST -f body=…`).
   - **Refuser** avec une justification **factuelle** (citation de doc, spec, test, comportement observable). Jamais de "je pense que" ou pushback vague.
 - Au-delà de 10 min sans nouveau commentaire : considérer la revue terminée.
 
