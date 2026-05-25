@@ -17,9 +17,9 @@ public enum TextFormatter {
         }
         let allRows = [headers] + rows
         let lines = allRows.map { row -> String in
-            let paddedCells = row.indices.map { col -> String in
+            let paddedCells = headers.indices.map { col -> String in
                 let cell = col < row.count ? row[col] : ""
-                let width = col < widths.count ? widths[col] : 0
+                let width = widths[col]
                 return cell.padding(toLength: width, withPad: " ", startingAt: 0)
             }
             return paddedCells.joined(separator: "  ")

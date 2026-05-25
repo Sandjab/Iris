@@ -250,13 +250,20 @@ struct SecretCommand: AsyncParsableCommand {
     }
 }
 
-/// Reads a line from a TTY without echoing characters. Uses `readpassphrase(3)`
-/// (1024-byte buffer) to avoid `getpass(3)`'s 128-char truncation limit.
-/// Returns `nil` if no TTY is available or the read fails.
+/// Reads a line from a TTY without echoing characters. Uses
+/// `readpassphrase(3)` (Darwin libc) with a 1024-byte buffer to avoid
+/// `getpass(3)`'s 128-char `PASS_MAX` truncation limit. Converts the
+/// raw `CChar` buffer to `Data` directly via `UInt8(bitPattern:)` to
+/// (a) avoid round-tripping through Swift `String`, which is hard to
+/// zero out of memory, and (b) preserve binary secrets that may
+/// contain bytes >= 128 (which `String(cString:)` would mangle as
+/// invalid UTF-8).
 private func readSecretFromTTY(prompt: String) -> Data? {
     var buf = [CChar](repeating: 0, count: 1024)
     guard readpassphrase(prompt, &buf, buf.count, RPP_REQUIRE_TTY) != nil else {
         return nil
     }
-    return Data(String(cString: buf).utf8)
+    guard let nullIndex = buf.firstIndex(of: 0) else { return nil }
+    let bytes = buf[..<nullIndex].map { UInt8(bitPattern: $0) }
+    return Data(bytes)
 }

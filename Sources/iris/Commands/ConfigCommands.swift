@@ -40,9 +40,10 @@ struct ConfigCommand: AsyncParsableCommand {
                     "max_substitutions_per_minute = \(config.security.maxSubstitutionsPerMinute)"
                 )
                 lines.append("")
-                lines.append("[mitm_host]")
                 for entry in config.mitmHosts {
+                    lines.append("[[mitm_host]]")
                     lines.append("host = \"\(entry.host)\"")
+                    lines.append("")
                 }
                 return lines.joined(separator: "\n")
             }()
