@@ -15,6 +15,7 @@ struct IrisCLI: AsyncParsableCommand {
             CACommand.self,
             ConfigCommand.self,
             RuleCommand.self,
+            LogsCommand.self,
         ]
     )
 }
