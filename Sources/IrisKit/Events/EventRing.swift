@@ -10,20 +10,32 @@ public actor EventRing {
     private let capacity: Int
     private var entries: [Event] = []
     private var totals: [Event.Kind: UInt64] = [:]
+    private var bus: EventsBus?
 
-    public init(capacity: Int = 10_000) {
+    public init(capacity: Int = 10_000, bus: EventsBus? = nil) {
         // A zero-capacity ring would crash `append` (`removeFirst` on an
         // empty array). The default — and only sensible value — is positive.
         precondition(capacity > 0, "EventRing capacity must be > 0, got \(capacity)")
         self.capacity = capacity
+        self.bus = bus
     }
 
-    public func append(_ event: Event) {
+    /// Late-binds the bus after construction. `ProxyServer` creates the ring
+    /// in its initializer (before the IPC layer exists), and the bus is only
+    /// instantiated by the daemon when wiring the SSE server.
+    public func attach(bus: EventsBus) {
+        self.bus = bus
+    }
+
+    public func append(_ event: Event) async {
         if entries.count >= capacity {
             entries.removeFirst()
         }
         entries.append(event)
         totals[event.kind, default: 0] &+= 1
+        if let bus = bus {
+            await bus.publish(event)
+        }
     }
 
     public var all: [Event] { entries }
