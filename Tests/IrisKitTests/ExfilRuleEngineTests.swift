@@ -424,4 +424,26 @@ final class ExfilRuleEngineTests: XCTestCase {
             return XCTFail("counter must remain 0 after blocks")
         }
     }
+
+    // MARK: Composition
+
+    func testR1WinsOverR3WhenBothFire() async throws {
+        // Two distinct secrets (R3 medium) + one of them is host-mismatched (R1 high).
+        // Expected: alert reports R1 (.hostMismatch), severity .high (R1 in pipeline order).
+        let ev = try await makeEvaluator(secrets: [
+            ("foo", ["api.anthropic.com"]),
+            ("bar", ["api.anthropic.com"]),
+        ])
+        let hits = [
+            PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}"),
+            PlaceholderHit(name: "bar", location: .header(name: "x-api-key"), snippet: "{{kc:bar}}"),
+        ]
+        let decision = try await ev.evaluate(hits: hits, context: ctx(host: "api.github.com"))
+        guard case .block(let alert, let allHits) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .hostMismatch)
+        XCTAssertEqual(alert.severity, .high)
+        XCTAssertEqual(allHits.count, 2)
+    }
 }
