@@ -8,17 +8,18 @@ import Logging
 struct IrisDaemonCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "irisd",
-        abstract: "IRIS credentials broker daemon (Phase 2 — single-host MITM)."
+        abstract: "IRIS credentials broker daemon (Phase 3 — IPC + SSE)."
     )
 
     @Flag(name: .long, help: "Run in foreground.")
     var foreground: Bool = false
 
-    @Option(name: .long, help: "Listen host (default 127.0.0.1).")
-    var host: String = "127.0.0.1"
-
-    @Option(name: .long, help: "Listen port (default 8888).")
-    var port: Int = 8888
+    @Option(
+        name: .long,
+        help:
+            "Config TOML path (default ~/Library/Application Support/iris/config.toml; falls back to built-in defaults if absent)."
+    )
+    var configPath: String?
 
     @Option(
         name: .long,
@@ -26,14 +27,21 @@ struct IrisDaemonCLI: AsyncParsableCommand {
     )
     var caPath: String?
 
-    @Option(name: .long, help: "Log level: trace, debug, info, warning, error.")
-    var logLevel: String = "info"
+    @Option(name: .long, help: "Override broker.log_level (trace|debug|info|warning|error).")
+    var logLevel: String?
 
     @Flag(
         name: .long,
         help: "Read secrets from IRIS_SECRET_<NAME> env vars instead of the Keychain (debug)."
     )
     var inMemorySecrets: Bool = false
+
+    @Flag(
+        name: .long,
+        help:
+            "Generate a fresh in-memory CA on every boot instead of persisting it in the Keychain (debug)."
+    )
+    var inMemoryCa: Bool = false
 
     mutating func run() async throws {
         // Restore default disposition for SIGINT/SIGTERM as the very first
@@ -46,8 +54,10 @@ struct IrisDaemonCLI: AsyncParsableCommand {
         signal(SIGINT, SIG_DFL)
         signal(SIGTERM, SIG_DFL)
 
+        let config = try loadConfig()
         var logger = Logger(label: "io.iris.daemon")
-        logger.logLevel = parseLogLevel(logLevel) ?? .info
+        let level = logLevel.flatMap(Self.parseLogLevel(_:)) ?? Self.loggerLevel(from: config.broker.logLevel)
+        logger.logLevel = level
 
         let caURL: URL
         if let caPath = caPath {
@@ -58,30 +68,41 @@ struct IrisDaemonCLI: AsyncParsableCommand {
             caURL = URL(fileURLWithPath: support)
         }
 
-        // Phase 2: hardcoded single-host whitelist per SPECS-aligned scope.
-        let allowedHosts: Set<String> = ["api.anthropic.com"]
-
         logger.info(
             "Starting irisd",
             metadata: [
-                "host": "\(host)",
-                "port": "\(port)",
-                "allowed_hosts": "\(allowedHosts.sorted())",
+                "listen": "\(config.broker.listen)",
+                "events_listen": "\(config.broker.eventsListen)",
+                "admin_socket": "\(config.broker.adminSocket)",
+                "allowed_hosts": "\(config.mitmHosts.map(\.host).sorted())",
             ]
         )
 
         let daemon = try await Daemon(
-            listenHost: host,
-            listenPort: port,
-            allowedHosts: allowedHosts,
-            caPath: caURL,
+            config: config,
             secretBackend: inMemorySecrets ? .inMemoryFromEnvironment : .keychain,
+            caBackend: inMemoryCa ? .inMemory : .keychain,
+            caPath: caURL,
             logger: logger
         )
         try await daemon.run()
     }
 
-    private func parseLogLevel(_ raw: String) -> Logger.Level? {
+    private func loadConfig() throws -> Config {
+        if let configPath = configPath {
+            let url = URL(fileURLWithPath: (configPath as NSString).expandingTildeInPath)
+            return try ConfigLoader.load(from: url)
+        }
+        let defaultPath = ("~/Library/Application Support/iris/config.toml" as NSString)
+            .expandingTildeInPath
+        let url = URL(fileURLWithPath: defaultPath)
+        if FileManager.default.fileExists(atPath: url.path) {
+            return try ConfigLoader.load(from: url)
+        }
+        return Config.default
+    }
+
+    private static func parseLogLevel(_ raw: String) -> Logger.Level? {
         switch raw.lowercased() {
         case "trace": return .trace
         case "debug": return .debug
@@ -89,6 +110,16 @@ struct IrisDaemonCLI: AsyncParsableCommand {
         case "warn", "warning": return .warning
         case "error": return .error
         default: return nil
+        }
+    }
+
+    private static func loggerLevel(from level: LogLevel) -> Logger.Level {
+        switch level {
+        case .trace: return .trace
+        case .debug: return .debug
+        case .info: return .info
+        case .warn: return .warning
+        case .error: return .error
         }
     }
 }

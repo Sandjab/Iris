@@ -16,6 +16,24 @@ public struct Config: Codable, Sendable, Hashable {
         self.security = security
         self.mitmHosts = mitmHosts
     }
+
+    /// Built-in defaults used when no config file is found at the standard
+    /// location. Mirrors the values documented in `docs/user-guide.md`.
+    public static let `default` = Config(
+        broker: BrokerConfig(
+            listen: "127.0.0.1:8888",
+            eventsListen: "127.0.0.1:8899",
+            adminSocket: "~/Library/Application Support/iris/admin.sock",
+            logLevel: .info,
+            eventRetentionDays: 7,
+            eventRingSize: 10_000
+        ),
+        security: SecurityConfig(
+            onExfilAttempt: .blockAndNotify,
+            maxSubstitutionsPerMinute: 60
+        ),
+        mitmHosts: [MITMHostEntry(host: "api.anthropic.com")]
+    )
 }
 
 public struct BrokerConfig: Codable, Sendable, Hashable {
