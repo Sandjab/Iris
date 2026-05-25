@@ -197,4 +197,42 @@ final class PlaceholderEngineTests: XCTestCase {
         XCTAssertEqual(payload.unresolved, ["bar"])
         XCTAssertEqual(payload.headers[0].value, "Bearer {{kc:bar}}")
     }
+
+    func testSubstituteResolvableSubstitutesAllOccurrencesOfSameName() async throws {
+        let engine = try await makeEngine(with: ["k": "V"])
+        let hit = PlaceholderHit(name: "k", location: .header(name: "authorization"), snippet: "")
+        let payload = try await engine.substituteResolvable(
+            headers: [
+                ("Authorization", "Bearer {{kc:k}}"),
+                ("X-Echo", "{{kc:k}}"),
+            ],
+            uri: "/x?t={{kc:k}}",
+            body: Data(#"{"t":"{{kc:k}}"}"#.utf8),
+            resolvableHits: [hit]
+        )
+        XCTAssertEqual(payload.substituted, ["k"])  // reported once despite 4 occurrences
+        XCTAssertEqual(payload.headers[0].value, "Bearer V")
+        XCTAssertEqual(payload.headers[1].value, "V")
+        XCTAssertEqual(payload.uri, "/x?t=V")
+        XCTAssertEqual(String(data: payload.body!, encoding: .utf8), #"{"t":"V"}"#)
+    }
+
+    func testSubstituteResolvableReportsNonUTF8SecretValueAsUnresolved() async throws {
+        // A secret with non-UTF-8 bytes (random binary) cannot be spliced into
+        // request strings. Must be surfaced via `unresolved`, not silently dropped.
+        let store = InMemorySecretStore()
+        let nonUTF8Bytes = Data([0xFF, 0xFE, 0xFD, 0xFC])
+        _ = try await store.add(nonUTF8Bytes, named: "binkey", allowedHosts: ["api.x"], createdAt: Date())
+        let engine = PlaceholderEngine(secretStore: store)
+        let hit = PlaceholderHit(name: "binkey", location: .header(name: "authorization"), snippet: "")
+        let payload = try await engine.substituteResolvable(
+            headers: [("Authorization", "Bearer {{kc:binkey}}")],
+            uri: "/",
+            body: nil,
+            resolvableHits: [hit]
+        )
+        XCTAssertEqual(payload.substituted, [])
+        XCTAssertEqual(payload.unresolved, ["binkey"])
+        XCTAssertEqual(payload.headers[0].value, "Bearer {{kc:binkey}}")
+    }
 }
