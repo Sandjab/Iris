@@ -235,28 +235,28 @@ final class SSEHandler: ChannelInboundHandler, @unchecked Sendable {
 
         // Send any historical events the caller asked for, then attach to
         // the live bus stream. We subscribe BEFORE walking the backlog so
-        // events emitted concurrently are not lost.
+        // events emitted concurrently are not lost — but that same ordering
+        // produces a brief overlap window: an event appended between
+        // `bus.subscribe()` returning and `eventRing.events(since:)`
+        // completing will appear in both the backlog and the live stream.
+        // We dedupe by `Event.id` (UUID), bounded by the backlog size.
         streamingTask = Task {
             let (subscriberID, stream) = await bus.subscribe()
             defer { Task { await bus.unsubscribe(id: subscriberID) } }
 
+            var emittedIDs = Set<UUID>()
             if let since = filters.since {
                 let backlog = await eventRing.events(since: since)
                 for event in backlog where filters.matches(event) {
+                    emittedIDs.insert(event.id)
                     await Self.writeSSEEvent(event, to: channel, logger: logger)
                 }
             }
 
-            for await item in stream {
-                switch item {
-                case .event(let event):
-                    guard filters.matches(event) else { continue }
-                    await Self.writeSSEEvent(event, to: channel, logger: logger)
-                case .dropped(let count):
-                    await Self.writeSSEDropped(count: count, to: channel, logger: logger)
-                    _ = try? await channel.close()
-                    return
-                }
+            for await event in stream {
+                if emittedIDs.contains(event.id) { continue }
+                guard filters.matches(event) else { continue }
+                await Self.writeSSEEvent(event, to: channel, logger: logger)
             }
         }
     }
@@ -295,21 +295,6 @@ final class SSEHandler: ChannelInboundHandler, @unchecked Sendable {
         _ = try? await channel.writeAndFlush(
             HTTPServerResponsePart.body(.byteBuffer(buffer))
         )
-    }
-
-    private static func writeSSEDropped(
-        count: UInt64,
-        to channel: Channel,
-        logger: Logger
-    ) async {
-        let body = "event: dropped\ndata: {\"count\":\(count)}\n\n"
-        var buffer = channel.allocator.buffer(capacity: body.utf8.count)
-        buffer.writeString(body)
-        _ = try? await channel.writeAndFlush(
-            HTTPServerResponsePart.body(.byteBuffer(buffer))
-        )
-        // Cleanly terminate the chunked response so the client sees EOF.
-        _ = try? await channel.writeAndFlush(HTTPServerResponsePart.end(nil))
     }
 }
 

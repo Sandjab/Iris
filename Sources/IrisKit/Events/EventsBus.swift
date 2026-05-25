@@ -1,50 +1,51 @@
 import Foundation
 
-/// One item delivered to an SSE subscriber. Either a normal event, or the
-/// terminal `dropped` sentinel sent when the daemon falls more than
-/// `EventsBus.maxQueueDepth` events behind a slow consumer (SPECS §14.4).
-public enum SSEItem: Sendable, Equatable {
-    case event(Event)
-    case dropped(count: UInt64)
-}
-
 /// In-process pub/sub for live events. The proxy (`MITMHandler`) emits
 /// events into the `EventRing`, which forwards them here; the SSE server
 /// (`EventsServer`) holds one subscription per connected HTTP client.
 ///
-/// SPECS §14.4 backpressure: each subscriber gets a bounded
-/// `AsyncStream<SSEItem>` of `maxQueueDepth` items. If the underlying
-/// continuation reports a dropped element on `yield`, we mark the
-/// subscriber as poisoned, emit a final `.dropped(count:)` sentinel and
-/// finish the stream so the server-side reader can close the connection.
+/// SPECS §14.4 backpressure (slow-consumer detection + `event: dropped`
+/// sentinel + close) is **not implemented in Phase 3**. The earlier draft
+/// branched on `AsyncStream.Continuation.YieldResult.dropped`, but with the
+/// `.bufferingNewest` policy `yield` always returns `.enqueued`
+/// (oldest item discarded silently to make room), making the branch
+/// unreachable. Properly supporting slow-consumer detection requires either
+/// a custom `AsyncSequence` that exposes overflow, or a migration to
+/// `NIOAsyncWriter` so that the SSE writer suspends on real TCP
+/// backpressure. Tracked as a Phase 3.x follow-up; in current usage the bus
+/// silently drops items if a consumer lags by > `queueDepth` events.
 public actor EventsBus {
-    /// Default per-subscriber buffer (SPECS §14.4: 1000).
-    public static let maxQueueDepth = 1000
+    /// Default per-subscriber buffer.
+    public static let defaultQueueDepth = 1000
 
     private struct Subscriber {
-        let continuation: AsyncStream<SSEItem>.Continuation
-        var droppedCount: UInt64
-        var poisoned: Bool
+        let continuation: AsyncStream<Event>.Continuation
     }
 
     private var subscribers: [UUID: Subscriber] = [:]
     private let queueDepth: Int
 
-    public init(queueDepth: Int = EventsBus.maxQueueDepth) {
+    public init(queueDepth: Int = EventsBus.defaultQueueDepth) {
         precondition(queueDepth > 0, "queueDepth must be positive")
         self.queueDepth = queueDepth
     }
 
-    public func subscribe() -> (id: UUID, stream: AsyncStream<SSEItem>) {
+    public func subscribe() -> (id: UUID, stream: AsyncStream<Event>) {
         let id = UUID()
-        let (stream, continuation) = AsyncStream<SSEItem>.makeStream(
+        let (stream, continuation) = AsyncStream<Event>.makeStream(
             bufferingPolicy: .bufferingNewest(queueDepth)
         )
-        subscribers[id] = Subscriber(
-            continuation: continuation,
-            droppedCount: 0,
-            poisoned: false
-        )
+        subscribers[id] = Subscriber(continuation: continuation)
+        // Eager cleanup: when the consumer drops its stream/iterator the
+        // continuation fires `onTermination` and we evict the subscriber
+        // from the dictionary on the bus actor. Without this the only
+        // cleanup path is the next `publish` detecting `.terminated`,
+        // which leaks the registration if no further events arrive.
+        // `nonmutating set` on the continuation lets us assign even from
+        // an actor-isolated context.
+        continuation.onTermination = { [weak self, id] _ in
+            Task { await self?.unsubscribe(id: id) }
+        }
         return (id, stream)
     }
 
@@ -54,30 +55,29 @@ public actor EventsBus {
     }
 
     public func publish(_ event: Event) {
-        for id in subscribers.keys {
-            guard var subscriber = subscribers[id], !subscriber.poisoned else { continue }
-            let result = subscriber.continuation.yield(.event(event))
+        // Iterate over a snapshot of the keys: a `.terminated` yield below
+        // mutates `subscribers` which would otherwise invalidate iteration.
+        for id in Array(subscribers.keys) {
+            guard let subscriber = subscribers[id] else { continue }
+            let result = subscriber.continuation.yield(event)
             switch result {
-            case .enqueued:
+            case .enqueued, .dropped:
+                // `.dropped` is the documented but unreachable case under
+                // `.bufferingNewest` (oldest items are evicted silently).
+                // Treat both as success at this layer.
                 break
-            case .dropped:
-                subscriber.poisoned = true
-                subscriber.droppedCount &+= 1
-                _ = subscriber.continuation.yield(.dropped(count: subscriber.droppedCount))
-                subscriber.continuation.finish()
             case .terminated:
-                // Consumer already closed; drop the entry on the next pass
-                // via unsubscribe-on-termination semantics. For now, leave
-                // it; the next subscribe()/unsubscribe() cleans up.
-                break
+                // Consumer has finished iterating — drop the registration so
+                // the dictionary doesn't leak entries for abruptly-closed
+                // clients.
+                subscribers.removeValue(forKey: id)
             @unknown default:
                 break
             }
-            subscribers[id] = subscriber
         }
     }
 
     /// Number of currently-registered subscribers. Exposed for tests and
-    /// for the `daemon.status` extension we may add later.
+    /// for `daemon.status`-style introspection.
     public var subscriberCount: Int { subscribers.count }
 }

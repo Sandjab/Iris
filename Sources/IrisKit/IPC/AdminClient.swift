@@ -52,12 +52,12 @@ public actor AdminClient {
         }
     }
 
-    deinit {
-        if ownsGroup {
-            try? group.syncShutdownGracefully()
-        }
-    }
-
+    /// Caller-owned lifecycle: invoke `await shutdown()` before dropping the
+    /// client when no `group` was supplied at init. We deliberately do **not**
+    /// shut down from `deinit` — `EventLoopGroup.syncShutdownGracefully()` is
+    /// a blocking call and running it from ARC-driven teardown can deadlock
+    /// the calling thread (NIO documents this as an anti-pattern). If a
+    /// shared `group` was passed in, the caller already owns its lifetime.
     public func shutdown() async throws {
         if ownsGroup {
             try await group.shutdownGracefully()

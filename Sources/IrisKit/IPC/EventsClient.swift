@@ -22,7 +22,6 @@ public enum EventsClientError: Error, Equatable, LocalizedError {
 
 public enum EventsClientItem: Sendable, Equatable {
     case event(Event)
-    case dropped(count: UInt64)
     case ping
 }
 
@@ -138,17 +137,7 @@ public struct EventsClient: Sendable {
     }
 
     private static func materialize(frame: SSEFrame) throws -> EventsClientItem? {
-        guard let name = frame.eventName else { return nil }
-        if name == "dropped" {
-            struct DroppedPayload: Decodable { let count: UInt64 }
-            guard let payloadData = frame.data.data(using: .utf8) else { return nil }
-            do {
-                let payload = try JSONRPCCoder.makeDecoder().decode(DroppedPayload.self, from: payloadData)
-                return .dropped(count: payload.count)
-            } catch {
-                throw EventsClientError.decodeFailed("\(error)")
-            }
-        }
+        guard frame.eventName != nil else { return nil }
         guard let payloadData = frame.data.data(using: .utf8) else { return nil }
         do {
             let event = try JSONRPCCoder.makeDecoder().decode(Event.self, from: payloadData)
