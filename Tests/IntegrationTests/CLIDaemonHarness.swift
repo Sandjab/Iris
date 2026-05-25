@@ -128,7 +128,7 @@ final class CLIDaemonHarness {
         // --socket-path right after them.
         let subcommandWords: Set<String> = [
             "secret", "add", "list", "show", "edit", "rotate", "rm",
-            "status", "pause", "resume", "ca", "config", "rule",
+            "status", "pause", "resume", "ca", "config", "rule", "logs",
         ]
         var insertAt = 0
         while insertAt < args.count && subcommandWords.contains(args[insertAt]) {
