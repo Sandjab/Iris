@@ -32,4 +32,22 @@ final class RedactionTests: XCTestCase {
         let value = "some-secret-value"
         XCTAssertEqual(Redaction.redact(value), Redaction.redact(Data(value.utf8)))
     }
+
+    func testEventPreservesOriginalURIWithPlaceholderForSubstitutedKind() {
+        // CLAUDE.md §6.1 invariant: secret values never reach events.
+        // The Event.path must carry the original (placeholder-containing) URI,
+        // never the post-substitution URI.
+        let event = Event(
+            timestamp: Date(),
+            kind: .substituted,
+            host: "api.anthropic.com",
+            method: "GET",
+            path: "/v1?token={{kc:foo}}",  // original URI
+            statusCode: 200,
+            durationMs: 10,
+            substitutedSecrets: ["foo"]
+        )
+        XCTAssertTrue(event.path.contains("{{kc:foo}}"))
+        XCTAssertFalse(event.path.contains("REAL_SECRET_VALUE"))
+    }
 }

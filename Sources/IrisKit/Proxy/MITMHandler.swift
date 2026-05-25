@@ -99,6 +99,13 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         // Snapshot the pause flag at request entry so a flip mid-request
         // doesn't desync the event kind we emit at the end.
         let bypass = server.isPaused
+        // Capture the ORIGINAL URI/method before any substitution. Events and
+        // logs must carry the original URI, never the post-substitution one:
+        // a placeholder in path/query is rewritten with the raw secret value
+        // and would otherwise leak into logs, the SSE stream, and (Phase 5)
+        // SQLite — violating CLAUDE.md §6.1.
+        let originalURI = head.uri
+        let originalMethod = head.method.rawValue
 
         eventLoop.makeFutureWithTask { () async throws -> (ProcessedRequest, UpstreamResponse) in
             let processed = try await Self.processRequest(
@@ -117,7 +124,7 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                     metadata: [
                         "host": "\(host)",
                         "secrets": "\(names)",
-                        "path": "\(processed.head.uri)",
+                        "path": "\(originalURI)",
                     ]
                 )
             case .blocked(let alert):
@@ -160,7 +167,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
             let event = Self.makeEvent(
                 startTime: startTime,
                 host: host,
-                head: processed.head,
+                originalURI: originalURI,
+                originalMethod: originalMethod,
                 upstream: upstream,
                 duration: duration,
                 outcome: processed.outcome
@@ -392,7 +400,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
     private static func makeEvent(
         startTime: Date,
         host: String,
-        head: HTTPRequestHead,
+        originalURI: String,
+        originalMethod: String,
         upstream: UpstreamResponse,
         duration: UInt32,
         outcome: ProcessedRequest.Outcome
@@ -404,8 +413,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 timestamp: startTime,
                 kind: .passThrough,
                 host: host,
-                method: head.method.rawValue,
-                path: head.uri,
+                method: originalMethod,
+                path: originalURI,
                 statusCode: status,
                 durationMs: duration,
                 substitutedSecrets: []
@@ -415,8 +424,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 timestamp: startTime,
                 kind: .substituted,
                 host: host,
-                method: head.method.rawValue,
-                path: head.uri,
+                method: originalMethod,
+                path: originalURI,
                 statusCode: status,
                 durationMs: duration,
                 substitutedSecrets: names
@@ -426,8 +435,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 timestamp: startTime,
                 kind: .noMatch,
                 host: host,
-                method: head.method.rawValue,
-                path: head.uri,
+                method: originalMethod,
+                path: originalURI,
                 statusCode: status,
                 durationMs: duration,
                 substitutedSecrets: []
@@ -437,8 +446,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 timestamp: startTime,
                 kind: .exfilBlocked,
                 host: host,
-                method: head.method.rawValue,
-                path: head.uri,
+                method: originalMethod,
+                path: originalURI,
                 statusCode: status,
                 durationMs: duration,
                 substitutedSecrets: [],
