@@ -79,21 +79,25 @@ public final class ProxyServer: @unchecked Sendable {
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
-                // .forwardBytes so the TLS ClientHello that may arrive in the
-                // same TCP segment as the CONNECT request is preserved across
-                // the upgrade and reaches the freshly-installed TLS handler.
-                let decoder = ByteToMessageHandler(
-                    HTTPRequestDecoder(leftOverBytesStrategy: .forwardBytes)
-                )
-                let encoder = HTTPResponseEncoder()
-                let connectHandler = ConnectHandler(
-                    server: server,
-                    plainDecoder: decoder,
-                    plainEncoder: encoder
-                )
-                return channel.pipeline.addHandler(decoder)
-                    .flatMap { channel.pipeline.addHandler(encoder) }
-                    .flatMap { channel.pipeline.addHandler(connectHandler) }
+                channel.eventLoop.makeCompletedFuture(withResultOf: {
+                    // .forwardBytes so the TLS ClientHello that may arrive in
+                    // the same TCP segment as the CONNECT request is preserved
+                    // across the upgrade and reaches the freshly-installed TLS
+                    // handler.
+                    let decoder = ByteToMessageHandler(
+                        HTTPRequestDecoder(leftOverBytesStrategy: .forwardBytes)
+                    )
+                    let encoder = HTTPResponseEncoder()
+                    let connectHandler = ConnectHandler(
+                        server: server,
+                        plainDecoder: decoder,
+                        plainEncoder: encoder
+                    )
+                    let sync = channel.pipeline.syncOperations
+                    try sync.addHandler(decoder)
+                    try sync.addHandler(encoder)
+                    try sync.addHandler(connectHandler)
+                })
             }
 
         let channel =
