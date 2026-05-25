@@ -81,16 +81,18 @@ public enum PlaceholderScanner {
     }
 
     private static func makeSnippet(text: String, around range: Range<String.Index>) -> String {
-        let startOffset = max(
-            text.distance(from: text.startIndex, to: range.lowerBound) - snippetContextChars,
-            0
-        )
-        let endOffset = min(
-            text.distance(from: text.startIndex, to: range.upperBound) + snippetContextChars,
-            text.count
-        )
-        let snippetStart = text.index(text.startIndex, offsetBy: startOffset)
-        let snippetEnd = text.index(text.startIndex, offsetBy: endOffset)
+        let snippetStart =
+            text.index(
+                range.lowerBound,
+                offsetBy: -snippetContextChars,
+                limitedBy: text.startIndex
+            ) ?? text.startIndex
+        let snippetEnd =
+            text.index(
+                range.upperBound,
+                offsetBy: snippetContextChars,
+                limitedBy: text.endIndex
+            ) ?? text.endIndex
         let raw = String(text[snippetStart..<snippetEnd])
         let cleaned = raw.map { ch -> Character in
             if ch.isASCII, let scalar = ch.asciiValue, scalar < 0x20 || scalar == 0x7F {
