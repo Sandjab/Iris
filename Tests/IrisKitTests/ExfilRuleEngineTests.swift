@@ -146,4 +146,51 @@ final class ExfilRuleEngineTests: XCTestCase {
             return XCTFail("R2 should not fire on POST body")
         }
     }
+
+    // MARK: R3
+
+    func testR3MultipleDistinctSecretsBlocks() async throws {
+        let ev = try await makeEvaluator(secrets: [
+            ("foo", ["api.anthropic.com"]),
+            ("bar", ["api.anthropic.com"]),
+        ])
+        let hits = [
+            PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}"),
+            PlaceholderHit(name: "bar", location: .header(name: "x-api-key"), snippet: "{{kc:bar}}"),
+        ]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .block(let alert, let allHits) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .multipleSecrets)
+        XCTAssertEqual(alert.severity, .medium)
+        XCTAssertEqual(alert.secretName, "bar")  // alphabetically first
+        XCTAssertEqual(allHits.count, 2)
+    }
+
+    func testR3SameNameMultipleHitsAllowed() async throws {
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [
+            PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}"),
+            PlaceholderHit(name: "foo", location: .header(name: "x-api-key"), snippet: "{{kc:foo}}"),
+        ]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .allow = decision else {
+            return XCTFail("same name multiple hits should not fire R3")
+        }
+    }
+
+    func testR3CountsUnknownNames() async throws {
+        // 1 known + 1 unknown = 2 distinct names → R3 fires.
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [
+            PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}"),
+            PlaceholderHit(name: "ghost", location: .header(name: "x-api-key"), snippet: "{{kc:ghost}}"),
+        ]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected block")
+        }
+        XCTAssertEqual(alert.rule, .multipleSecrets)
+    }
 }

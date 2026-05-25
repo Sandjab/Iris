@@ -84,6 +84,25 @@ public actor ExfilRuleEngine {
             }
         }
 
+        // R3 — multiple distinct secrets (medium). Counts all hits, including
+        // unknown names (design §7.1): mixed known + typo is exactly the pattern
+        // we want to flag.
+        let distinctNames = Set(hits.map(\.name))
+        if distinctNames.count >= 2 {
+            guard let triggeringName = distinctNames.sorted().first else {
+                return .allow(resolvable: knownHits)
+            }
+            let triggeringHit = hits.first { $0.name == triggeringName } ?? hits[0]
+            let alert = Alert(
+                severity: .medium,
+                rule: .multipleSecrets,
+                secretName: triggeringName,
+                detectedAt: alertLocation(from: triggeringHit.location),
+                snippet: triggeringHit.snippet
+            )
+            return .block(alert: alert, allHits: hits)
+        }
+
         return .allow(resolvable: knownHits)
     }
 
