@@ -424,4 +424,92 @@ final class ProxyEndToEndTests: XCTestCase {
         try? await proxy.stop()
         try? await mock.stop()
     }
+
+    func testVolumeAnomalyBlocksAfterThreshold() async throws {
+        let secretValue = "sk-XYZ"
+        let secretName = "test_key"
+
+        let secretStore = InMemorySecretStore()
+        _ = try await secretStore.add(
+            Data(secretValue.utf8),
+            named: secretName,
+            allowedHosts: ["localhost"],  // request host = "localhost" → R1 passes
+            createdAt: Date()
+        )
+
+        let proxyCAManager = CAManager(keyStore: InMemoryCAKeyStore())
+        _ = try await proxyCAManager.ensureCA()
+
+        let mockCAManager = CAManager(keyStore: InMemoryCAKeyStore())
+        let mockCACert = try await mockCAManager.ensureCA()
+
+        let mock = try await MockUpstream.start(host: "localhost", caManager: mockCAManager)
+        let mockCANIO = try NIOSSLCertificate(bytes: Array(mockCACert.derBytes), format: .der)
+
+        let proxyConfig = ProxyServer.Configuration(
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+            allowedHosts: ["localhost"],
+            upstreamPort: mock.port,
+            upstreamTrustRoots: .certificates([mockCANIO]),
+            maxSubstitutionsPerMinute: 2,
+            onExfilAttempt: .blockOnly
+        )
+        let proxy = ProxyServer(
+            configuration: proxyConfig,
+            secretStore: secretStore,
+            caManager: proxyCAManager
+        )
+        let proxyAddress = try await proxy.start()
+        guard let proxyPort = proxyAddress.port else {
+            try? await proxy.stop()
+            try? await mock.stop()
+            return XCTFail("proxy did not bind")
+        }
+
+        let proxyCACert = try await proxyCAManager.ensureCA()
+        let proxyCANIO = try NIOSSLCertificate(
+            bytes: Array(proxyCACert.derBytes),
+            format: .der
+        )
+
+        let client = TestProxyClient()
+        // Send 3 requests; 3rd should fire R5.
+        for _ in 0..<3 {
+            _ = try? await client.send(
+                proxyHost: "127.0.0.1",
+                proxyPort: proxyPort,
+                targetHost: "localhost",
+                targetPort: 443,
+                method: .POST,
+                path: "/v1/messages",
+                headers: [("Authorization", "Bearer {{kc:\(secretName)}}")],
+                body: nil,
+                trustingCAs: [proxyCANIO]
+            )
+        }
+
+        // Allow async event emission to land.
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let events = await proxy.eventRing.recent(100)
+        let substituted = events.filter { $0.kind == .substituted }
+        let blocked = events.filter { e in
+            e.kind == .exfilBlocked && e.alert?.rule == .volumeAnomaly
+        }
+        XCTAssertEqual(substituted.count, 2, "expected 2 substituted events before threshold")
+        XCTAssertEqual(blocked.count, 1, "expected 1 volume-anomaly block on the 3rd request")
+        XCTAssertEqual(blocked.first?.alert?.severity, .low)
+        XCTAssertEqual(blocked.first?.alert?.secretName, secretName)
+
+        // CLAUDE.md §6.1 redaction: events must not contain the secret value.
+        for event in events {
+            XCTAssertFalse(event.host.contains(secretValue))
+            XCTAssertFalse(event.path.contains(secretValue))
+            XCTAssertFalse(event.method.contains(secretValue))
+        }
+
+        try? await proxy.stop()
+        try? await mock.stop()
+    }
 }
