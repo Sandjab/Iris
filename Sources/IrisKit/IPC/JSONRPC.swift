@@ -228,15 +228,18 @@ extension JSONValue {
 
 // MARK: - Shared coders
 
-/// Snake-case + ISO-8601 coders for the admin transport. The wire format
-/// from SPECS §13.2 uses snake_case keys (e.g. `allowed_hosts`,
-/// `created_at`) so we wire the strategy here once instead of repeating it
-/// at every call site. Factories return fresh instances because
-/// `JSONEncoder`/`JSONDecoder` are not formally `Sendable`.
+/// ISO-8601 coders for the admin transport. We do **not** apply
+/// `convertTo/FromSnakeCase` strategies because they conflict with types
+/// that ship explicit `CodingKeys` whose raw values are already snake_case
+/// (notably `Config` / `BrokerConfig`, designed for TOML). Instead, every
+/// wire-bound type declares snake_case `CodingKeys` explicitly — see
+/// `AdminProtocol.swift` and the `Models/*` types.
+///
+/// Factories return fresh instances because `JSONEncoder`/`JSONDecoder` are
+/// not formally `Sendable`.
 public enum JSONRPCCoder {
     public static func makeEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return encoder
@@ -244,7 +247,6 @@ public enum JSONRPCCoder {
 
     public static func makeDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }

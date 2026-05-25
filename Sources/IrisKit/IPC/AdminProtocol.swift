@@ -29,6 +29,12 @@ public struct SecretAddParams: Codable, Sendable, Equatable {
     /// Binary secret value. Serialized as base64 by the default `Data` Codable.
     public let value: Data
 
+    enum CodingKeys: String, CodingKey {
+        case name
+        case allowedHosts = "allowed_hosts"
+        case value
+    }
+
     public init(name: String, allowedHosts: [String], value: Data) {
         self.name = name
         self.allowedHosts = allowedHosts
@@ -44,6 +50,11 @@ public struct SecretNameParams: Codable, Sendable, Equatable {
 public struct SecretUpdateParams: Codable, Sendable, Equatable {
     public let name: String
     public let allowedHosts: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case allowedHosts = "allowed_hosts"
+    }
 
     public init(name: String, allowedHosts: [String]) {
         self.name = name
@@ -96,6 +107,13 @@ public struct DaemonStats: Codable, Sendable, Equatable {
     public let exfilBlockedTotal: UInt64
     public let errorsTotal: UInt64
 
+    enum CodingKeys: String, CodingKey {
+        case reqTotal = "req_total"
+        case subTotal = "sub_total"
+        case exfilBlockedTotal = "exfil_blocked_total"
+        case errorsTotal = "errors_total"
+    }
+
     public init(reqTotal: UInt64, subTotal: UInt64, exfilBlockedTotal: UInt64, errorsTotal: UInt64) {
         self.reqTotal = reqTotal
         self.subTotal = subTotal
@@ -111,6 +129,13 @@ public struct DaemonStatus: Codable, Sendable, Equatable {
     public let uptimeS: UInt64
     public let version: String
     public let stats: DaemonStats
+
+    enum CodingKeys: String, CodingKey {
+        case pid
+        case uptimeS = "uptime_s"
+        case version
+        case stats
+    }
 
     public init(pid: Int32, uptimeS: UInt64, version: String, stats: DaemonStats) {
         self.pid = pid

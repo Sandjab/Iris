@@ -83,6 +83,9 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         let channel = context.channel
         let eventLoop = context.eventLoop
         let startTime = Date()
+        // Snapshot the pause flag at request entry so a flip mid-request
+        // doesn't desync the event kind we emit at the end.
+        let bypass = server.isPaused
 
         eventLoop.makeFutureWithTask { () async throws -> (ResolvedRequest, UpstreamResponse) in
             let resolved = try await Self.applySubstitution(
@@ -90,7 +93,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 body: body,
                 engine: server.placeholderEngine,
                 logger: server.logger,
-                host: host
+                host: host,
+                bypass: bypass
             )
             if !resolved.substituted.isEmpty {
                 server.logger.info(
@@ -111,9 +115,17 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
             return (resolved, upstream)
         }.flatMap { (resolved, upstream) -> EventLoopFuture<Void> in
             let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
+            let kind: Event.Kind
+            if bypass {
+                kind = .passThrough
+            } else if resolved.substituted.isEmpty {
+                kind = .noMatch
+            } else {
+                kind = .substituted
+            }
             let event = Event(
                 timestamp: startTime,
-                kind: resolved.substituted.isEmpty ? .noMatch : .substituted,
+                kind: kind,
                 host: host,
                 method: head.method.rawValue,
                 path: head.uri,
@@ -160,8 +172,24 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         body: ByteBuffer?,
         engine: PlaceholderEngine,
         logger: Logger,
-        host: String
+        host: String,
+        bypass: Bool
     ) async throws -> ResolvedRequest {
+        if bypass {
+            // Pause path: forward verbatim, strip only Accept-Encoding so an
+            // upstream response we can't gunzip won't propagate a compressed
+            // body. No placeholder scan, no substitution, no logging.
+            var newHeaders = head.headers
+            newHeaders.remove(name: "Accept-Encoding")
+            var newHead = HTTPRequestHead(
+                version: .http1_1,
+                method: head.method,
+                uri: head.uri,
+                headers: newHeaders
+            )
+            newHead.version = .http1_1
+            return ResolvedRequest(head: newHead, body: body, substituted: [])
+        }
         var allSubstituted = Set<String>()
 
         // Headers — strip Accept-Encoding (SPECS §7.5: prevents compressed upstream responses)

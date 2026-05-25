@@ -31,6 +31,10 @@ public actor CAManager {
         self.options = options
     }
 
+    /// Configured filesystem path where the public CA cert is written, if any.
+    /// Exposed for the admin RPC `ca.export_path` (SPECS §13.2).
+    public var publicCertPath: URL? { options.publicCertPath }
+
     public func ensureCA() async throws -> CACertificate {
         let key = try await keyStore.loadOrGenerateKey()
 
