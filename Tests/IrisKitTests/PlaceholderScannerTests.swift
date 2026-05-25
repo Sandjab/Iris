@@ -132,4 +132,17 @@ final class PlaceholderScannerTests: XCTestCase {
         XCTAssertTrue(hits[0].snippet.contains("{{kc:foo}}"))
         XCTAssertLessThanOrEqual(hits[0].snippet.count, 256)
     }
+
+    func testSnippetReplacesControlCharactersWithQuestionMark() {
+        // Body with placeholder surrounded by control characters (\u{0001}, \u{0007} = BEL, \u{007F} = DEL).
+        let body = Data("\u{0001}\u{0007}prefix {{kc:foo}} suffix\u{007F}".utf8)
+        let hits = PlaceholderScanner.scan(headers: [], uri: "/", body: body)
+        XCTAssertEqual(hits.count, 1)
+        let snippet = hits[0].snippet
+        XCTAssertFalse(snippet.contains("\u{0001}"))
+        XCTAssertFalse(snippet.contains("\u{0007}"))
+        XCTAssertFalse(snippet.contains("\u{007F}"))
+        XCTAssertTrue(snippet.contains("?"))
+        XCTAssertTrue(snippet.contains("{{kc:foo}}"))
+    }
 }

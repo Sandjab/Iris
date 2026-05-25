@@ -2,6 +2,8 @@ import Foundation
 
 public struct PlaceholderHit: Sendable, Hashable {
     public enum Location: Sendable, Hashable {
+        /// Header location. The associated `name` is lowercased per RFC 7230 §3.2
+        /// when produced by `PlaceholderScanner.scan(headers:uri:body:)`.
         case header(name: String)
         case urlPath
         case queryString
@@ -22,6 +24,11 @@ public enum PlaceholderScanner {
     private static let regex: NSRegularExpression? = {
         try? NSRegularExpression(pattern: PlaceholderEngine.pattern)
     }()
+    /// Snippet length ceiling. Under the current placeholder grammar
+    /// (`[a-zA-Z0-9_-]{1,64}`), the worst-case snippet from `makeSnippet` is
+    /// roughly `2 * snippetContextChars + 73` characters ≈ 233, so the cap is
+    /// defense-in-depth: it locks the upper bound for future-proofing if the
+    /// grammar or the context window changes.
     private static let snippetMaxLength = 256
     private static let snippetContextChars = 80
 
@@ -51,7 +58,7 @@ public enum PlaceholderScanner {
         return hits
     }
 
-    public static func scanString(_ text: String, location: PlaceholderHit.Location) -> [PlaceholderHit] {
+    static func scanString(_ text: String, location: PlaceholderHit.Location) -> [PlaceholderHit] {
         guard let regex = regex else { return [] }
         let nsRange = NSRange(text.startIndex..., in: text)
         let matches = regex.matches(in: text, range: nsRange)
