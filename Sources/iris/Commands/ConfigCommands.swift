@@ -6,7 +6,7 @@ struct ConfigCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "config",
         abstract: "Inspect or reload the daemon configuration.",
-        subcommands: [Get.self]
+        subcommands: [Get.self, Reload.self]
     )
 
     struct Get: AsyncParsableCommand {
@@ -33,8 +33,12 @@ struct ConfigCommand: AsyncParsableCommand {
                 lines.append("event_ring_size = \(config.broker.eventRingSize)")
                 lines.append("")
                 lines.append("[security]")
-                lines.append("on_exfil_attempt = \"\(config.security.onExfilAttempt.rawValue)\"")
-                lines.append("max_substitutions_per_minute = \(config.security.maxSubstitutionsPerMinute)")
+                lines.append(
+                    "on_exfil_attempt = \"\(config.security.onExfilAttempt.rawValue)\""
+                )
+                lines.append(
+                    "max_substitutions_per_minute = \(config.security.maxSubstitutionsPerMinute)"
+                )
                 lines.append("")
                 lines.append("[mitm_host]")
                 for entry in config.mitmHosts {
@@ -43,6 +47,24 @@ struct ConfigCommand: AsyncParsableCommand {
                 return lines.joined(separator: "\n")
             }()
             try Output.print(humanText: humanText, jsonValue: config, json: json)
+        }
+    }
+
+    struct Reload: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "reload",
+            abstract:
+                "Reload config via SIGHUP (Phase 4.x — not yet implemented)."
+        )
+
+        mutating func run() async throws {
+            FileHandle.standardError.write(
+                Data(
+                    "iris config reload: not implemented in Phase 5 (tracked in Phase 4.x — needs SIGHUP handler in irisd)\n"
+                        .utf8
+                )
+            )
+            Foundation.exit(IrisExitCode.usage)
         }
     }
 }
