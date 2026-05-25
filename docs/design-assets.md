@@ -28,7 +28,7 @@ Depuis Xcode 26 et macOS 26 Tahoe, Apple a unifié la création d'icônes multi-
 | Cible | Généré |
 |---|---|
 | macOS 26+ | Variantes **light / dark / tinted / clear** (Liquid Glass) |
-| macOS 13–25 (notre minimum Ventura) | Fallback `.icns` classique |
+| macOS 13–15 (notre minimum Ventura → Sequoia) | Fallback `.icns` classique |
 | Toutes tailles | 16, 32, 64, 128, 256, 512, 1024 px en @1x et @2x |
 
 → **Une seule source, génération auto**. Vs l'ancien flow où il fallait fournir 14 PNG individuels dans un asset catalog.
@@ -113,8 +113,8 @@ Exemple `create-dmg` :
 ```sh
 create-dmg \
   --volname "IRIS" \
-  --volicon "assets/dmg-volume.icns" \
-  --background "assets/dmg-background.png" \
+  --volicon "assets/dmg/volume.icns" \
+  --background "assets/dmg/background.png" \
   --window-size 540 380 \
   --icon "Iris.app" 140 190 \
   --app-drop-link 400 190 \
