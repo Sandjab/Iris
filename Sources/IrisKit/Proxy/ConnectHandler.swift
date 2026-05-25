@@ -232,7 +232,8 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
                     path: "\(host):\(port)",
                     durationMs: duration
                 )
-                Task { await server.eventRing.append(event) }
+                let ring = server.eventRing
+                Task { await ring.append(event) }
                 server.logger.info(
                     "Passthrough tunnel established",
                     metadata: ["host": "\(host)", "port": "\(port)"]
