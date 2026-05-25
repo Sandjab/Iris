@@ -238,4 +238,118 @@ final class ProxyEndToEndTests: XCTestCase {
         try? await proxy.stop()
         XCTAssertEqual(status, .badGateway, "unreachable passthrough upstream must yield 502")
     }
+
+    func testHostMismatchEmitsExfilBlockedEventAndForwardsPlaceholder() async throws {
+        // SPECS §10 R1: a placeholder whose `allowed_hosts` does NOT include the
+        // request host must trigger an `exfilBlocked` event with rule
+        // `hostMismatch` and severity `high`. The proxy must forward the
+        // request with the placeholder LITERAL — no substitution occurs.
+        let secretValue = "sk-real-XYZ-DO-NOT-LEAK"
+        let secretName = "test_anthropic_key"
+
+        let secretStore = InMemorySecretStore()
+        _ = try await secretStore.add(
+            Data(secretValue.utf8),
+            named: secretName,
+            // Does NOT include localhost — request to localhost must trip R1.
+            allowedHosts: ["api.anthropic.com"],
+            createdAt: Date()
+        )
+
+        let proxyCAManager = CAManager(keyStore: InMemoryCAKeyStore())
+        let proxyCACert = try await proxyCAManager.ensureCA()
+
+        let mockCAManager = CAManager(keyStore: InMemoryCAKeyStore())
+        let mockCACert = try await mockCAManager.ensureCA()
+
+        let mock = try await MockUpstream.start(
+            host: "localhost",
+            caManager: mockCAManager
+        )
+
+        let mockCANIO = try NIOSSLCertificate(bytes: Array(mockCACert.derBytes), format: .der)
+        let proxyConfig = ProxyServer.Configuration(
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+            // localhost IS whitelisted at the proxy level — request must be
+            // MITM'd and reach the exfil rule engine.
+            allowedHosts: ["localhost"],
+            upstreamPort: mock.port,
+            upstreamTrustRoots: .certificates([mockCANIO]),
+            maxSubstitutionsPerMinute: 60,
+            // Use blockOnly to avoid auto-pause side effects on the proxy.
+            onExfilAttempt: .blockOnly
+        )
+        let proxy = ProxyServer(
+            configuration: proxyConfig,
+            secretStore: secretStore,
+            caManager: proxyCAManager
+        )
+        let proxyAddress = try await proxy.start()
+        guard let proxyPort = proxyAddress.port else {
+            try? await proxy.stop()
+            try? await mock.stop()
+            return XCTFail("proxy did not bind")
+        }
+
+        let proxyCANIO = try NIOSSLCertificate(bytes: Array(proxyCACert.derBytes), format: .der)
+        let client = TestProxyClient()
+
+        var caughtError: Error?
+        var response: TestProxyClient.Response?
+        var received: MockUpstream.ReceivedRequest?
+        do {
+            response = try await client.send(
+                proxyHost: "127.0.0.1",
+                proxyPort: proxyPort,
+                targetHost: "localhost",
+                targetPort: 443,
+                method: .POST,
+                path: "/v1/messages",
+                // Authorization is a CANONICAL secret location for Bearer
+                // tokens; R2 (non-canonical) must not fire — R1 must be the
+                // rule that triggers.
+                headers: [
+                    ("host", "localhost"),
+                    ("Authorization", "Bearer {{kc:\(secretName)}}"),
+                ],
+                body: nil,
+                trustingCAs: [proxyCANIO]
+            )
+            received = try await mock.receivedRequest()
+        } catch {
+            caughtError = error
+        }
+
+        // Give the async event append a brief moment to land before reading.
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let events = await proxy.eventRing.recent(100)
+        try? await proxy.stop()
+        try? await mock.stop()
+
+        if let caughtError = caughtError {
+            throw caughtError
+        }
+
+        XCTAssertEqual(response?.status, .ok)
+
+        // Upstream must have received the placeholder LITERAL — substitution
+        // was blocked by R1, so the original bytes flow through.
+        XCTAssertEqual(
+            received?.head.headers.first(name: "Authorization"),
+            "Bearer {{kc:\(secretName)}}",
+            "host-mismatch block must forward the placeholder verbatim"
+        )
+
+        let blocked = events.first(where: { $0.kind == .exfilBlocked })
+        XCTAssertNotNil(blocked, "expected an exfilBlocked event in the ring")
+        XCTAssertEqual(blocked?.alert?.rule, .hostMismatch)
+        XCTAssertEqual(blocked?.alert?.severity, .high)
+        XCTAssertEqual(blocked?.alert?.secretName, secretName)
+        XCTAssertEqual(blocked?.substitutedSecrets, [])
+
+        // CLAUDE.md §6.1 invariant: events must never embed the secret value.
+        XCTAssertFalse(blocked?.host.contains(secretValue) ?? true)
+        XCTAssertFalse(blocked?.path.contains(secretValue) ?? true)
+    }
 }
