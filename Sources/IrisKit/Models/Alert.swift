@@ -7,6 +7,14 @@ public struct Alert: Codable, Sendable, Hashable {
     public let detectedAt: Location
     public let snippet: String
 
+    enum CodingKeys: String, CodingKey {
+        case severity
+        case rule
+        case secretName = "secret_name"
+        case detectedAt = "detected_at"
+        case snippet
+    }
+
     public enum ExfilRule: String, Codable, Sendable, CaseIterable {
         case hostMismatch
         case nonCanonicalLocation

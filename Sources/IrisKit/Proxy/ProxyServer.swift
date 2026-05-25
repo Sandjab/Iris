@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import NIO
+import NIOConcurrencyHelpers
 import NIOHTTP1
 import NIOSSL
 
@@ -44,6 +45,7 @@ public final class ProxyServer: @unchecked Sendable {
     private let group: EventLoopGroup
     private let ownsGroup: Bool
     private var serverChannel: Channel?
+    private let pauseFlag = NIOLockedValueBox<Bool>(false)
 
     public init(
         configuration: Configuration,
@@ -126,6 +128,20 @@ public final class ProxyServer: @unchecked Sendable {
         if ownsGroup {
             try await group.shutdownGracefully()
         }
+    }
+
+    // MARK: - Pause control (SPECS §13.2 daemon.pause / daemon.resume)
+
+    /// When paused, `MITMHandler` skips placeholder substitution and forwards
+    /// each request verbatim, emitting an `Event(.passThrough)`. The flag is
+    /// guarded by a lock so it can be read from inbound NIO handlers without
+    /// suspension.
+    public var isPaused: Bool {
+        pauseFlag.withLockedValue { $0 }
+    }
+
+    public func setPaused(_ paused: Bool) {
+        pauseFlag.withLockedValue { $0 = paused }
     }
 }
 

@@ -62,7 +62,11 @@ let package = Package(
         ),
         .testTarget(
             name: "IrisKitTests",
-            dependencies: ["IrisKit"],
+            dependencies: [
+                "IrisKit",
+                .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOEmbedded", package: "swift-nio"),
+            ],
             swiftSettings: strictConcurrency
         ),
         .testTarget(

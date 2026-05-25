@@ -7,6 +7,14 @@ public struct Secret: Codable, Sendable, Hashable {
     public let lastUsedAt: Date?
     public let usageCount: UInt64
 
+    enum CodingKeys: String, CodingKey {
+        case name
+        case allowedHosts = "allowed_hosts"
+        case createdAt = "created_at"
+        case lastUsedAt = "last_used_at"
+        case usageCount = "usage_count"
+    }
+
     public init(
         name: String,
         allowedHosts: [String],

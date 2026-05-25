@@ -12,6 +12,19 @@ public struct Event: Codable, Sendable, Identifiable, Equatable {
     public let substitutedSecrets: [String]
     public let alert: Alert?
 
+    enum CodingKeys: String, CodingKey {
+        case id
+        case timestamp
+        case kind
+        case host
+        case method
+        case path
+        case statusCode = "status_code"
+        case durationMs = "duration_ms"
+        case substitutedSecrets = "substituted_secrets"
+        case alert
+    }
+
     public enum Kind: String, Codable, Sendable, CaseIterable {
         case substituted
         case passThrough
