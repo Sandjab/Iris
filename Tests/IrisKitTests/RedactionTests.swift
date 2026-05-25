@@ -50,4 +50,43 @@ final class RedactionTests: XCTestCase {
         XCTAssertTrue(event.path.contains("{{kc:foo}}"))
         XCTAssertFalse(event.path.contains("REAL_SECRET_VALUE"))
     }
+
+    func testAlertSnippetNeverContainsSecretValue() async throws {
+        // CLAUDE.md §6.1: alert payloads must not carry secret values.
+        // The scanner produces hits BEFORE substitution, so the snippet
+        // is always the placeholder literal — verified here.
+        let secretValue = "sk-supersecret-DO-NOT-LEAK"
+        let secretName = "test_key"
+
+        let store = InMemorySecretStore()
+        _ = try await store.add(
+            Data(secretValue.utf8),
+            named: secretName,
+            allowedHosts: ["api.anthropic.com"],
+            createdAt: Date()
+        )
+        let evaluator = ExfilRuleEngine(secretStore: store, maxSubstitutionsPerMinute: 60)
+        let hit = PlaceholderHit(
+            name: secretName,
+            location: .header(name: "x-custom"),
+            snippet: "X-Custom: {{kc:\(secretName)}}"
+        )
+        let decision = try await evaluator.evaluate(
+            hits: [hit],
+            context: RequestContext(
+                host: "api.anthropic.com",
+                method: "POST",
+                path: "/v1/x",
+                contentType: "application/json"
+            )
+        )
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected block (R2 non-canonical header fires)")
+        }
+        XCTAssertFalse(
+            alert.snippet.contains(secretValue),
+            "alert snippet must not carry secret value"
+        )
+        XCTAssertTrue(alert.snippet.contains("{{kc:\(secretName)}}"))
+    }
 }
