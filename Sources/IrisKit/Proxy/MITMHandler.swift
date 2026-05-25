@@ -250,15 +250,16 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
             )
         }
 
-        // Decode body for scanning (non-UTF-8 short-circuit).
-        var bodyData: Data? = nil
+        // Decode body for scanning (non-UTF-8 short-circuit). Decoded once,
+        // reused by the scanner to avoid a second UTF-8 pass.
+        var bodyString: String? = nil
         var nonUtf8 = false
         if let original = body {
             let data = Data(original.readableBytesView)
-            if String(data: data, encoding: .utf8) == nil {
-                nonUtf8 = true
+            if let decoded = String(data: data, encoding: .utf8) {
+                bodyString = decoded
             } else {
-                bodyData = data
+                nonUtf8 = true
             }
         }
 
@@ -281,7 +282,7 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         let hits = PlaceholderScanner.scan(
             headers: headerPairs,
             uri: preparedHead.uri,
-            body: bodyData
+            body: bodyString
         )
         if hits.isEmpty {
             return ProcessedRequest(
@@ -324,11 +325,15 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 )
             }
 
-            // Pass 3 — substitute.
+            // Pass 3 — substitute. `substituteResolvable` still operates on
+            // `Data` bodies; reconvert from the cached UTF-8 string here so
+            // we do not have to keep two parallel body representations alive
+            // for the common case (no substitution).
+            let originalBodyData = bodyString.map { Data($0.utf8) }
             let payload = try await engine.substituteResolvable(
                 headers: headerPairs,
                 uri: preparedHead.uri,
-                body: bodyData,
+                body: originalBodyData,
                 resolvableHits: resolvable
             )
 
@@ -350,7 +355,7 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 newHeaders.add(name: n, value: v)
             }
             var newBody: ByteBuffer? = body
-            if let mutated = payload.body, mutated != bodyData {
+            if let mutated = payload.body, mutated != originalBodyData {
                 var buf = ByteBufferAllocator().buffer(capacity: mutated.count)
                 buf.writeBytes(mutated)
                 newBody = buf

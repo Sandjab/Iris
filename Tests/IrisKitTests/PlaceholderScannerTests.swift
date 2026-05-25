@@ -50,8 +50,11 @@ final class PlaceholderScannerTests: XCTestCase {
     }
 
     func testHitInBody() {
-        let body = Data(#"{"key":"{{kc:bar}}"}"#.utf8)
-        let hits = PlaceholderScanner.scan(headers: [], uri: "/", body: body)
+        let hits = PlaceholderScanner.scan(
+            headers: [],
+            uri: "/",
+            body: #"{"key":"{{kc:bar}}"}"#
+        )
         XCTAssertEqual(hits.count, 1)
         XCTAssertEqual(hits[0].location, .body)
     }
@@ -76,13 +79,6 @@ final class PlaceholderScannerTests: XCTestCase {
             body: nil
         )
         XCTAssertEqual(Set(hits.map(\.name)), ["foo", "bar"])
-    }
-
-    func testNonUTF8BodyYieldsNoHit() {
-        var bytes: [UInt8] = [0xFF, 0xFE, 0xFD]
-        bytes.append(contentsOf: Array("{{kc:foo}}".utf8))
-        let hits = PlaceholderScanner.scan(headers: [], uri: "/", body: Data(bytes))
-        XCTAssertTrue(hits.isEmpty)
     }
 
     func testURIWithoutQueryHasNoQueryStringLocation() {
@@ -135,7 +131,7 @@ final class PlaceholderScannerTests: XCTestCase {
 
     func testSnippetReplacesControlCharactersWithQuestionMark() {
         // Body with placeholder surrounded by control characters (\u{0001}, \u{0007} = BEL, \u{007F} = DEL).
-        let body = Data("\u{0001}\u{0007}prefix {{kc:foo}} suffix\u{007F}".utf8)
+        let body = "\u{0001}\u{0007}prefix {{kc:foo}} suffix\u{007F}"
         let hits = PlaceholderScanner.scan(headers: [], uri: "/", body: body)
         XCTAssertEqual(hits.count, 1)
         let snippet = hits[0].snippet

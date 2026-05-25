@@ -32,10 +32,17 @@ public enum PlaceholderScanner {
     private static let snippetMaxLength = 256
     private static let snippetContextChars = 80
 
+    /// Scans headers/URI/body for `{{kc:NAME}}` placeholders.
+    ///
+    /// The caller is responsible for UTF-8 decoding the request body. Pass
+    /// `nil` when the body is absent or not UTF-8 decodable — the scanner
+    /// does not attempt to decode bytes itself, so the proxy can avoid
+    /// running the UTF-8 decode twice (once for the non-UTF-8 short-circuit,
+    /// once here).
     public static func scan(
         headers: [(name: String, value: String)],
         uri: String,
-        body: Data?
+        body: String?
     ) -> [PlaceholderHit] {
         var hits: [PlaceholderHit] = []
 
@@ -51,7 +58,7 @@ public enum PlaceholderScanner {
             hits.append(contentsOf: scanString(query, location: .queryString))
         }
 
-        if let body = body, let bodyText = String(data: body, encoding: .utf8) {
+        if let bodyText = body {
             hits.append(contentsOf: scanString(bodyText, location: .body))
         }
 
