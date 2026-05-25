@@ -352,4 +352,76 @@ final class ProxyEndToEndTests: XCTestCase {
         XCTAssertFalse(blocked?.host.contains(secretValue) ?? true)
         XCTAssertFalse(blocked?.path.contains(secretValue) ?? true)
     }
+
+    func testBlockNotifyPauseAutoPausesDaemon() async throws {
+        let secretValue = "sk-XYZ"
+        let secretName = "test_anthropic_key"
+
+        let secretStore = InMemorySecretStore()
+        _ = try await secretStore.add(
+            Data(secretValue.utf8),
+            named: secretName,
+            allowedHosts: ["api.anthropic.com"],
+            createdAt: Date()
+        )
+
+        let proxyCAManager = CAManager(keyStore: InMemoryCAKeyStore())
+        _ = try await proxyCAManager.ensureCA()
+
+        let mockCAManager = CAManager(keyStore: InMemoryCAKeyStore())
+        let mockCACert = try await mockCAManager.ensureCA()
+
+        let mock = try await MockUpstream.start(host: "localhost", caManager: mockCAManager)
+        let mockCANIO = try NIOSSLCertificate(bytes: Array(mockCACert.derBytes), format: .der)
+
+        let proxyConfig = ProxyServer.Configuration(
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+            allowedHosts: ["localhost"],
+            upstreamPort: mock.port,
+            upstreamTrustRoots: .certificates([mockCANIO]),
+            maxSubstitutionsPerMinute: 60,
+            onExfilAttempt: .blockNotifyPause
+        )
+        let proxy = ProxyServer(
+            configuration: proxyConfig,
+            secretStore: secretStore,
+            caManager: proxyCAManager
+        )
+        let proxyAddress = try await proxy.start()
+        guard let proxyPort = proxyAddress.port else {
+            try? await proxy.stop()
+            try? await mock.stop()
+            return XCTFail("proxy did not bind")
+        }
+
+        XCTAssertFalse(proxy.isPaused, "proxy should not start paused")
+
+        let proxyCACert = try await proxyCAManager.ensureCA()
+        let proxyCANIO = try NIOSSLCertificate(
+            bytes: Array(proxyCACert.derBytes),
+            format: .der
+        )
+
+        let client = TestProxyClient()
+        _ = try await client.send(
+            proxyHost: "127.0.0.1",
+            proxyPort: proxyPort,
+            targetHost: "localhost",
+            targetPort: 443,
+            method: .POST,
+            path: "/v1/messages",
+            headers: [("Authorization", "Bearer {{kc:\(secretName)}}")],
+            body: nil,
+            trustingCAs: [proxyCANIO]
+        )
+
+        // Allow async event emission + policy execution to complete.
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertTrue(proxy.isPaused, "daemon must auto-pause after exfil with block_notify_pause")
+
+        try? await proxy.stop()
+        try? await mock.stop()
+    }
 }
