@@ -152,10 +152,12 @@ public actor PlaceholderEngine {
         var substituted = Set<String>()
         func mutate(_ input: String) -> String {
             var result = input
-            for (name, value) in values {
+            for name in values.keys.sorted() {
                 let needle = "{{kc:\(name)}}"
                 guard result.contains(needle) else { continue }
-                let valueStr = String(data: value, encoding: .utf8) ?? ""
+                guard let value = values[name],
+                    let valueStr = String(data: value, encoding: .utf8)
+                else { continue }
                 result = result.replacingOccurrences(of: needle, with: valueStr)
                 substituted.insert(name)
             }
