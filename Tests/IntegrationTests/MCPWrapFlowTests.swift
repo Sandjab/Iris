@@ -1,3 +1,4 @@
+import IrisKit
 import XCTest
 
 final class MCPWrapFlowTests: XCTestCase {
@@ -218,5 +219,55 @@ final class MCPWrapFlowTests: XCTestCase {
         let url = try writeFile("dd.json", content: "{}")
         let result = try harness.runIris(["mcp", "wrap", url.path])
         XCTAssertEqual(result.code, 2, "expected exit 2 when daemon down, got code=\(result.code)")
+    }
+
+    // MARK: - JSONC tests
+
+    func testWrapRefusesCommentedFileButAcceptsDryRun() throws {
+        let url = try writeFile(
+            "commented.json",
+            content: """
+                // top
+                { "mcpServers": { "foo": { "command": "echo", "args": [] } } }
+                """
+        )
+
+        // dry-run: should succeed even though the file has comments
+        let dry = try harness.runIris(["mcp", "wrap", "--dry-run", url.path])
+        XCTAssertEqual(dry.code, 0, "dry-run should accept commented file, stderr: \(dry.stderr)")
+
+        // wrap (write): should fail with exit 1 (IrisExitCode.logicError), file unchanged
+        let mtimeBefore =
+            try FileManager.default
+            .attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+        let write = try harness.runIris(["mcp", "wrap", url.path])
+        XCTAssertEqual(write.code, 1, "expected exit 1 for commented file, got \(write.code)")
+        XCTAssertTrue(
+            write.stderr.contains("comments detected"),
+            "expected 'comments detected' in stderr: \(write.stderr)"
+        )
+        let mtimeAfter =
+            try FileManager.default
+            .attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+        XCTAssertEqual(mtimeBefore, mtimeAfter, "file must be unchanged after refusal")
+    }
+
+    func testWrapNormalizesTrailingCommaInWrite() throws {
+        let url = try writeFile(
+            "trailing-comma.json",
+            content: """
+                { "mcpServers": { "foo": { "command": "echo", "args": ["hi"], } } }
+                """
+        )
+
+        let result = try harness.runIris(["mcp", "wrap", url.path])
+        XCTAssertEqual(result.code, 0, "trailing-comma file should wrap cleanly, stderr: \(result.stderr)")
+
+        // Patched output must be strict valid JSON (no trailing comma)
+        let patched = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertNoThrow(
+            try OrderedJSONDocument.parse(patched),
+            "patched output must be strict-mode parseable (no trailing commas): \(patched)"
+        )
     }
 }
