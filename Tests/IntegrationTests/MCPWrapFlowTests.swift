@@ -270,4 +270,15 @@ final class MCPWrapFlowTests: XCTestCase {
             "patched output must be strict-mode parseable (no trailing commas): \(patched)"
         )
     }
+
+    func testWrapWatchAndDryRunAreMutuallyExclusive() throws {
+        let result = try harness.runIris(
+            ["mcp", "wrap", "--watch", "--dry-run", "/tmp/nonexistent.json"]
+        )
+        XCTAssertEqual(result.code, 64)  // usage error
+        XCTAssertTrue(
+            result.stderr.contains("--watch") && result.stderr.contains("--dry-run"),
+            "stderr: \(result.stderr)"
+        )
+    }
 }

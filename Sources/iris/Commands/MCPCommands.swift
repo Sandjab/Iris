@@ -28,9 +28,26 @@ struct MCPCommand: AsyncParsableCommand {
         @Flag(name: .customLong("json"), help: "Emit JSON summary.")
         var json: Bool = false
 
+        @Flag(name: .customLong("watch"), help: "Re-patch on every file edit (single-file, long-running).")
+        var watch: Bool = false
+
+        @Option(name: .customLong("log-level"), help: "Log level for --watch (debug|info|warn|error).")
+        var logLevel: String = "info"
+
         mutating func run() async throws {
             let expanded = (path as NSString).expandingTildeInPath
             let fileURL = URL(fileURLWithPath: expanded)
+
+            if watch && dryRun {
+                FileHandle.standardError.write(
+                    Data("error: --watch and --dry-run are mutually exclusive\n".utf8)
+                )
+                throw ExitCode(64)
+            }
+            if watch {
+                try await runWatch(path: expanded)
+                return
+            }
 
             // Anti-foot-gun: refuse to wrap a backup file
             if fileURL.lastPathComponent.hasSuffix(".iris.bak") {
@@ -178,6 +195,13 @@ struct MCPCommand: AsyncParsableCommand {
             print(original)
             print("--- PATCHED ---")
             print(patched)
+        }
+
+        private func runWatch(path: String) async throws {
+            FileHandle.standardError.write(
+                Data("error: --watch not yet implemented\n".utf8)
+            )
+            throw ExitCode(IrisExitCode.logicError)
         }
     }
 
