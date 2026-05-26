@@ -1,6 +1,8 @@
 import ArgumentParser
+import Crypto
 import Foundation
 import IrisKit
+import Logging
 
 struct MCPCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -198,10 +200,60 @@ struct MCPCommand: AsyncParsableCommand {
         }
 
         private func runWatch(path: String) async throws {
-            FileHandle.standardError.write(
-                Data("error: --watch not yet implemented\n".utf8)
+            let fileURL = URL(fileURLWithPath: path)
+
+            // Anti-foot-gun (same as one-shot)
+            if fileURL.lastPathComponent.hasSuffix(".iris.bak") {
+                FileHandle.standardError.write(
+                    Data("refusing to watch a .iris.bak file: \(path)\n".utf8)
+                )
+                throw ExitCode(IrisExitCode.logicError)
+            }
+
+            // Path must exist + readable at startup (decision §2.3 — fatal at start)
+            guard FileManager.default.isReadableFile(atPath: path) else {
+                FileHandle.standardError.write(
+                    Data("no such file or unreadable: \(path)\n".utf8)
+                )
+                throw ExitCode(IrisExitCode.logicError)
+            }
+
+            // Initial daemon fetch — exit 2 if down (cohérence avec autres sous-commandes)
+            let (brokerListen, caPath) = try await withAdminClient(connection) { client in
+                let cfg = try await client.call(.configGet, returning: Config.self)
+                let ca = try await client.call(.caExportPath, returning: CAExportPathResult.self)
+                return (cfg.broker.listen, ca.path)
+            }
+
+            // Setup logging
+            let logger = Logger(label: "iris.watch")
+
+            // State
+            var lastWrittenHash: Data? = nil
+
+            // Initial cycle (Task 14 implements the actual cycle body)
+            try await runOneCycle(
+                fileURL: fileURL,
+                brokerListen: brokerListen,
+                caPath: caPath,
+                lastWrittenHash: &lastWrittenHash,
+                logger: logger
             )
-            throw ExitCode(IrisExitCode.logicError)
+
+            logger.info("started, watching \(path)")
+
+            // Watch loop (Task 14 wires FileWatcher in)
+            // For now, exit after the initial cycle so the missing-path test passes.
+        }
+
+        private func runOneCycle(
+            fileURL: URL,
+            brokerListen: String,
+            caPath: String,
+            lastWrittenHash: inout Data?,
+            logger: Logger
+        ) async throws {
+            // Implemented in Task 14.
         }
     }
 

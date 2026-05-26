@@ -281,4 +281,20 @@ final class MCPWrapFlowTests: XCTestCase {
             "stderr: \(result.stderr)"
         )
     }
+
+    func testWatchExitsOnMissingPathAtStart() throws {
+        let nope = "/tmp/iris-watch-nope-\(UUID().uuidString).json"
+        let result = try harness.runIris(
+            ["mcp", "wrap", "--watch", nope], timeout: 5.0
+        )
+        // IrisExitCode.logicError = 1 (per codebase). Spec mentioned 65 but
+        // the real exit code constant is 1; tests align with implementation.
+        XCTAssertEqual(result.code, 1)
+        XCTAssertTrue(
+            result.stderr.lowercased().contains("no such file")
+                || result.stderr.contains(nope)
+                || result.stderr.lowercased().contains("unreadable"),
+            "stderr: \(result.stderr)"
+        )
+    }
 }
