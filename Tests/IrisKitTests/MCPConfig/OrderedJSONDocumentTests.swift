@@ -269,6 +269,32 @@ final class OrderedJSONDocumentTests: XCTestCase {
         }
     }
 
+    func testJSONCAcceptsTrailingCommaInArray() throws {
+        let doc = try OrderedJSONDocument.parse("[1, 2, 3,]", options: .jsonc)
+        XCTAssertEqual(doc.root, .array([.integer(1), .integer(2), .integer(3)]))
+    }
+
+    func testJSONCAcceptsTrailingCommaInObject() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "{\"a\": 1, \"b\": 2,}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .object([("a", .integer(1)), ("b", .integer(2))]))
+    }
+
+    func testJSONCAcceptsTrailingCommaWithCommentBefore() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "[1, 2, /* end */]",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .array([.integer(1), .integer(2)]))
+    }
+
+    func testStrictStillRejectsTrailingCommaRegression() throws {
+        XCTAssertThrowsError(try OrderedJSONDocument.parse("[1,]"))
+        XCTAssertThrowsError(try OrderedJSONDocument.parse("{\"a\":1,}"))
+    }
+
     // MARK: - Helpers
 
     private func assertRoundTrip(_ input: String, file: StaticString = #file, line: UInt = #line) throws {

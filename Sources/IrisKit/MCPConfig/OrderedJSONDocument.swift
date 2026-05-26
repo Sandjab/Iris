@@ -300,6 +300,10 @@ private struct Parser {
                 // Check for trailing comma
                 try skipWhitespaceAndComments()
                 if let after = peek(), after == "}" {
+                    if options.mode == .jsonc {
+                        advance()
+                        return .object(pairs)
+                    }
                     throw OrderedJSONError.trailingCommaNotAllowed(position: position)
                 }
             } else {
@@ -338,6 +342,10 @@ private struct Parser {
                 // Check for trailing comma
                 try skipWhitespaceAndComments()
                 if let after = peek(), after == "]" {
+                    if options.mode == .jsonc {
+                        advance()
+                        return .array(items)
+                    }
                     throw OrderedJSONError.trailingCommaNotAllowed(position: position)
                 }
             } else {
