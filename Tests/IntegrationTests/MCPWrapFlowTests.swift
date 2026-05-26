@@ -465,4 +465,50 @@ final class MCPWrapFlowTests: XCTestCase {
         let code = bg.waitForExit(timeout: 3.0)
         XCTAssertEqual(code, 0)
     }
+
+    func testWatchSurvivesDaemonRestart() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        try "{ \"mcpServers\": {} }".write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+        Thread.sleep(forTimeInterval: 1.5)
+
+        // Kill the daemon mid-watch
+        harness.stopDaemon()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // User edit during daemon down — should log warn, not exit
+        let edited = """
+            { "mcpServers": { "foo": { "command": "echo", "args": [] } } }
+            """
+        try edited.write(to: tmp, atomically: true, encoding: .utf8)
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // Restart the daemon
+        try harness.restartDaemon()
+        // Trigger another edit
+        try edited.write(to: tmp, atomically: true, encoding: .utf8)
+        Thread.sleep(forTimeInterval: 4.0)
+
+        // File should now be patched
+        let patched = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertTrue(
+            patched.contains("HTTPS_PROXY"),
+            "patched content after daemon restart : \(patched)"
+        )
+
+        // Process should still be alive
+        XCTAssertTrue(bg.process.isRunning)
+    }
 }

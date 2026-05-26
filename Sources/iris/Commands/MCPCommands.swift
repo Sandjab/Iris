@@ -216,23 +216,20 @@ struct MCPCommand: AsyncParsableCommand {
                 throw ExitCode(IrisExitCode.logicError)
             }
 
-            let (brokerListen, caPath) = try await withAdminClient(connection) { client in
-                let cfg = try await client.call(.configGet, returning: Config.self)
-                let ca = try await client.call(.caExportPath, returning: CAExportPathResult.self)
-                return (cfg.broker.listen, ca.path)
-            }
-
             let logger = Logger(label: "iris.watch")
             var lastWrittenHash: Data? = nil
 
-            // Initial cycle (exits via thrown ExitCode if catastrophic)
-            try await runOneCycle(
-                fileURL: fileURL,
-                brokerListen: brokerListen,
-                caPath: caPath,
-                lastWrittenHash: &lastWrittenHash,
-                logger: logger
-            )
+            // Initial cycle — exit 2 if daemon down (consistency with other subcommands)
+            do {
+                try await runOneCycle(
+                    fileURL: fileURL,
+                    lastWrittenHash: &lastWrittenHash,
+                    logger: logger
+                )
+            } catch let error as DaemonUnreachable {
+                FileHandle.standardError.write(Data("daemon unreachable: \(error)\n".utf8))
+                throw ExitCode(IrisExitCode.daemonUnreachable)
+            }
 
             logger.info("started, watching \(path)")
 
@@ -241,16 +238,16 @@ struct MCPCommand: AsyncParsableCommand {
             let signalToken = SignalHandling.onSIGINTOnce { watcher.stop() }
             defer { withExtendedLifetime(signalToken) {} }
 
-            // Watch loop
+            // Watch loop — survive daemon restarts: log warn and retry on next event
             for await _ in watcher.events() {
                 do {
                     try await runOneCycle(
                         fileURL: fileURL,
-                        brokerListen: brokerListen,
-                        caPath: caPath,
                         lastWrittenHash: &lastWrittenHash,
                         logger: logger
                     )
+                } catch let error as DaemonUnreachable {
+                    logger.warning("daemon unreachable, will retry on next event: \(error)")
                 } catch {
                     logger.warning("cycle failed: \(error)")
                 }
@@ -261,11 +258,16 @@ struct MCPCommand: AsyncParsableCommand {
 
         private func runOneCycle(
             fileURL: URL,
-            brokerListen: String,
-            caPath: String,
             lastWrittenHash: inout Data?,
             logger: Logger
         ) async throws {
+            // 0. Fetch daemon config — throws DaemonUnreachable if down
+            let (brokerListen, caPath) = try await withAdminClientOrThrow(connection) { client in
+                let cfg = try await client.call(.configGet, returning: Config.self)
+                let ca = try await client.call(.caExportPath, returning: CAExportPathResult.self)
+                return (cfg.broker.listen, ca.path)
+            }
+
             // 1. Read file
             let rawData: Data
             do {

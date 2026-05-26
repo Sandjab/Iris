@@ -81,6 +81,31 @@ final class CLIDaemonHarness {
         try? FileManager.default.removeItem(at: tmpDir)
     }
 
+    /// Test helper: terminate the ephemeral daemon to simulate a crash.
+    /// Does NOT delete tmpDir so the socket path is preserved for `restartDaemon()`.
+    /// Uses SIGTERM with a SIGKILL fallback so CI never hangs.
+    func stopDaemon() {
+        guard let p = process else { return }
+        p.terminate()
+        let limit = Date().addingTimeInterval(5.0)
+        while p.isRunning && Date() < limit {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if p.isRunning {
+            kill(p.processIdentifier, SIGKILL)
+        }
+        p.waitUntilExit()
+        process = nil
+        // Remove the stale socket so the daemon can rebind on restart.
+        try? FileManager.default.removeItem(atPath: adminSocket)
+    }
+
+    /// Test helper: relaunch the daemon on the same admin socket path.
+    /// The socket path doesn't move because it was computed in `init` and stored.
+    func restartDaemon() throws {
+        try start()
+    }
+
     // MARK: - Socket readiness
 
     private func waitForSocketReady(timeout: TimeInterval) throws {
