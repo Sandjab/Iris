@@ -365,4 +365,104 @@ final class MCPWrapFlowTests: XCTestCase {
 
         XCTAssertEqual(mtimeAfterPatch, mtimeNow, "watcher must not re-patch its own write")
     }
+
+    // MARK: - Watch loop reaction tests (Task 15)
+
+    func testWatchReactsToUserEdit() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        // Start with a compliant file so the initial cycle is a no-op
+        let initial = """
+            { "mcpServers": {} }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+        Thread.sleep(forTimeInterval: 1.5)
+
+        // User adds a server
+        let edited = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try edited.write(to: tmp, atomically: true, encoding: .utf8)
+        Thread.sleep(forTimeInterval: 2.5)
+
+        let patched = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertTrue(
+            patched.contains("HTTPS_PROXY"),
+            "expected patcher to add env vars after user edit"
+        )
+    }
+
+    func testWatchRefusesCommentedFileButKeepsWatching() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let initial = """
+            // user note
+            { "mcpServers": {} }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        Thread.sleep(forTimeInterval: 2.0)
+        // File should be unchanged
+        let after = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertEqual(initial, after)
+        bg.sendSIGINT()
+        let code = bg.waitForExit(timeout: 3.0)
+        let stderr = bg.readAllStderr()
+        XCTAssertEqual(code, 0)
+        XCTAssertTrue(stderr.contains("comments detected"), "stderr: \(stderr)")
+    }
+
+    func testWatchNormalizesTrailingComma() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        let initial = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"], }, } }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+        Thread.sleep(forTimeInterval: 2.0)
+
+        let patched = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertNoThrow(
+            try OrderedJSONDocument.parse(patched),
+            "patched output should be strict valid JSON"
+        )
+    }
+
+    func testWatchExitsCleanOnSIGINT() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try "{}".write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        Thread.sleep(forTimeInterval: 1.0)
+        bg.sendSIGINT()
+        let code = bg.waitForExit(timeout: 3.0)
+        XCTAssertEqual(code, 0)
+    }
 }
