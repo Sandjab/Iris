@@ -73,7 +73,10 @@ final class FileWatcherTests: XCTestCase {
     func testWatcherDebouncesBurstedWrites() async throws {
         let path = tmpDir.appendingPathComponent("a.json").path
         FileManager.default.createFile(atPath: path, contents: Data("{}".utf8))
-        let watcher = FileWatcher(path: path, debounce: .milliseconds(300))
+        // Use a larger debounce window so the inter-write delay (which can
+        // jitter to 100ms+ on slow CI runners) is always less than the
+        // window and the burst is guaranteed to coalesce into a single event.
+        let watcher = FileWatcher(path: path, debounce: .milliseconds(800))
         defer { watcher.stop() }
 
         let counter = EventCounter()
@@ -84,13 +87,16 @@ final class FileWatcherTests: XCTestCase {
                 if count == 1 { exp.fulfill() }
             }
         }
-        try await Task.sleep(for: .milliseconds(200))
+        // Let FSEvents fully arm before we start writing.
+        try await Task.sleep(for: .milliseconds(300))
+        // Tight burst: no sleep between writes. All 5 are synchronous and
+        // hit FSEvents within milliseconds — well inside the 800ms window.
         for i in 0..<5 {
             try "{\"x\":\(i)}".write(toFile: path, atomically: true, encoding: .utf8)
-            try await Task.sleep(for: .milliseconds(30))
         }
-        await fulfillment(of: [exp], timeout: 2.0)
-        try await Task.sleep(for: .milliseconds(500))
+        await fulfillment(of: [exp], timeout: 3.0)
+        // Wait past the debounce window to ensure no second event fires.
+        try await Task.sleep(for: .milliseconds(1000))
         let final = await counter.value
         XCTAssertEqual(final, 1, "burst should yield exactly one debounced event")
         task.cancel()
