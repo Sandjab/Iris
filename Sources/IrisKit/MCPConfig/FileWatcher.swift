@@ -18,11 +18,28 @@ public final class FileWatcher: @unchecked Sendable {
     private var stopped: Bool = false
 
     public init(path: String, debounce: Duration = .milliseconds(500)) {
-        self.path = path
-        self.parentDir = (path as NSString).deletingLastPathComponent
-        self.filename = (path as NSString).lastPathComponent
+        // Resolve to an absolute path so FSEventStreamCreate gets a valid
+        // directory even if the caller passed a relative path (where
+        // NSString.deletingLastPathComponent would return "").
+        let absolutePath = URL(fileURLWithPath: path).path
+        self.path = absolutePath
+        self.parentDir = (absolutePath as NSString).deletingLastPathComponent
+        self.filename = (absolutePath as NSString).lastPathComponent
         self.debounce = debounce
         self.queue = DispatchQueue(label: "io.iris.filewatcher.\(UUID().uuidString)")
+    }
+
+    deinit {
+        // Defensive cleanup if the caller forgets to call stop() before
+        // releasing the watcher. FSEventStreamStop/Invalidate/Release are
+        // documented as thread-safe. After Stop returns no further events
+        // will be dispatched, so the callback cannot use-after-free `self`.
+        if let s = stream {
+            FSEventStreamStop(s)
+            FSEventStreamInvalidate(s)
+            FSEventStreamRelease(s)
+        }
+        debounceTask?.cancel()
     }
 
     /// Returns an AsyncStream that yields `()` per debounced burst of events
@@ -91,10 +108,21 @@ public final class FileWatcher: @unchecked Sendable {
                 0.0,
                 flags
             )
-        else { return }
+        else {
+            // FSEventStreamCreate failed (rare — usually invalid path or OOM).
+            // Finish the continuation so the subscriber doesn't hang forever.
+            continuation?.finish()
+            continuation = nil
+            return
+        }
         FSEventStreamSetDispatchQueue(s, queue)
-        FSEventStreamStart(s)
-        self.stream = s
+        if FSEventStreamStart(s) {
+            self.stream = s
+        } else {
+            FSEventStreamRelease(s)
+            continuation?.finish()
+            continuation = nil
+        }
     }
 
     /// Called from FSEvents on `queue`. Filters to target filename and

@@ -51,6 +51,10 @@ final class FileWatcherTests: XCTestCase {
         let other = tmpDir.appendingPathComponent("b.json").path
         FileManager.default.createFile(atPath: target, contents: Data("{}".utf8))
         FileManager.default.createFile(atPath: other, contents: Data("{}".utf8))
+        // Let FSEvents drain the creation events BEFORE we arm the watcher.
+        // Without this, kFSEventStreamEventIdSinceNow can race with the
+        // kernel-queued create event for a.json on slower runners (CI flake).
+        try await Task.sleep(for: .milliseconds(500))
         let watcher = FileWatcher(path: target, debounce: .milliseconds(50))
         defer { watcher.stop() }
 
@@ -58,9 +62,9 @@ final class FileWatcherTests: XCTestCase {
         let task = Task {
             for await _ in watcher.events() { _ = await counter.increment() }
         }
-        try await Task.sleep(for: .milliseconds(150))
+        try await Task.sleep(for: .milliseconds(300))
         try "{\"y\":2}".write(toFile: other, atomically: true, encoding: .utf8)
-        try await Task.sleep(for: .milliseconds(400))
+        try await Task.sleep(for: .milliseconds(500))
         let count = await counter.value
         XCTAssertEqual(count, 0)
         task.cancel()
