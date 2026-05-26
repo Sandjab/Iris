@@ -182,6 +182,31 @@ final class OrderedJSONDocumentTests: XCTestCase {
         XCTAssertLessThan(out.range(of: "\"command\"")!.lowerBound, out.range(of: "\"args\"")!.lowerBound)
     }
 
+    // MARK: - JSONC mode
+
+    func testCommentPositionsEmptyOnStrictParse() throws {
+        let doc = try OrderedJSONDocument.parse("{\"a\":1}")
+        XCTAssertTrue(doc.commentPositions.isEmpty)
+    }
+
+    func testParseOptionsStrictIsDefault() throws {
+        // Default options = strict. Comment must still throw.
+        XCTAssertThrowsError(try OrderedJSONDocument.parse("// x\n{}")) { error in
+            guard case OrderedJSONError.commentNotAllowed = error else {
+                return XCTFail("expected commentNotAllowed, got \(error)")
+            }
+        }
+    }
+
+    func testParseOptionsJSONCAcceptsLineComment() throws {
+        let doc = try OrderedJSONDocument.parse("// header\n{}", options: .jsonc)
+        XCTAssertEqual(doc.root, .object([]))
+        XCTAssertEqual(doc.commentPositions.count, 1)
+        XCTAssertEqual(doc.commentPositions[0].line, 1)
+        XCTAssertEqual(doc.commentPositions[0].column, 1)
+        XCTAssertEqual(doc.commentPositions[0].kind, .lineComment)
+    }
+
     // MARK: - Helpers
 
     private func assertRoundTrip(_ input: String, file: StaticString = #file, line: UInt = #line) throws {

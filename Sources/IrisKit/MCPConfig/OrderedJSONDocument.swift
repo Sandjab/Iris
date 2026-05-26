@@ -6,8 +6,42 @@ import Foundation
 /// input.
 public struct OrderedJSONDocument: Sendable {
     public private(set) var root: OrderedJSONValue
+    public private(set) var commentPositions: [CommentPosition]
 
-    public init(root: OrderedJSONValue) { self.root = root }
+    public init(root: OrderedJSONValue, commentPositions: [CommentPosition] = []) {
+        self.root = root
+        self.commentPositions = commentPositions
+    }
+}
+
+public struct CommentPosition: Sendable, Equatable {
+    public let line: Int
+    public let column: Int
+    public let kind: Kind
+    public enum Kind: Sendable, Equatable { case lineComment, blockComment }
+
+    public init(line: Int, column: Int, kind: Kind) {
+        self.line = line
+        self.column = column
+        self.kind = kind
+    }
+}
+
+extension OrderedJSONDocument {
+    public struct ParseOptions: Sendable {
+        public var mode: Mode
+        public var recordCommentPositions: Bool
+
+        public enum Mode: Sendable, Equatable { case strict, jsonc }
+
+        public init(mode: Mode, recordCommentPositions: Bool) {
+            self.mode = mode
+            self.recordCommentPositions = recordCommentPositions
+        }
+
+        public static let strict = ParseOptions(mode: .strict, recordCommentPositions: false)
+        public static let jsonc = ParseOptions(mode: .jsonc, recordCommentPositions: true)
+    }
 }
 
 // MARK: - Value type
@@ -50,6 +84,7 @@ public enum OrderedJSONError: Error, LocalizedError, Equatable {
     case duplicateKey(String, position: Int)
     case commentNotAllowed(position: Int)
     case trailingCommaNotAllowed(position: Int)
+    case unterminatedBlockComment(position: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -67,6 +102,8 @@ public enum OrderedJSONError: Error, LocalizedError, Equatable {
             return "Comments not allowed (position \(p)) — JSONC not supported in Phase 5.3"
         case .trailingCommaNotAllowed(let p):
             return "Trailing comma not allowed (position \(p))"
+        case .unterminatedBlockComment(let p):
+            return "Unterminated /* block comment (position \(p))"
         }
     }
 }
@@ -75,24 +112,45 @@ public enum OrderedJSONError: Error, LocalizedError, Equatable {
 
 extension OrderedJSONDocument {
     public static func parse(_ input: String) throws -> OrderedJSONDocument {
-        var parser = Parser(source: Array(input.unicodeScalars))
-        parser.skipWhitespace()
-        guard !parser.isAtEnd else {
-            throw OrderedJSONError.unexpectedEnd
-        }
+        try parse(input, options: .strict)
+    }
+
+    public static func parse(
+        _ input: String,
+        options: ParseOptions = .strict
+    ) throws -> OrderedJSONDocument {
+        // Phase 5.3.1a Task 1 stub: only strict mode is wired here. JSONC
+        // behavior (comments, trailing commas) is implemented in subsequent
+        // tasks. This stub exists to make ParseOptions discoverable.
+        var parser = Parser(source: Array(input.unicodeScalars), options: options)
+        parser.skipWhitespaceAndComments()
+        guard !parser.isAtEnd else { throw OrderedJSONError.unexpectedEnd }
         let value = try parser.parseValue()
-        parser.skipWhitespace()
+        parser.skipWhitespaceAndComments()
         if !parser.isAtEnd {
             let c = parser.peek()!
             throw OrderedJSONError.unexpectedCharacter(Character(c), position: parser.position)
         }
-        return OrderedJSONDocument(root: value)
+        return OrderedJSONDocument(
+            root: value,
+            commentPositions: parser.recordedComments
+        )
     }
 }
 
 private struct Parser {
     let source: [Unicode.Scalar]
+    let options: OrderedJSONDocument.ParseOptions
     var position: Int = 0
+    var recordedComments: [CommentPosition] = []
+
+    init(
+        source: [Unicode.Scalar],
+        options: OrderedJSONDocument.ParseOptions = .strict
+    ) {
+        self.source = source
+        self.options = options
+    }
 
     var isAtEnd: Bool { position >= source.count }
 
@@ -111,6 +169,12 @@ private struct Parser {
         while let c = peek(), c == " " || c == "\t" || c == "\n" || c == "\r" {
             position += 1
         }
+    }
+
+    mutating func skipWhitespaceAndComments() {
+        // Phase 5.3.1a Task 1: behaves identically to skipWhitespace() until
+        // Tasks 2-3 add comment handling.
+        skipWhitespace()
     }
 
     mutating func parseValue() throws -> OrderedJSONValue {
