@@ -119,9 +119,6 @@ extension OrderedJSONDocument {
         _ input: String,
         options: ParseOptions = .strict
     ) throws -> OrderedJSONDocument {
-        // Phase 5.3.1a Task 1 stub: only strict mode is wired here. JSONC
-        // behavior (comments, trailing commas) is implemented in subsequent
-        // tasks. This stub exists to make ParseOptions discoverable.
         var parser = Parser(source: Array(input.unicodeScalars), options: options)
         parser.skipWhitespaceAndComments()
         guard !parser.isAtEnd else { throw OrderedJSONError.unexpectedEnd }
