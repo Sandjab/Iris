@@ -172,13 +172,49 @@ private struct Parser {
     }
 
     mutating func skipWhitespaceAndComments() {
-        // Phase 5.3.1a Task 1: behaves identically to skipWhitespace() until
-        // Tasks 2-3 add comment handling.
-        skipWhitespace()
+        while true {
+            skipWhitespace()
+            guard options.mode == .jsonc else { return }
+            guard let c = peek(), c == "/" else { return }
+            // Lookahead at position+1 for // (line comment)
+            guard position + 1 < source.count else { return }
+            let next = source[position + 1]
+            if next == "/" {
+                let (line, column) = lineAndColumn(at: position)
+                if options.recordCommentPositions {
+                    recordedComments.append(.init(line: line, column: column, kind: .lineComment))
+                }
+                // Consume "//"
+                position += 2
+                // Consume until \n or EOF (do not consume the \n itself)
+                while let c = peek(), c != "\n" { advance() }
+                continue
+            }
+            return  // not a comment start — let caller handle '/' as error
+        }
+    }
+
+    /// Compute 1-indexed (line, column) for a position offset in `source`.
+    /// Lines split on '\n'.
+    func lineAndColumn(at offset: Int) -> (line: Int, column: Int) {
+        var line = 1
+        var column = 1
+        var i = 0
+        while i < offset && i < source.count {
+            let c = source[i]
+            if c == "\n" {
+                line += 1
+                column = 1
+            } else {
+                column += 1
+            }
+            i += 1
+        }
+        return (line, column)
     }
 
     mutating func parseValue() throws -> OrderedJSONValue {
-        skipWhitespace()
+        skipWhitespaceAndComments()
         guard let c = peek() else { throw OrderedJSONError.unexpectedEnd }
         switch c {
         case "{": return try parseObject()
@@ -198,7 +234,7 @@ private struct Parser {
 
     mutating func parseObject() throws -> OrderedJSONValue {
         advance()  // consume '{'
-        skipWhitespace()
+        skipWhitespaceAndComments()
 
         var pairs: [(String, OrderedJSONValue)] = []
         var seenKeys = Set<String>()
@@ -210,7 +246,7 @@ private struct Parser {
         }
 
         while true {
-            skipWhitespace()
+            skipWhitespaceAndComments()
             guard peek() != nil else { throw OrderedJSONError.unexpectedEnd }
 
             // Parse key
@@ -226,7 +262,7 @@ private struct Parser {
             seenKeys.insert(key)
 
             // Colon
-            skipWhitespace()
+            skipWhitespaceAndComments()
             guard let colon = peek(), colon == ":" else {
                 throw OrderedJSONError.unexpectedCharacter(
                     peek().map { Character($0) } ?? "\0",
@@ -239,7 +275,7 @@ private struct Parser {
             let val = try parseValue()
             pairs.append((key, val))
 
-            skipWhitespace()
+            skipWhitespaceAndComments()
             guard let next = peek() else { throw OrderedJSONError.unexpectedEnd }
             if next == "}" {
                 advance()
@@ -247,13 +283,9 @@ private struct Parser {
             } else if next == "," {
                 advance()
                 // Check for trailing comma
-                skipWhitespace()
+                skipWhitespaceAndComments()
                 if let after = peek(), after == "}" {
                     throw OrderedJSONError.trailingCommaNotAllowed(position: position)
-                }
-                // Check for comment after comma
-                if let after = peek(), after == "/" {
-                    throw OrderedJSONError.commentNotAllowed(position: position)
                 }
             } else {
                 throw OrderedJSONError.unexpectedCharacter(Character(next), position: position)
@@ -267,7 +299,7 @@ private struct Parser {
 
     mutating func parseArray() throws -> OrderedJSONValue {
         advance()  // consume '['
-        skipWhitespace()
+        skipWhitespaceAndComments()
 
         var items: [OrderedJSONValue] = []
 
@@ -281,7 +313,7 @@ private struct Parser {
             let item = try parseValue()
             items.append(item)
 
-            skipWhitespace()
+            skipWhitespaceAndComments()
             guard let next = peek() else { throw OrderedJSONError.unexpectedEnd }
             if next == "]" {
                 advance()
@@ -289,13 +321,9 @@ private struct Parser {
             } else if next == "," {
                 advance()
                 // Check for trailing comma
-                skipWhitespace()
+                skipWhitespaceAndComments()
                 if let after = peek(), after == "]" {
                     throw OrderedJSONError.trailingCommaNotAllowed(position: position)
-                }
-                // Check for comment after comma
-                if let after = peek(), after == "/" {
-                    throw OrderedJSONError.commentNotAllowed(position: position)
                 }
             } else {
                 throw OrderedJSONError.unexpectedCharacter(Character(next), position: position)

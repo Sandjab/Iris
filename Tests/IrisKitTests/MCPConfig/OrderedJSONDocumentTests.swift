@@ -199,20 +199,34 @@ final class OrderedJSONDocumentTests: XCTestCase {
     }
 
     func testParseOptionsJSONCAcceptsLineComment() throws {
-        // Phase 5.3.1a Task 1 stub: line-comment parsing wired in Task 2.
-        // Remove XCTExpectFailure wrap once Task 2 lands.
-        XCTExpectFailure("JSONC line-comment parsing not yet implemented — Task 2") {
-            do {
-                let doc = try OrderedJSONDocument.parse("// header\n{}", options: .jsonc)
-                XCTAssertEqual(doc.root, .object([]))
-                XCTAssertEqual(doc.commentPositions.count, 1)
-                XCTAssertEqual(doc.commentPositions[0].line, 1)
-                XCTAssertEqual(doc.commentPositions[0].column, 1)
-                XCTAssertEqual(doc.commentPositions[0].kind, .lineComment)
-            } catch {
-                XCTFail("threw: \(error)")
-            }
-        }
+        let doc = try OrderedJSONDocument.parse("// header\n{}", options: .jsonc)
+        XCTAssertEqual(doc.root, .object([]))
+        XCTAssertEqual(doc.commentPositions.count, 1)
+        XCTAssertEqual(doc.commentPositions[0].line, 1)
+        XCTAssertEqual(doc.commentPositions[0].column, 1)
+        XCTAssertEqual(doc.commentPositions[0].kind, .lineComment)
+    }
+
+    func testJSONCAcceptsLineCommentBetweenTokens() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "{ // foo\n  \"a\": 1 // trailing\n}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .object([("a", .integer(1))]))
+        XCTAssertEqual(doc.commentPositions.count, 2)
+        XCTAssertEqual(doc.commentPositions[0].kind, .lineComment)
+        XCTAssertEqual(doc.commentPositions[0].line, 1)
+        XCTAssertEqual(doc.commentPositions[1].line, 2)
+    }
+
+    func testJSONCMultilineCommentPositionsAreCorrect() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "\n\n  // line 3 col 3\n{}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.commentPositions.count, 1)
+        XCTAssertEqual(doc.commentPositions[0].line, 3)
+        XCTAssertEqual(doc.commentPositions[0].column, 3)
     }
 
     // MARK: - Helpers
