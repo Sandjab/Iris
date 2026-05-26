@@ -229,6 +229,46 @@ final class OrderedJSONDocumentTests: XCTestCase {
         XCTAssertEqual(doc.commentPositions[0].column, 3)
     }
 
+    func testJSONCAcceptsBlockComment() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "/* header */\n{\"a\": 1}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .object([("a", .integer(1))]))
+        XCTAssertEqual(doc.commentPositions.count, 1)
+        XCTAssertEqual(doc.commentPositions[0].kind, .blockComment)
+        XCTAssertEqual(doc.commentPositions[0].line, 1)
+    }
+
+    func testJSONCBlockCommentBetweenKeyAndValue() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "{\"a\":/* inline */1}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .object([("a", .integer(1))]))
+        XCTAssertEqual(doc.commentPositions.count, 1)
+        XCTAssertEqual(doc.commentPositions[0].kind, .blockComment)
+    }
+
+    func testJSONCMultilineBlockComment() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "/* line 1\nline 2\nline 3 */\n{}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .object([]))
+        XCTAssertEqual(doc.commentPositions.count, 1)
+    }
+
+    func testJSONCUnterminatedBlockCommentThrows() throws {
+        XCTAssertThrowsError(
+            try OrderedJSONDocument.parse("/* unterminated", options: .jsonc)
+        ) { error in
+            guard case OrderedJSONError.unterminatedBlockComment = error else {
+                return XCTFail("expected unterminatedBlockComment, got \(error)")
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func assertRoundTrip(_ input: String, file: StaticString = #file, line: UInt = #line) throws {
