@@ -76,7 +76,7 @@ struct MCPCommand: AsyncParsableCommand {
                 let first = original.commentPositions[0]
                 FileHandle.standardError.write(
                     Data(
-                        "\(expanded): comments detected at L\(first.line):\(first.column) — retire-les manuellement ou utilise --dry-run pour voir le diff\n"
+                        "\(expanded): comments detected at L\(first.line):\(first.column) — remove them manually or use --dry-run to see the diff\n"
                             .utf8
                     )
                 )

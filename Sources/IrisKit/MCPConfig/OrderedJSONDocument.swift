@@ -141,6 +141,12 @@ private struct Parser {
     var position: Int = 0
     var recordedComments: [CommentPosition] = []
 
+    // Cache for lineAndColumn(at:) — sequential parsing means subsequent calls
+    // can resume from the last computed offset (O(1) amortized vs O(N) naive).
+    var lastLineColumnOffset: Int = 0
+    var lastLine: Int = 1
+    var lastColumn: Int = 1
+
     init(
         source: [Unicode.Scalar],
         options: OrderedJSONDocument.ParseOptions = .strict
@@ -171,8 +177,10 @@ private struct Parser {
     mutating func skipWhitespaceAndComments() throws {
         while true {
             skipWhitespace()
-            guard options.mode == .jsonc else { return }
             guard let c = peek(), c == "/" else { return }
+            guard options.mode == .jsonc else {
+                throw OrderedJSONError.commentNotAllowed(position: position)
+            }
             guard position + 1 < source.count else { return }
             let next = source[position + 1]
             if next == "/" {
@@ -210,11 +218,21 @@ private struct Parser {
     }
 
     /// Compute 1-indexed (line, column) for a position offset in `source`.
-    /// Lines split on '\n'.
-    func lineAndColumn(at offset: Int) -> (line: Int, column: Int) {
-        var line = 1
-        var column = 1
-        var i = 0
+    /// Lines split on '\n'. Caches `(lastLineColumnOffset, lastLine, lastColumn)`
+    /// so sequential calls along the parser cursor are O(1) amortized rather
+    /// than O(N) per call (avoids O(N²) blowup on large multi-comment inputs).
+    mutating func lineAndColumn(at offset: Int) -> (line: Int, column: Int) {
+        // If the requested offset is behind the cache, fall back to a full
+        // recompute from index 0. In practice this never happens during normal
+        // forward parsing — callers only ever query the current position.
+        var line = lastLine
+        var column = lastColumn
+        var i = lastLineColumnOffset
+        if offset < lastLineColumnOffset {
+            line = 1
+            column = 1
+            i = 0
+        }
         while i < offset && i < source.count {
             let c = source[i]
             if c == "\n" {
@@ -225,6 +243,9 @@ private struct Parser {
             }
             i += 1
         }
+        lastLineColumnOffset = i
+        lastLine = line
+        lastColumn = column
         return (line, column)
     }
 
