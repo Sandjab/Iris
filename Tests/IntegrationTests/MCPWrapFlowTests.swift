@@ -511,4 +511,106 @@ final class MCPWrapFlowTests: XCTestCase {
         // Process should still be alive
         XCTAssertTrue(bg.process.isRunning)
     }
+
+    // MARK: - Invariants (Task 17)
+
+    func testWatchLogsContainNoSecretLikeStrings() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        let initial = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        Thread.sleep(forTimeInterval: 2.0)
+        bg.sendSIGINT()
+        _ = bg.waitForExit(timeout: 2.0)
+        let stderr = bg.readAllStderr()
+
+        // No string of 20+ token-like chars. Filter out ISO timestamps and
+        // file paths (UUID component contains long hex spans).
+        let regex = try NSRegularExpression(pattern: "[A-Za-z0-9_-]{20,}")
+        let matches = regex.matches(
+            in: stderr,
+            range: NSRange(stderr.startIndex..., in: stderr)
+        )
+        // Build a set of known-safe substrings derived from the tmp path.
+        let tmpPathComponents = Set(tmp.path.split(separator: "/").map(String.init))
+        let suspicious = matches.compactMap { m -> String? in
+            guard let range = Range(m.range, in: stderr) else { return nil }
+            let s = String(stderr[range])
+            // ISO 8601 timestamp like 2026-05-27T18:42:13Z — has '-' and 'T'
+            if s.contains("-") && s.contains("T") { return nil }
+            // Any token that is a path component of our tmp file (UUID, folder hash, etc.)
+            if tmpPathComponents.contains(s) { return nil }
+            // Allow iris-watch-<UUID> filename tokens (contain our UUID prefix)
+            if s.hasPrefix("iris-watch-") { return nil }
+            return s
+        }
+        XCTAssertTrue(
+            suspicious.isEmpty,
+            "suspicious token-like strings in logs: \(suspicious)"
+        )
+    }
+
+    func testWatchIdempotenceAfterCommentRemoval() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        let withComment = """
+            // user comment
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try withComment.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+        Thread.sleep(forTimeInterval: 1.5)
+        // File should be unchanged (commented)
+        let stillCommented = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertEqual(withComment, stillCommented)
+
+        // User removes the comment
+        let cleaned = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try cleaned.write(to: tmp, atomically: true, encoding: .utf8)
+        Thread.sleep(forTimeInterval: 2.5)
+
+        let patched = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertTrue(
+            patched.contains("HTTPS_PROXY"),
+            "should be patched after comment removal"
+        )
+
+        let mtimeAfterPatch =
+            try FileManager.default
+            .attributesOfItem(atPath: tmp.path)[.modificationDate] as? Date
+
+        // No further write
+        Thread.sleep(forTimeInterval: 2.0)
+        let mtimeFinal =
+            try FileManager.default
+            .attributesOfItem(atPath: tmp.path)[.modificationDate] as? Date
+        XCTAssertEqual(
+            mtimeAfterPatch,
+            mtimeFinal,
+            "hash exclusion must hold post-patch"
+        )
+    }
 }
