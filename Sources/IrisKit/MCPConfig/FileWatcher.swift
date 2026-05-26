@@ -61,6 +61,68 @@ public final class FileWatcher: @unchecked Sendable {
     // MARK: - Private — must be called on `queue`
 
     private func startStreamLocked() {
-        // Implementation in Task 9.
+        guard !stopped, stream == nil else { return }
+        let info = Unmanaged.passUnretained(self).toOpaque()
+        var context = FSEventStreamContext(
+            version: 0,
+            info: info,
+            retain: nil,
+            release: nil,
+            copyDescription: nil
+        )
+        let flags: FSEventStreamCreateFlags =
+            UInt32(kFSEventStreamCreateFlagFileEvents)
+            | UInt32(kFSEventStreamCreateFlagNoDefer)
+            | UInt32(kFSEventStreamCreateFlagUseCFTypes)
+        let paths = [parentDir] as CFArray
+        guard
+            let s = FSEventStreamCreate(
+                kCFAllocatorDefault,
+                { (_, info, _, paths, _, _) in
+                    guard let info = info else { return }
+                    let watcher = Unmanaged<FileWatcher>.fromOpaque(info).takeUnretainedValue()
+                    let cfPaths = unsafeBitCast(paths, to: CFArray.self)
+                    guard let pathsArr = cfPaths as? [String] else { return }
+                    watcher.handleEvents(paths: pathsArr)
+                },
+                &context,
+                paths,
+                FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+                0.0,
+                flags
+            )
+        else { return }
+        FSEventStreamSetDispatchQueue(s, queue)
+        FSEventStreamStart(s)
+        self.stream = s
+    }
+
+    /// Called from FSEvents on `queue`. Filters to target filename and
+    /// schedules a debounced emit.
+    fileprivate func handleEvents(paths: [String]) {
+        queue.async {
+            guard !self.stopped else { return }
+            // FSEvents emits absolute paths matching the watched dir; filter
+            // by lastPathComponent to ignore writes to other files in the dir.
+            let matches = paths.contains {
+                ($0 as NSString).lastPathComponent == self.filename
+            }
+            guard matches else { return }
+            self.scheduleDebouncedEmitLocked()
+        }
+    }
+
+    private func scheduleDebouncedEmitLocked() {
+        debounceTask?.cancel()
+        let debounceCopy = self.debounce
+        debounceTask = Task { [weak self] in
+            try? await Task.sleep(for: debounceCopy)
+            guard !Task.isCancelled else { return }
+            self?.queue.async {
+                guard let self else { return }
+                guard !self.stopped else { return }
+                self.continuation?.yield()
+            }
+        }
     }
 }
