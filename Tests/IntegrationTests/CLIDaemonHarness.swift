@@ -81,6 +81,31 @@ final class CLIDaemonHarness {
         try? FileManager.default.removeItem(at: tmpDir)
     }
 
+    /// Test helper: terminate the ephemeral daemon to simulate a crash.
+    /// Does NOT delete tmpDir so the socket path is preserved for `restartDaemon()`.
+    /// Uses SIGTERM with a SIGKILL fallback so CI never hangs.
+    func stopDaemon() {
+        guard let p = process else { return }
+        p.terminate()
+        let limit = Date().addingTimeInterval(5.0)
+        while p.isRunning && Date() < limit {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if p.isRunning {
+            kill(p.processIdentifier, SIGKILL)
+        }
+        p.waitUntilExit()
+        process = nil
+        // Remove the stale socket so the daemon can rebind on restart.
+        try? FileManager.default.removeItem(atPath: adminSocket)
+    }
+
+    /// Test helper: relaunch the daemon on the same admin socket path.
+    /// The socket path doesn't move because it was computed in `init` and stored.
+    func restartDaemon() throws {
+        try start()
+    }
+
     // MARK: - Socket readiness
 
     private func waitForSocketReady(timeout: TimeInterval) throws {
@@ -211,6 +236,81 @@ final class CLIDaemonHarness {
         let err =
             String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         return (out, err, p.terminationStatus)
+    }
+
+    // MARK: - Background iris invocation
+
+    /// Background handle for long-running `iris` invocations (e.g. `--watch`).
+    /// Caller can read stderr line-by-line, send SIGINT, and wait for exit.
+    final class BackgroundIris {
+        let process: Process
+        let stderrPipe: Pipe
+        let stdoutPipe: Pipe
+
+        init(process: Process, stdoutPipe: Pipe, stderrPipe: Pipe) {
+            self.process = process
+            self.stderrPipe = stderrPipe
+            self.stdoutPipe = stdoutPipe
+        }
+
+        func sendSIGINT() {
+            kill(process.processIdentifier, SIGINT)
+        }
+
+        func waitForExit(timeout: TimeInterval) -> Int32? {
+            let limit = Date().addingTimeInterval(timeout)
+            while process.isRunning && Date() < limit {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if process.isRunning {
+                process.terminate()
+                // Defensive: if the child ignores SIGTERM, fall back to SIGKILL
+                // after a short grace period so CI never hangs.
+                let killLimit = Date().addingTimeInterval(2.0)
+                while process.isRunning && Date() < killLimit {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+                if process.isRunning {
+                    kill(process.processIdentifier, SIGKILL)
+                }
+                process.waitUntilExit()
+                return nil
+            }
+            return process.terminationStatus
+        }
+
+        func readAllStderr() -> String {
+            String(
+                data: stderrPipe.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? ""
+        }
+    }
+
+    /// Launches `iris` with `--socket-path` injected and returns immediately.
+    /// Use for long-running subcommands like `mcp wrap --watch`.
+    func runIrisBackground(_ args: [String]) throws -> BackgroundIris {
+        let subcommandWords: Set<String> = [
+            "secret", "add", "list", "show", "edit", "rotate", "rm",
+            "status", "pause", "resume", "ca", "config", "rule", "logs", "doctor",
+            "mcp", "wrap",
+        ]
+        var insertAt = 0
+        while insertAt < args.count && subcommandWords.contains(args[insertAt]) {
+            insertAt += 1
+        }
+        var fullArgs = args
+        fullArgs.insert(contentsOf: ["--socket-path", adminSocket], at: insertAt)
+
+        let p = Process()
+        p.executableURL = ExecutableLocator.iris
+        p.arguments = fullArgs
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        p.standardOutput = outPipe
+        p.standardError = errPipe
+        try p.run()
+        return BackgroundIris(process: p, stdoutPipe: outPipe, stderrPipe: errPipe)
     }
 }
 

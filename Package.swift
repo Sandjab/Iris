@@ -57,6 +57,7 @@ let package = Package(
                 "IrisKit",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Logging", package: "swift-log"),
+                .product(name: "Crypto", package: "swift-crypto"),
             ],
             swiftSettings: strictConcurrency
         ),

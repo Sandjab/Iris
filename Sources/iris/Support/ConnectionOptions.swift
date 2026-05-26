@@ -75,3 +75,25 @@ func withAdminClient<T: Sendable>(
         throw error
     }
 }
+
+/// Variant of `withAdminClient` that throws `DaemonUnreachable` instead of
+/// `ExitCode(2)`. Used by the watch loop so callers can distinguish a
+/// daemon-down condition from other errors without catching `ExitCode`.
+func withAdminClientOrThrow<T: Sendable>(
+    _ options: ConnectionOptions,
+    body: (AdminClient) async throws -> T
+) async throws -> T {
+    let path = try options.resolvedSocketPath()
+    let client = AdminClient(socketPath: path)
+    do {
+        let result = try await body(client)
+        try await client.shutdown()
+        return result
+    } catch {
+        try? await client.shutdown()
+        if let adminErr = error as? AdminClientError, case .connectFailed = adminErr {
+            throw DaemonUnreachable(socketPath: path)
+        }
+        throw error
+    }
+}

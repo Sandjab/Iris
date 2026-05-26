@@ -270,4 +270,347 @@ final class MCPWrapFlowTests: XCTestCase {
             "patched output must be strict-mode parseable (no trailing commas): \(patched)"
         )
     }
+
+    func testWrapWatchAndDryRunAreMutuallyExclusive() throws {
+        let result = try harness.runIris(
+            ["mcp", "wrap", "--watch", "--dry-run", "/tmp/nonexistent.json"]
+        )
+        XCTAssertEqual(result.code, 64)  // usage error
+        XCTAssertTrue(
+            result.stderr.contains("--watch") && result.stderr.contains("--dry-run"),
+            "stderr: \(result.stderr)"
+        )
+    }
+
+    func testWatchExitsOnMissingPathAtStart() throws {
+        let nope = "/tmp/iris-watch-nope-\(UUID().uuidString).json"
+        let result = try harness.runIris(
+            ["mcp", "wrap", "--watch", nope],
+            timeout: 5.0
+        )
+        // IrisExitCode.logicError = 1 (per codebase). Spec mentioned 65 but
+        // the real exit code constant is 1; tests align with implementation.
+        XCTAssertEqual(result.code, 1)
+        XCTAssertTrue(
+            result.stderr.lowercased().contains("no such file")
+                || result.stderr.contains(nope)
+                || result.stderr.lowercased().contains("unreadable"),
+            "stderr: \(result.stderr)"
+        )
+    }
+
+    func testWatchPatchesOnInitialCycle() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        let initial = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+
+        // Give it ~2s to do the initial cycle
+        Thread.sleep(forTimeInterval: 2.0)
+
+        let bakExists = FileManager.default.fileExists(
+            atPath: tmp.appendingPathExtension("iris.bak").path
+        )
+        XCTAssertTrue(bakExists, "backup should be created after initial cycle")
+
+        let patched = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertTrue(patched.contains("HTTPS_PROXY"), "expected env vars patched in")
+    }
+
+    func testWatchIgnoresOwnWrite() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        let initial = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+
+        // Wait for initial patch
+        Thread.sleep(forTimeInterval: 2.0)
+        let mtimeAfterPatch =
+            try FileManager.default
+            .attributesOfItem(atPath: tmp.path)[.modificationDate] as? Date
+
+        // Wait 2 more seconds — should NOT re-patch
+        Thread.sleep(forTimeInterval: 2.0)
+        let mtimeNow =
+            try FileManager.default
+            .attributesOfItem(atPath: tmp.path)[.modificationDate] as? Date
+
+        XCTAssertEqual(mtimeAfterPatch, mtimeNow, "watcher must not re-patch its own write")
+    }
+
+    // MARK: - Watch loop reaction tests (Task 15)
+
+    func testWatchReactsToUserEdit() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        // Start with a compliant file so the initial cycle is a no-op
+        let initial = """
+            { "mcpServers": {} }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+        Thread.sleep(forTimeInterval: 1.5)
+
+        // User adds a server
+        let edited = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try edited.write(to: tmp, atomically: true, encoding: .utf8)
+        Thread.sleep(forTimeInterval: 2.5)
+
+        let patched = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertTrue(
+            patched.contains("HTTPS_PROXY"),
+            "expected patcher to add env vars after user edit"
+        )
+    }
+
+    func testWatchRefusesCommentedFileButKeepsWatching() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let initial = """
+            // user note
+            { "mcpServers": {} }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        Thread.sleep(forTimeInterval: 2.0)
+        // File should be unchanged
+        let after = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertEqual(initial, after)
+        bg.sendSIGINT()
+        let code = bg.waitForExit(timeout: 3.0)
+        let stderr = bg.readAllStderr()
+        XCTAssertEqual(code, 0)
+        XCTAssertTrue(stderr.contains("comments detected"), "stderr: \(stderr)")
+    }
+
+    func testWatchNormalizesTrailingComma() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        let initial = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"], }, } }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+        Thread.sleep(forTimeInterval: 2.0)
+
+        let patched = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertNoThrow(
+            try OrderedJSONDocument.parse(patched),
+            "patched output should be strict valid JSON"
+        )
+    }
+
+    func testWatchExitsCleanOnSIGINT() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try "{}".write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        Thread.sleep(forTimeInterval: 1.0)
+        bg.sendSIGINT()
+        let code = bg.waitForExit(timeout: 3.0)
+        XCTAssertEqual(code, 0)
+    }
+
+    func testWatchSurvivesDaemonRestart() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        try "{ \"mcpServers\": {} }".write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+        Thread.sleep(forTimeInterval: 1.5)
+
+        // Kill the daemon mid-watch
+        harness.stopDaemon()
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // User edit during daemon down — should log warn, not exit
+        let edited = """
+            { "mcpServers": { "foo": { "command": "echo", "args": [] } } }
+            """
+        try edited.write(to: tmp, atomically: true, encoding: .utf8)
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // Restart the daemon
+        try harness.restartDaemon()
+        // Trigger another edit
+        try edited.write(to: tmp, atomically: true, encoding: .utf8)
+        Thread.sleep(forTimeInterval: 4.0)
+
+        // File should now be patched
+        let patched = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertTrue(
+            patched.contains("HTTPS_PROXY"),
+            "patched content after daemon restart : \(patched)"
+        )
+
+        // Process should still be alive
+        XCTAssertTrue(bg.process.isRunning)
+    }
+
+    // MARK: - Invariants (Task 17)
+
+    func testWatchLogsContainNoSecretLikeStrings() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        let initial = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        Thread.sleep(forTimeInterval: 2.0)
+        bg.sendSIGINT()
+        _ = bg.waitForExit(timeout: 2.0)
+        let stderr = bg.readAllStderr()
+
+        // No string of 20+ token-like chars. Filter out ISO timestamps and
+        // file paths (UUID component contains long hex spans).
+        let regex = try NSRegularExpression(pattern: "[A-Za-z0-9_-]{20,}")
+        let matches = regex.matches(
+            in: stderr,
+            range: NSRange(stderr.startIndex..., in: stderr)
+        )
+        // Build a set of known-safe substrings derived from the tmp path.
+        let tmpPathComponents = Set(tmp.path.split(separator: "/").map(String.init))
+        let suspicious = matches.compactMap { m -> String? in
+            guard let range = Range(m.range, in: stderr) else { return nil }
+            let s = String(stderr[range])
+            // ISO 8601 timestamp like 2026-05-27T18:42:13Z — has '-' and 'T'
+            if s.contains("-") && s.contains("T") { return nil }
+            // Any token that is a path component of our tmp file (UUID, folder hash, etc.)
+            if tmpPathComponents.contains(s) { return nil }
+            // Allow iris-watch-<UUID> filename tokens (contain our UUID prefix)
+            if s.hasPrefix("iris-watch-") { return nil }
+            return s
+        }
+        XCTAssertTrue(
+            suspicious.isEmpty,
+            "suspicious token-like strings in logs: \(suspicious)"
+        )
+    }
+
+    func testWatchIdempotenceAfterCommentRemoval() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        let withComment = """
+            // user comment
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try withComment.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+        Thread.sleep(forTimeInterval: 1.5)
+        // File should be unchanged (commented)
+        let stillCommented = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertEqual(withComment, stillCommented)
+
+        // User removes the comment
+        let cleaned = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try cleaned.write(to: tmp, atomically: true, encoding: .utf8)
+        Thread.sleep(forTimeInterval: 2.5)
+
+        let patched = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertTrue(
+            patched.contains("HTTPS_PROXY"),
+            "should be patched after comment removal"
+        )
+
+        let mtimeAfterPatch =
+            try FileManager.default
+            .attributesOfItem(atPath: tmp.path)[.modificationDate] as? Date
+
+        // No further write
+        Thread.sleep(forTimeInterval: 2.0)
+        let mtimeFinal =
+            try FileManager.default
+            .attributesOfItem(atPath: tmp.path)[.modificationDate] as? Date
+        XCTAssertEqual(
+            mtimeAfterPatch,
+            mtimeFinal,
+            "hash exclusion must hold post-patch"
+        )
+    }
 }

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import IrisKit
 
 final class TextFormatterTests: XCTestCase {
