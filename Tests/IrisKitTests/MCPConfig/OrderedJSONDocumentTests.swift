@@ -182,6 +182,119 @@ final class OrderedJSONDocumentTests: XCTestCase {
         XCTAssertLessThan(out.range(of: "\"command\"")!.lowerBound, out.range(of: "\"args\"")!.lowerBound)
     }
 
+    // MARK: - JSONC mode
+
+    func testCommentPositionsEmptyOnStrictParse() throws {
+        let doc = try OrderedJSONDocument.parse("{\"a\":1}")
+        XCTAssertTrue(doc.commentPositions.isEmpty)
+    }
+
+    func testParseOptionsStrictIsDefault() throws {
+        // Default options = strict. Comment must still throw.
+        XCTAssertThrowsError(try OrderedJSONDocument.parse("// x\n{}")) { error in
+            guard case OrderedJSONError.commentNotAllowed = error else {
+                return XCTFail("expected commentNotAllowed, got \(error)")
+            }
+        }
+    }
+
+    func testParseOptionsJSONCAcceptsLineComment() throws {
+        let doc = try OrderedJSONDocument.parse("// header\n{}", options: .jsonc)
+        XCTAssertEqual(doc.root, .object([]))
+        XCTAssertEqual(doc.commentPositions.count, 1)
+        XCTAssertEqual(doc.commentPositions[0].line, 1)
+        XCTAssertEqual(doc.commentPositions[0].column, 1)
+        XCTAssertEqual(doc.commentPositions[0].kind, .lineComment)
+    }
+
+    func testJSONCAcceptsLineCommentBetweenTokens() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "{ // foo\n  \"a\": 1 // trailing\n}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .object([("a", .integer(1))]))
+        XCTAssertEqual(doc.commentPositions.count, 2)
+        XCTAssertEqual(doc.commentPositions[0].kind, .lineComment)
+        XCTAssertEqual(doc.commentPositions[0].line, 1)
+        XCTAssertEqual(doc.commentPositions[1].line, 2)
+    }
+
+    func testJSONCMultilineCommentPositionsAreCorrect() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "\n\n  // line 3 col 3\n{}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.commentPositions.count, 1)
+        XCTAssertEqual(doc.commentPositions[0].line, 3)
+        XCTAssertEqual(doc.commentPositions[0].column, 3)
+    }
+
+    func testJSONCAcceptsBlockComment() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "/* header */\n{\"a\": 1}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .object([("a", .integer(1))]))
+        XCTAssertEqual(doc.commentPositions.count, 1)
+        XCTAssertEqual(doc.commentPositions[0].kind, .blockComment)
+        XCTAssertEqual(doc.commentPositions[0].line, 1)
+    }
+
+    func testJSONCBlockCommentBetweenKeyAndValue() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "{\"a\":/* inline */1}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .object([("a", .integer(1))]))
+        XCTAssertEqual(doc.commentPositions.count, 1)
+        XCTAssertEqual(doc.commentPositions[0].kind, .blockComment)
+    }
+
+    func testJSONCMultilineBlockComment() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "/* line 1\nline 2\nline 3 */\n{}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .object([]))
+        XCTAssertEqual(doc.commentPositions.count, 1)
+    }
+
+    func testJSONCUnterminatedBlockCommentThrows() throws {
+        XCTAssertThrowsError(
+            try OrderedJSONDocument.parse("/* unterminated", options: .jsonc)
+        ) { error in
+            guard case OrderedJSONError.unterminatedBlockComment = error else {
+                return XCTFail("expected unterminatedBlockComment, got \(error)")
+            }
+        }
+    }
+
+    func testJSONCAcceptsTrailingCommaInArray() throws {
+        let doc = try OrderedJSONDocument.parse("[1, 2, 3,]", options: .jsonc)
+        XCTAssertEqual(doc.root, .array([.integer(1), .integer(2), .integer(3)]))
+    }
+
+    func testJSONCAcceptsTrailingCommaInObject() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "{\"a\": 1, \"b\": 2,}",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .object([("a", .integer(1)), ("b", .integer(2))]))
+    }
+
+    func testJSONCAcceptsTrailingCommaWithCommentBefore() throws {
+        let doc = try OrderedJSONDocument.parse(
+            "[1, 2, /* end */]",
+            options: .jsonc
+        )
+        XCTAssertEqual(doc.root, .array([.integer(1), .integer(2)]))
+    }
+
+    func testStrictStillRejectsTrailingCommaRegression() throws {
+        XCTAssertThrowsError(try OrderedJSONDocument.parse("[1,]"))
+        XCTAssertThrowsError(try OrderedJSONDocument.parse("{\"a\":1,}"))
+    }
+
     // MARK: - Helpers
 
     private func assertRoundTrip(_ input: String, file: StaticString = #file, line: UInt = #line) throws {

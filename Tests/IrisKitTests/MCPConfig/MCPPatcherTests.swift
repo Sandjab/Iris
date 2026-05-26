@@ -163,4 +163,32 @@ final class MCPPatcherTests: XCTestCase {
         XCTAssertEqual(summary.alreadyCompliant, 0)
         XCTAssertEqual(summary.skippedHttpSse, 0)
     }
+
+    func testPatcherWorksOnJSONCDocument() throws {
+        let input = """
+            // Top-level comment
+            {
+              "mcpServers": {
+                "foo": {
+                  "command": "node",
+                  "args": ["server.js"],
+                }
+              }
+            }
+            """
+        let doc = try OrderedJSONDocument.parse(input, options: .jsonc)
+        XCTAssertFalse(doc.commentPositions.isEmpty)
+        let (patched, summary) = try MCPPatcher.patch(
+            document: doc,
+            brokerListen: "127.0.0.1:9876",
+            caPemPath: "/tmp/ca.pem"
+        )
+        XCTAssertEqual(summary.patched, 1)
+        XCTAssertEqual(summary.alreadyCompliant, 0)
+        // Serialize: result must be valid strict JSON (comments stripped)
+        let serialized = OrderedJSONDocument.serialize(patched)
+        let reparsed = try OrderedJSONDocument.parse(serialized)
+        XCTAssertEqual(reparsed.root, patched.root)
+        XCTAssertTrue(reparsed.commentPositions.isEmpty)
+    }
 }
