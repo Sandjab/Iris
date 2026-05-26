@@ -166,16 +166,16 @@ final class MCPPatcherTests: XCTestCase {
 
     func testPatcherWorksOnJSONCDocument() throws {
         let input = """
-        // Top-level comment
-        {
-          "mcpServers": {
-            "foo": {
-              "command": "node",
-              "args": ["server.js"],
+            // Top-level comment
+            {
+              "mcpServers": {
+                "foo": {
+                  "command": "node",
+                  "args": ["server.js"],
+                }
+              }
             }
-          }
-        }
-        """
+            """
         let doc = try OrderedJSONDocument.parse(input, options: .jsonc)
         XCTAssertFalse(doc.commentPositions.isEmpty)
         let (patched, summary) = try MCPPatcher.patch(
