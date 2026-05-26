@@ -202,7 +202,6 @@ struct MCPCommand: AsyncParsableCommand {
         private func runWatch(path: String) async throws {
             let fileURL = URL(fileURLWithPath: path)
 
-            // Anti-foot-gun (same as one-shot)
             if fileURL.lastPathComponent.hasSuffix(".iris.bak") {
                 FileHandle.standardError.write(
                     Data("refusing to watch a .iris.bak file: \(path)\n".utf8)
@@ -210,7 +209,6 @@ struct MCPCommand: AsyncParsableCommand {
                 throw ExitCode(IrisExitCode.logicError)
             }
 
-            // Path must exist + readable at startup (decision §2.3 — fatal at start)
             guard FileManager.default.isReadableFile(atPath: path) else {
                 FileHandle.standardError.write(
                     Data("no such file or unreadable: \(path)\n".utf8)
@@ -218,20 +216,16 @@ struct MCPCommand: AsyncParsableCommand {
                 throw ExitCode(IrisExitCode.logicError)
             }
 
-            // Initial daemon fetch — exit 2 if down (cohérence avec autres sous-commandes)
             let (brokerListen, caPath) = try await withAdminClient(connection) { client in
                 let cfg = try await client.call(.configGet, returning: Config.self)
                 let ca = try await client.call(.caExportPath, returning: CAExportPathResult.self)
                 return (cfg.broker.listen, ca.path)
             }
 
-            // Setup logging
             let logger = Logger(label: "iris.watch")
-
-            // State
             var lastWrittenHash: Data? = nil
 
-            // Initial cycle (Task 14 implements the actual cycle body)
+            // Initial cycle (exits via thrown ExitCode if catastrophic)
             try await runOneCycle(
                 fileURL: fileURL,
                 brokerListen: brokerListen,
@@ -242,8 +236,27 @@ struct MCPCommand: AsyncParsableCommand {
 
             logger.info("started, watching \(path)")
 
-            // Watch loop (Task 14 wires FileWatcher in)
-            // For now, exit after the initial cycle so the missing-path test passes.
+            // FileWatcher + SIGINT
+            let watcher = FileWatcher(path: path)
+            let signalToken = SignalHandling.onSIGINTOnce { watcher.stop() }
+            defer { withExtendedLifetime(signalToken) {} }
+
+            // Watch loop
+            for await _ in watcher.events() {
+                do {
+                    try await runOneCycle(
+                        fileURL: fileURL,
+                        brokerListen: brokerListen,
+                        caPath: caPath,
+                        lastWrittenHash: &lastWrittenHash,
+                        logger: logger
+                    )
+                } catch {
+                    logger.warning("cycle failed: \(error)")
+                }
+            }
+
+            logger.info("stopped (SIGINT)")
         }
 
         private func runOneCycle(
@@ -253,7 +266,84 @@ struct MCPCommand: AsyncParsableCommand {
             lastWrittenHash: inout Data?,
             logger: Logger
         ) async throws {
-            // Implemented in Task 14.
+            // 1. Read file
+            let rawData: Data
+            do {
+                rawData = try Data(contentsOf: fileURL)
+            } catch {
+                logger.info("file unreadable (transient?): \(error)")
+                return
+            }
+
+            // 2. Hash check — skip if this is our own write echoing back
+            let currentHash = Data(SHA256.hash(data: rawData))
+            if let last = lastWrittenHash, last == currentHash {
+                logger.debug("hash match — skipping (own write)")
+                return
+            }
+
+            // 3. Decode UTF-8
+            guard let text = String(data: rawData, encoding: .utf8) else {
+                logger.warning("not UTF-8")
+                return
+            }
+
+            // 4. Parse JSONC
+            let document: OrderedJSONDocument
+            do {
+                document = try OrderedJSONDocument.parse(text, options: .jsonc)
+            } catch {
+                logger.warning("parse failed: \(error)")
+                return
+            }
+
+            // 5. Refuse if comments present
+            if !document.commentPositions.isEmpty {
+                let first = document.commentPositions[0]
+                logger.warning(
+                    "comments detected at L\(first.line):\(first.column) — refusing to write"
+                )
+                return
+            }
+
+            // 6. Patch
+            let originalSerialized = OrderedJSONDocument.serialize(document)
+            let (patched, summary) = try MCPPatcher.patch(
+                document: document,
+                brokerListen: brokerListen,
+                caPemPath: caPath
+            )
+            let patchedSerialized = OrderedJSONDocument.serialize(patched)
+
+            // 7. Already compliant — no write, but update hash to avoid reprocessing
+            if patchedSerialized == originalSerialized {
+                lastWrittenHash = currentHash
+                logger.debug("already compliant (patched=\(summary.patched))")
+                return
+            }
+
+            // 8. Backup + write atomically
+            let backupURL = fileURL.appendingPathExtension("iris.bak")
+            do {
+                try rawData.write(to: backupURL, options: .atomic)
+            } catch {
+                logger.error("backup write failed: \(error)")
+                return
+            }
+            guard let patchedData = patchedSerialized.data(using: .utf8) else {
+                logger.error("failed to encode patched output as UTF-8")
+                return
+            }
+            do {
+                try patchedData.write(to: fileURL, options: .atomic)
+            } catch {
+                logger.error("write failed: \(error)")
+                return
+            }
+
+            // 9. Update hash (of what we wrote) + log
+            lastWrittenHash = Data(SHA256.hash(data: patchedData))
+            logger.info("patched (backup at \(backupURL.lastPathComponent))")
         }
     }
 

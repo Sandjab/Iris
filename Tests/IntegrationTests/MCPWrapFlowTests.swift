@@ -285,7 +285,8 @@ final class MCPWrapFlowTests: XCTestCase {
     func testWatchExitsOnMissingPathAtStart() throws {
         let nope = "/tmp/iris-watch-nope-\(UUID().uuidString).json"
         let result = try harness.runIris(
-            ["mcp", "wrap", "--watch", nope], timeout: 5.0
+            ["mcp", "wrap", "--watch", nope],
+            timeout: 5.0
         )
         // IrisExitCode.logicError = 1 (per codebase). Spec mentioned 65 but
         // the real exit code constant is 1; tests align with implementation.
@@ -296,5 +297,72 @@ final class MCPWrapFlowTests: XCTestCase {
                 || result.stderr.lowercased().contains("unreadable"),
             "stderr: \(result.stderr)"
         )
+    }
+
+    func testWatchPatchesOnInitialCycle() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        let initial = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+
+        // Give it ~2s to do the initial cycle
+        Thread.sleep(forTimeInterval: 2.0)
+
+        let bakExists = FileManager.default.fileExists(
+            atPath: tmp.appendingPathExtension("iris.bak").path
+        )
+        XCTAssertTrue(bakExists, "backup should be created after initial cycle")
+
+        let patched = try String(contentsOf: tmp, encoding: .utf8)
+        XCTAssertTrue(patched.contains("HTTPS_PROXY"), "expected env vars patched in")
+    }
+
+    func testWatchIgnoresOwnWrite() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("iris-watch-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: tmp)
+            try? FileManager.default.removeItem(
+                at: tmp.appendingPathExtension("iris.bak")
+            )
+        }
+        let initial = """
+            { "mcpServers": { "foo": { "command": "echo", "args": ["hi"] } } }
+            """
+        try initial.write(to: tmp, atomically: true, encoding: .utf8)
+
+        let bg = try harness.runIrisBackground(["mcp", "wrap", "--watch", tmp.path])
+        defer {
+            bg.sendSIGINT()
+            _ = bg.waitForExit(timeout: 2.0)
+        }
+
+        // Wait for initial patch
+        Thread.sleep(forTimeInterval: 2.0)
+        let mtimeAfterPatch =
+            try FileManager.default
+            .attributesOfItem(atPath: tmp.path)[.modificationDate] as? Date
+
+        // Wait 2 more seconds — should NOT re-patch
+        Thread.sleep(forTimeInterval: 2.0)
+        let mtimeNow =
+            try FileManager.default
+            .attributesOfItem(atPath: tmp.path)[.modificationDate] as? Date
+
+        XCTAssertEqual(mtimeAfterPatch, mtimeNow, "watcher must not re-patch its own write")
     }
 }
