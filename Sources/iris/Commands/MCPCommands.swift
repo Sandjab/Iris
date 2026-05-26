@@ -63,11 +63,20 @@ struct MCPCommand: AsyncParsableCommand {
 
             let original: OrderedJSONDocument
             do {
-                original = try OrderedJSONDocument.parse(text)
+                original = try OrderedJSONDocument.parse(text, options: .jsonc)
             } catch {
                 FileHandle.standardError.write(
+                    Data("\(expanded): not valid JSON\n  \(error)\n".utf8)
+                )
+                throw ExitCode(IrisExitCode.logicError)
+            }
+
+            // Refuse-write if comments are present. --dry-run is still allowed.
+            if !original.commentPositions.isEmpty && !dryRun {
+                let first = original.commentPositions[0]
+                FileHandle.standardError.write(
                     Data(
-                        "\(expanded): not valid JSON (JSONC not supported in Phase 5.3)\n  \(error)\n"
+                        "\(expanded): comments detected at L\(first.line):\(first.column) — retire-les manuellement ou utilise --dry-run pour voir le diff\n"
                             .utf8
                     )
                 )
