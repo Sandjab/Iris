@@ -37,6 +37,10 @@ public actor Daemon {
     private let eventLoopGroup: EventLoopGroup
     private let runtimeRulesStore: RuntimeRulesStore
     private let reloadBox: NIOLockedValueBox<@Sendable () async throws -> ConfigReloadResult>
+    /// Holds the current set of TOML-defined MITM hosts. Updated by `reload()`
+    /// so that the `onRulesChanged` and `tomlHostsProvider` closures always see
+    /// the live value, not the boot-time snapshot captured in `init`.
+    private let tomlHostsBox: NIOLockedValueBox<Set<String>>
     private var didStart = false
 
     public init(
@@ -98,6 +102,11 @@ public actor Daemon {
         let allowedHosts = tomlHosts.union(runtimeHosts)
         self.runtimeRulesStore = runtimeRulesStore
 
+        // Mutable box holding the current TOML hosts. Captured by closures so
+        // reload() can update them without re-constructing the dispatcher.
+        let tomlHostsBox = NIOLockedValueBox<Set<String>>(tomlHosts)
+        self.tomlHostsBox = tomlHostsBox
+
         let proxyConfig = ProxyServer.Configuration(
             listenHost: listenHost,
             listenPort: listenPort,
@@ -147,13 +156,13 @@ public actor Daemon {
             daemon: daemonControl,
             config: config,
             runtimeRulesStore: runtimeRulesStore,
-            onRulesChanged: { [capturedProxy, capturedRulesStore] in
-                let toml = Set(config.mitmHosts.map(\.host))
+            onRulesChanged: { [capturedProxy, capturedRulesStore, tomlHostsBox] in
+                let toml = tomlHostsBox.withLockedValue { $0 }
                 let runtime = Set(await capturedRulesStore.list().map(\.host))
                 await capturedProxy.updateAllowedHosts(toml.union(runtime))
             },
-            tomlHostsProvider: {
-                config.mitmHosts.map(\.host)
+            tomlHostsProvider: { [tomlHostsBox] in
+                Array(tomlHostsBox.withLockedValue { $0 })
             },
             onConfigReload: { [reloadBox] in
                 let fn = reloadBox.withLockedValue { $0 }
@@ -321,11 +330,12 @@ public actor Daemon {
             onExfilAttempt: newConfig.security.onExfilAttempt
         )
 
-        // Swap config so tomlHostsProvider reflects the new TOML.
+        // Swap config and update tomlHostsBox so closures see the new TOML.
         currentConfig = newConfig
+        tomlHostsBox.withLockedValue { $0 = Set(newConfig.mitmHosts.map(\.host)) }
 
         // Recompute allowedHosts = new TOML hosts ∪ persisted runtime rules.
-        let tomlHosts = Set(newConfig.mitmHosts.map(\.host))
+        let tomlHosts = tomlHostsBox.withLockedValue { $0 }
         let runtimeHosts = Set(await runtimeRulesStore.list().map(\.host))
         await proxy.updateAllowedHosts(tomlHosts.union(runtimeHosts))
 

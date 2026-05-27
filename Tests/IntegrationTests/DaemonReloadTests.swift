@@ -205,6 +205,46 @@ final class DaemonReloadTests: XCTestCase {
         XCTAssertTrue(ignored.contains("broker.event_ring_size"))
     }
 
+    func testReloadRefreshesTomlHostsInRuleList() async throws {
+        // Regression test for stale-capture bug: closures in Daemon.init used to
+        // close over the boot-time `config` value instead of a mutable box. After
+        // reload(), rule.list must reflect the NEW TOML hosts, not the original ones.
+        let tmp = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let configURL = tmp.appendingPathComponent("config.toml")
+        let adminSocket = tmp.appendingPathComponent("admin.sock").path
+        let (proxyPort, eventsPort) = ports(from: tmp.lastPathComponent)
+
+        let initialToml = makeToml(
+            proxyPort: proxyPort,
+            eventsPort: eventsPort,
+            adminSocket: adminSocket,
+            hosts: ["original.example.com"]
+        )
+        let daemon = try await makeDaemon(tomlText: initialToml, configURL: configURL)
+
+        // Boot-time: allowedHosts snapshot must contain the original host.
+        let bootHosts = await daemon.proxyForTesting.allowedHostsSnapshot()
+        XCTAssertTrue(bootHosts.contains("original.example.com"), "boot hosts=\(bootHosts)")
+
+        // Reload with a different TOML host.
+        let updatedToml = makeToml(
+            proxyPort: proxyPort,
+            eventsPort: eventsPort,
+            adminSocket: adminSocket,
+            hosts: ["replaced.example.com"]
+        )
+        try updatedToml.write(to: configURL, atomically: true, encoding: .utf8)
+        let result = try await daemon.reload()
+        XCTAssertTrue(result.reloaded)
+
+        // After reload: proxy must reflect the replaced host, not the original.
+        let afterHosts = await daemon.proxyForTesting.allowedHostsSnapshot()
+        XCTAssertTrue(afterHosts.contains("replaced.example.com"), "after-reload hosts=\(afterHosts)")
+        XCTAssertFalse(afterHosts.contains("original.example.com"),
+            "original host must no longer be in allowedHosts after reload; got \(afterHosts)")
+    }
+
     func testReloadRejectsSemanticallyInvalidConfig() async throws {
         // Catches the bug where parse succeeds but semantics are bad.
         // Config.validate() rejects port 0 (`validateListenAddress`).
