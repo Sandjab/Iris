@@ -111,6 +111,11 @@ public struct SecretDeletedResult: Codable, Sendable, Equatable {
     public init(deleted: Bool) { self.deleted = deleted }
 }
 
+public struct RuleDeletedResult: Codable, Sendable, Equatable {
+    public let deleted: Bool
+    public init(deleted: Bool) { self.deleted = deleted }
+}
+
 public struct DaemonStats: Codable, Sendable, Equatable {
     public let reqTotal: UInt64
     public let subTotal: UInt64

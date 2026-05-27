@@ -35,6 +35,24 @@ public enum TextFormatter {
             + "exfil=\(s.exfilBlockedTotal) err=\(s.errorsTotal)"
     }
 
+    /// Render a list of MITM rules as a column-aligned table with HOST, SOURCE,
+    /// and CREATED columns. TOML-sourced rules show "—" for creation time
+    /// (sentinel epoch-0 is the discriminant used by the dispatcher).
+    public static func ruleTable(rules: [MITMRule]) -> String {
+        if rules.isEmpty { return "no rules" }
+        let formatter = ISO8601DateFormatter()
+        let rows = rules.map { rule -> [String] in
+            let created: String
+            if rule.source == .toml || rule.createdAt.timeIntervalSince1970 == 0 {
+                created = "—"
+            } else {
+                created = formatter.string(from: rule.createdAt)
+            }
+            return [rule.host, rule.source.rawValue, created]
+        }
+        return table(headers: ["HOST", "SOURCE", "CREATED"], rows: rows)
+    }
+
     /// Human-friendly uptime ("1d2h", "5m30s", "12s") — keeps the two
     /// most-significant units, drops trailing zero units, always non-empty.
     public static func uptime(seconds total: UInt64) -> String {

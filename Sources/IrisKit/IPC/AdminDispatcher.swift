@@ -18,6 +18,9 @@ public struct AdminDispatcher: Sendable {
     public let daemon: any DaemonControl
     public let config: Config?
     public let logger: Logger
+    public let runtimeRulesStore: RuntimeRulesStore
+    public let onRulesChanged: @Sendable () async -> Void
+    public let tomlHostsProvider: @Sendable () async -> [String]
 
     public init(
         secretStore: any SecretStore,
@@ -25,6 +28,9 @@ public struct AdminDispatcher: Sendable {
         caManager: CAManager,
         daemon: any DaemonControl,
         config: Config? = nil,
+        runtimeRulesStore: RuntimeRulesStore,
+        onRulesChanged: @escaping @Sendable () async -> Void = {},
+        tomlHostsProvider: @escaping @Sendable () async -> [String] = { [] },
         logger: Logger = Logger(label: "io.iris.admin.dispatcher")
     ) {
         self.secretStore = secretStore
@@ -32,6 +38,9 @@ public struct AdminDispatcher: Sendable {
         self.caManager = caManager
         self.daemon = daemon
         self.config = config
+        self.runtimeRulesStore = runtimeRulesStore
+        self.onRulesChanged = onRulesChanged
+        self.tomlHostsProvider = tomlHostsProvider
         self.logger = logger
     }
 
@@ -52,6 +61,19 @@ public struct AdminDispatcher: Sendable {
             return .failure(id: request.id, error: error)
         } catch let error as SecretStoreError {
             return .failure(id: request.id, error: Self.mapSecretStoreError(error))
+        } catch let error as RuntimeRulesStore.Error {
+            switch error {
+            case .invalidHost(let h):
+                return .failure(
+                    id: request.id,
+                    error: JSONRPCError(code: JSONRPCError.invalidParams.code, message: "invalid host: \(h)")
+                )
+            case .ioError(let msg):
+                return .failure(
+                    id: request.id,
+                    error: JSONRPCError(code: JSONRPCError.internalError.code, message: "io error: \(msg)")
+                )
+            }
         } catch {
             logger.error(
                 "admin call unexpected error",
@@ -151,16 +173,34 @@ public struct AdminDispatcher: Sendable {
             return try JSONValue.encoding(config)
 
         case .ruleAdd:
-            // TODO: Phase 6 — runtime rule CRUD
-            throw JSONRPCError.methodNotFound
+            let payload = try Self.decode(RuleHostParams.self, from: params)
+            let rule = try await runtimeRulesStore.add(host: payload.host, now: Date())
+            await onRulesChanged()
+            return try JSONValue.encoding(rule)
 
         case .ruleList:
-            // TODO: Phase 6 — runtime rule CRUD
-            throw JSONRPCError.methodNotFound
+            let tomlHosts = await tomlHostsProvider()
+            let tomlRules = tomlHosts.map {
+                MITMRule(host: $0, createdAt: Date(timeIntervalSince1970: 0), source: .toml)
+            }
+            let runtimeRules = await runtimeRulesStore.list()
+            // Dedup by host; TOML wins on collision.
+            var merged: [String: MITMRule] = [:]
+            for rule in runtimeRules { merged[rule.host] = rule }
+            for rule in tomlRules { merged[rule.host] = rule }
+            let sorted = merged.values.sorted { $0.host < $1.host }
+            return try JSONValue.encoding(sorted)
 
         case .ruleDelete:
-            // TODO: Phase 6 — runtime rule CRUD
-            throw JSONRPCError.methodNotFound
+            let payload = try Self.decode(RuleHostParams.self, from: params)
+            let tomlHosts = Set(await tomlHostsProvider())
+            if tomlHosts.contains(payload.host) {
+                throw JSONRPCError.ruleProtected
+            }
+            let deleted = try await runtimeRulesStore.delete(host: payload.host)
+            guard deleted else { throw JSONRPCError.ruleNotFound }
+            await onRulesChanged()
+            return try JSONValue.encoding(RuleDeletedResult(deleted: true))
 
         case .configReload:
             // TODO: Phase 5.5 — dynamic config reload from disk

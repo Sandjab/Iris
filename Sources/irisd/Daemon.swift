@@ -27,12 +27,13 @@ public actor Daemon {
         case inMemory
     }
 
-    private let config: Config
+    private var currentConfig: Config
     private let logger: Logger
     private let proxy: ProxyServer
     private let adminServer: AdminServer
     private let eventsServer: EventsServer
     private let eventLoopGroup: EventLoopGroup
+    private let runtimeRulesStore: RuntimeRulesStore
     private var didStart = false
 
     public init(
@@ -43,7 +44,7 @@ public actor Daemon {
         logger: Logger
     ) async throws {
         try config.validate()
-        self.config = config
+        self.currentConfig = config
         self.logger = logger
         self.eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)
 
@@ -77,7 +78,20 @@ public actor Daemon {
 
         let listenHost = try Self.host(of: config.broker.listen)
         let listenPort = try Self.port(of: config.broker.listen)
-        let allowedHosts = Set(config.mitmHosts.map(\.host))
+
+        // Runtime rules are stored beside the admin socket.
+        let runtimeRulesPath = config.broker.resolvedAdminSocketURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("runtime-rules.json")
+        let runtimeRulesParent = runtimeRulesPath.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: runtimeRulesParent, withIntermediateDirectories: true)
+        let runtimeRulesStore = try await RuntimeRulesStore(path: runtimeRulesPath, logger: logger)
+
+        // allowedHosts = TOML hosts ∪ persisted runtime rules.
+        let tomlHosts = Set(config.mitmHosts.map(\.host))
+        let runtimeHosts = Set(await runtimeRulesStore.list().map(\.host))
+        let allowedHosts = tomlHosts.union(runtimeHosts)
+        self.runtimeRulesStore = runtimeRulesStore
 
         let proxyConfig = ProxyServer.Configuration(
             listenHost: listenHost,
@@ -106,12 +120,25 @@ public actor Daemon {
             writePaused: { [proxy] paused in proxy.setPaused(paused) }
         )
 
+        // Capture proxy in a local constant so the @Sendable closures below
+        // hold a direct reference without crossing actor isolation.
+        let capturedProxy = proxy
+        let capturedRulesStore = runtimeRulesStore
         let dispatcher = AdminDispatcher(
             secretStore: secretStore,
             eventRing: proxy.eventRing,
             caManager: caManager,
             daemon: daemonControl,
             config: config,
+            runtimeRulesStore: runtimeRulesStore,
+            onRulesChanged: { [capturedProxy, capturedRulesStore] in
+                let toml = Set(config.mitmHosts.map(\.host))
+                let runtime = Set(await capturedRulesStore.list().map(\.host))
+                await capturedProxy.updateAllowedHosts(toml.union(runtime))
+            },
+            tomlHostsProvider: {
+                config.mitmHosts.map(\.host)
+            },
             logger: logger
         )
 
@@ -148,9 +175,9 @@ public actor Daemon {
         logger.info(
             "irisd ready",
             metadata: [
-                "admin_socket": "\(config.broker.adminSocket)",
-                "events_listen": "\(config.broker.eventsListen)",
-                "listen": "\(config.broker.listen)",
+                "admin_socket": "\(currentConfig.broker.adminSocket)",
+                "events_listen": "\(currentConfig.broker.eventsListen)",
+                "listen": "\(currentConfig.broker.listen)",
             ]
         )
 
