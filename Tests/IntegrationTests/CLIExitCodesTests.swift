@@ -1,6 +1,30 @@
 import XCTest
 
 final class CLIExitCodesTests: XCTestCase {
+
+    // MARK: - Helpers
+
+    /// Waits for `process` to exit within `timeout` seconds. Terminates (then
+    /// kills) the process if it does not exit in time, and fails the test.
+    private func waitWithTimeout(_ process: Process, timeout: TimeInterval = 10, file: StaticString = #file, line: UInt = #line) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+            let killDeadline = Date().addingTimeInterval(2)
+            while process.isRunning && Date() < killDeadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+            }
+            process.waitUntilExit()
+            XCTFail("process did not exit within \(timeout)s", file: file, line: line)
+        }
+    }
+
     func testStatusExitsTwoWhenDaemonUnreachable() throws {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("iris-noexist-\(UUID().uuidString).sock").path
@@ -12,7 +36,7 @@ final class CLIExitCodesTests: XCTestCase {
         process.standardOutput = outPipe
         process.standardError = errPipe
         try process.run()
-        process.waitUntilExit()
+        waitWithTimeout(process)
 
         XCTAssertEqual(process.terminationStatus, 2)
         let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
@@ -31,7 +55,7 @@ final class CLIExitCodesTests: XCTestCase {
         process.standardOutput = outPipe
         process.standardError = errPipe
         try process.run()
-        process.waitUntilExit()
+        waitWithTimeout(process)
 
         XCTAssertEqual(process.terminationStatus, 2)
         let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
@@ -48,7 +72,7 @@ final class CLIExitCodesTests: XCTestCase {
         process.standardOutput = Pipe()
         process.standardError = errPipe
         try process.run()
-        process.waitUntilExit()
+        waitWithTimeout(process)
         XCTAssertEqual(process.terminationStatus, 2)
         let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         XCTAssertTrue(stderr.contains("irisd not running"), "stderr=\(stderr)")
@@ -64,7 +88,7 @@ final class CLIExitCodesTests: XCTestCase {
         let errPipe = Pipe()
         process.standardError = errPipe
         try process.run()
-        process.waitUntilExit()
+        waitWithTimeout(process)
         XCTAssertEqual(process.terminationStatus, 2)
         let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         XCTAssertTrue(stderr.contains("irisd not running"), "stderr=\(stderr)")
