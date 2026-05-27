@@ -241,8 +241,10 @@ final class DaemonReloadTests: XCTestCase {
         // After reload: proxy must reflect the replaced host, not the original.
         let afterHosts = await daemon.proxyForTesting.allowedHostsSnapshot()
         XCTAssertTrue(afterHosts.contains("replaced.example.com"), "after-reload hosts=\(afterHosts)")
-        XCTAssertFalse(afterHosts.contains("original.example.com"),
-            "original host must no longer be in allowedHosts after reload; got \(afterHosts)")
+        XCTAssertFalse(
+            afterHosts.contains("original.example.com"),
+            "original host must no longer be in allowedHosts after reload; got \(afterHosts)"
+        )
     }
 
     func testReloadRejectsSemanticallyInvalidConfig() async throws {

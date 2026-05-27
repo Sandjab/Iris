@@ -488,13 +488,18 @@ final class AdminDispatcherTests: XCTestCase {
         let synth = try unwrapResult(addResp).decode(as: MITMRule.self)
         XCTAssertEqual(synth.host, "api.toml.example.com")
         XCTAssertEqual(synth.source, .toml)
-        XCTAssertEqual(synth.createdAt.timeIntervalSince1970, 0,
-            "synthesised rule must have createdAt = epoch 0")
+        XCTAssertEqual(
+            synth.createdAt.timeIntervalSince1970,
+            0,
+            "synthesised rule must have createdAt = epoch 0"
+        )
 
         // Verify runtime store was NOT written
         let runtimeRules = await rulesStore.list()
-        XCTAssertTrue(runtimeRules.isEmpty,
-            "rule.add on TOML host must not write to runtime store; got \(runtimeRules)")
+        XCTAssertTrue(
+            runtimeRules.isEmpty,
+            "rule.add on TOML host must not write to runtime store; got \(runtimeRules)"
+        )
     }
 
     func testRuleAddInvalidHostReturnsInvalidParams() async throws {

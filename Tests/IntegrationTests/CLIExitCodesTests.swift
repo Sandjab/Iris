@@ -6,7 +6,12 @@ final class CLIExitCodesTests: XCTestCase {
 
     /// Waits for `process` to exit within `timeout` seconds. Terminates (then
     /// kills) the process if it does not exit in time, and fails the test.
-    private func waitWithTimeout(_ process: Process, timeout: TimeInterval = 10, file: StaticString = #file, line: UInt = #line) {
+    private func waitWithTimeout(
+        _ process: Process,
+        timeout: TimeInterval = 10,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning && Date() < deadline {
             Thread.sleep(forTimeInterval: 0.05)
