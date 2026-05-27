@@ -27,6 +27,15 @@ func installSIGHUP(_ handler: @escaping @Sendable () -> Void) -> IrisdSignalToke
     signal(SIGHUP, SIG_IGN)
     return IrisdSignalToken {
         source.cancel()
-        signal(SIGHUP, SIG_DFL)
+        // Set SIG_DFL and inspect what we replaced. When we installed we set
+        // SIG_IGN so DispatchSource owns delivery; if anything else is
+        // installed now, another component owns the handler — restore it.
+        // C function pointers are not Equatable in Swift; compare raw bits.
+        let previous = signal(SIGHUP, SIG_DFL)
+        let prevBits = unsafeBitCast(previous, to: Int.self)
+        let ignBits = unsafeBitCast(SIG_IGN, to: Int.self)
+        if prevBits != ignBits {
+            signal(SIGHUP, previous)
+        }
     }
 }
