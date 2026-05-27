@@ -167,8 +167,8 @@ public struct AdminDispatcher: Sendable {
             throw JSONRPCError.methodNotFound
 
         case .eventsClear:
-            // TODO: Phase 4.x — clear event ring for testing/cleanup
-            throw JSONRPCError.methodNotFound
+            let n = await eventRing.clear()
+            return try JSONValue.encoding(EventsClearResult(deletedCount: n))
         }
     }
 

@@ -57,4 +57,16 @@ public actor EventRing {
     public var counts: [Event.Kind: UInt64] { totals }
 
     public func count(of kind: Event.Kind) -> UInt64 { totals[kind, default: 0] }
+
+    /// Drops all in-memory entries from the ring buffer. Cumulative per-kind
+    /// totals (from `count(of:)` and `counts`) are NOT reset — they reflect
+    /// the daemon's lifetime totals and feed `daemon.stats`.
+    ///
+    /// Returns the number of entries removed.
+    @discardableResult
+    public func clear() -> Int {
+        let n = entries.count
+        entries.removeAll(keepingCapacity: true)
+        return n
+    }
 }

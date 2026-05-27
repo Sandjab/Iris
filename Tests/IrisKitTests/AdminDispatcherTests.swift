@@ -360,4 +360,42 @@ final class AdminDispatcherTests: XCTestCase {
         let returned = try unwrapResult(resp).decode(as: Config.self)
         XCTAssertEqual(returned, config)
     }
+
+    // MARK: - events.clear
+
+    func testEventsClearReturnsDeletedCountAndPreservesTotals() async throws {
+        let ring = EventRing(capacity: 100)
+        for index in 0..<4 {
+            await ring.append(
+                Event(
+                    timestamp: Date(),
+                    kind: .substituted,
+                    host: "h\(index)",
+                    method: "POST",
+                    path: "/v1"
+                )
+            )
+        }
+
+        let (dispatcher, _, _) = try await makeDispatcher(eventRing: ring)
+        let resp = await dispatcher.dispatch(request(.eventsClear))
+        let result = try unwrapResult(resp).decode(as: EventsClearResult.self)
+
+        XCTAssertEqual(result.deletedCount, 4)
+        // Verify entries are gone
+        let remaining = await ring.recent(100)
+        XCTAssertEqual(remaining.count, 0, "entries should be cleared")
+        // Verify totals are preserved
+        let totalSubstituted = await ring.count(of: .substituted)
+        XCTAssertEqual(totalSubstituted, 4, "totals must survive clear()")
+    }
+
+    func testEventsClearOnEmptyRingReturnsZero() async throws {
+        let ring = EventRing(capacity: 100)
+        let (dispatcher, _, _) = try await makeDispatcher(eventRing: ring)
+
+        let resp = await dispatcher.dispatch(request(.eventsClear))
+        let result = try unwrapResult(resp).decode(as: EventsClearResult.self)
+        XCTAssertEqual(result.deletedCount, 0)
+    }
 }
