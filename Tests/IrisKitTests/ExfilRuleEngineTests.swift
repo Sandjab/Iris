@@ -16,7 +16,7 @@ final class ExfilRuleEngineTests: XCTestCase {
                 createdAt: Date()
             )
         }
-        return ExfilRuleEngine(secretStore: store, maxSubstitutionsPerMinute: maxPerMinute)
+        return ExfilRuleEngine(secretStore: store, maxSubstitutionsPerMinuteProvider: { maxPerMinute })
     }
 
     private func ctx(

@@ -157,7 +157,7 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                         "severity": "\(alert.severity.rawValue)",
                     ]
                 )
-                switch server.configuration.onExfilAttempt {
+                switch server.currentOnExfilAttempt {
                 case .blockOnly:
                     break
                 case .blockAndNotify:

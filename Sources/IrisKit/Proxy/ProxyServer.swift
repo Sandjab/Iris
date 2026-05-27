@@ -5,6 +5,18 @@ import NIOConcurrencyHelpers
 import NIOHTTP1
 import NIOSSL
 
+/// Snapshot of mutable security-policy fields that can be hot-reloaded via
+/// `ProxyServer.updateSecurityPolicy(maxSubstitutionsPerMinute:onExfilAttempt:)`.
+public struct SecurityPolicySnapshot: Sendable, Equatable {
+    public let maxSubstitutionsPerMinute: Int
+    public let onExfilAttempt: ExfilAttemptPolicy
+
+    public init(maxSubstitutionsPerMinute: Int, onExfilAttempt: ExfilAttemptPolicy) {
+        self.maxSubstitutionsPerMinute = maxSubstitutionsPerMinute
+        self.onExfilAttempt = onExfilAttempt
+    }
+}
+
 /// Top-level orchestrator for the local MITM forward proxy.
 ///
 /// Phase 2 deliberately omits:
@@ -53,6 +65,8 @@ public final class ProxyServer: @unchecked Sendable {
     private let ownsGroup: Bool
     private var serverChannel: Channel?
     private let pauseFlag = NIOLockedValueBox<Bool>(false)
+    private let allowedHostsBox: NIOLockedValueBox<Set<String>>
+    private let securityPolicyBox: NIOLockedValueBox<SecurityPolicySnapshot>
 
     public init(
         configuration: Configuration,
@@ -65,9 +79,17 @@ public final class ProxyServer: @unchecked Sendable {
         self.logger = logger
         self.eventRing = EventRing()
         self.placeholderEngine = PlaceholderEngine(secretStore: secretStore)
+        let policyBox = NIOLockedValueBox<SecurityPolicySnapshot>(
+            SecurityPolicySnapshot(
+                maxSubstitutionsPerMinute: configuration.maxSubstitutionsPerMinute,
+                onExfilAttempt: configuration.onExfilAttempt
+            )
+        )
+        self.securityPolicyBox = policyBox
+        self.allowedHostsBox = NIOLockedValueBox(configuration.allowedHosts)
         self.exfilRuleEngine = ExfilRuleEngine(
             secretStore: secretStore,
-            maxSubstitutionsPerMinute: configuration.maxSubstitutionsPerMinute
+            maxSubstitutionsPerMinuteProvider: { policyBox.withLockedValue { $0.maxSubstitutionsPerMinute } }
         )
         self.leafCertCache = LeafCertCache(caManager: caManager)
         if let group = group {
@@ -125,7 +147,7 @@ public final class ProxyServer: @unchecked Sendable {
             "Proxy bound",
             metadata: [
                 "address": "\(address)",
-                "allowed_hosts": "\(configuration.allowedHosts.sorted())",
+                "allowed_hosts": "\(currentAllowedHosts.sorted())",
             ]
         )
         return address
@@ -153,6 +175,52 @@ public final class ProxyServer: @unchecked Sendable {
 
     public func setPaused(_ paused: Bool) {
         pauseFlag.withLockedValue { $0 = paused }
+    }
+
+    // MARK: - Hot-reload primitives
+
+    /// Returns the current live set of allowed MITM hosts.
+    /// Safe to call from any context without suspension.
+    public func allowedHostsSnapshot() async -> Set<String> {
+        allowedHostsBox.withLockedValue { $0 }
+    }
+
+    /// Returns the current live security-policy snapshot.
+    /// Safe to call from any context without suspension.
+    public func securityPolicySnapshot() async -> SecurityPolicySnapshot {
+        securityPolicyBox.withLockedValue { $0 }
+    }
+
+    /// Atomically replaces the set of allowed MITM hosts.
+    /// Takes effect for every new request processed after this call returns.
+    public func updateAllowedHosts(_ hosts: Set<String>) async {
+        allowedHostsBox.withLockedValue { $0 = hosts }
+    }
+
+    /// Atomically replaces security-policy fields.
+    /// Takes effect for every new request processed after this call returns.
+    public func updateSecurityPolicy(
+        maxSubstitutionsPerMinute: Int,
+        onExfilAttempt: ExfilAttemptPolicy
+    ) async {
+        securityPolicyBox.withLockedValue {
+            $0 = SecurityPolicySnapshot(
+                maxSubstitutionsPerMinute: maxSubstitutionsPerMinute,
+                onExfilAttempt: onExfilAttempt
+            )
+        }
+    }
+
+    // MARK: - Internal live-value accessors (consumed by NIO handlers)
+
+    /// Live snapshot of the allowed MITM hosts. Read by `ConnectHandler` per connection.
+    var currentAllowedHosts: Set<String> {
+        allowedHostsBox.withLockedValue { $0 }
+    }
+
+    /// Live `onExfilAttempt` policy. Read by `MITMHandler` per request.
+    var currentOnExfilAttempt: ExfilAttemptPolicy {
+        securityPolicyBox.withLockedValue { $0.onExfilAttempt }
     }
 }
 
