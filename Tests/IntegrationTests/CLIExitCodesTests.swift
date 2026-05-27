@@ -54,17 +54,19 @@ final class CLIExitCodesTests: XCTestCase {
         XCTAssertTrue(stderr.contains("irisd not running"), "stderr=\(stderr)")
     }
 
-    func testConfigReloadExitsUsage() throws {
+    func testConfigReloadExitsTwoWhenDaemonUnreachable() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iris-noexist-\(UUID().uuidString).sock").path
         let process = Process()
         process.executableURL = ExecutableLocator.iris
-        process.arguments = ["config", "reload"]
+        process.arguments = ["config", "reload", "--socket-path", tmp]
         process.standardOutput = Pipe()
         let errPipe = Pipe()
         process.standardError = errPipe
         try process.run()
         process.waitUntilExit()
-        XCTAssertEqual(process.terminationStatus, 64)
+        XCTAssertEqual(process.terminationStatus, 2)
         let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        XCTAssertTrue(stderr.contains("Phase 4.x"))
+        XCTAssertTrue(stderr.contains("irisd not running"), "stderr=\(stderr)")
     }
 }

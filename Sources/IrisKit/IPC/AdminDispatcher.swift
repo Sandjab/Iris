@@ -21,6 +21,7 @@ public struct AdminDispatcher: Sendable {
     public let runtimeRulesStore: RuntimeRulesStore
     public let onRulesChanged: @Sendable () async -> Void
     public let tomlHostsProvider: @Sendable () async -> [String]
+    public let onConfigReload: @Sendable () async throws -> ConfigReloadResult
 
     public init(
         secretStore: any SecretStore,
@@ -31,6 +32,9 @@ public struct AdminDispatcher: Sendable {
         runtimeRulesStore: RuntimeRulesStore,
         onRulesChanged: @escaping @Sendable () async -> Void = {},
         tomlHostsProvider: @escaping @Sendable () async -> [String] = { [] },
+        onConfigReload: @escaping @Sendable () async throws -> ConfigReloadResult = {
+            throw JSONRPCError.internalError
+        },
         logger: Logger = Logger(label: "io.iris.admin.dispatcher")
     ) {
         self.secretStore = secretStore
@@ -41,6 +45,7 @@ public struct AdminDispatcher: Sendable {
         self.runtimeRulesStore = runtimeRulesStore
         self.onRulesChanged = onRulesChanged
         self.tomlHostsProvider = tomlHostsProvider
+        self.onConfigReload = onConfigReload
         self.logger = logger
     }
 
@@ -203,8 +208,8 @@ public struct AdminDispatcher: Sendable {
             return try JSONValue.encoding(RuleDeletedResult(deleted: true))
 
         case .configReload:
-            // TODO: Phase 5.5 — dynamic config reload from disk
-            throw JSONRPCError.methodNotFound
+            let result = try await onConfigReload()
+            return try JSONValue.encoding(result)
 
         case .eventsClear:
             let n = await eventRing.clear()
