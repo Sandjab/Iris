@@ -463,6 +463,40 @@ final class AdminDispatcherTests: XCTestCase {
         XCTAssertEqual(delAgainResp.error?.code, JSONRPCError.ruleNotFound.code)
     }
 
+    func testRuleAddOnTomlHostReturnsSynthRuleWithoutRuntimeWrite() async throws {
+        // Spec §3.1: rule.add on a TOML-defined host must be an idempotent no-op
+        // that returns a synthesised MITMRule (createdAt=epoch 0, source=.toml)
+        // without writing to the runtime store.
+        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
+        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
+        let caManager = CAManager(keyStore: InMemoryCAKeyStore())
+        _ = try await caManager.ensureCA()
+        let dispatcher = AdminDispatcher(
+            secretStore: InMemorySecretStore(),
+            eventRing: EventRing(capacity: 64),
+            caManager: caManager,
+            daemon: FakeDaemon(),
+            runtimeRulesStore: rulesStore,
+            tomlHostsProvider: { ["api.toml.example.com"] },
+            logger: Logger(label: "test")
+        )
+
+        // rule.add on a TOML host
+        let addResp = await dispatcher.dispatch(
+            request(.ruleAdd, params: try JSONValue.encoding(RuleHostParams(host: "api.toml.example.com")))
+        )
+        let synth = try unwrapResult(addResp).decode(as: MITMRule.self)
+        XCTAssertEqual(synth.host, "api.toml.example.com")
+        XCTAssertEqual(synth.source, .toml)
+        XCTAssertEqual(synth.createdAt.timeIntervalSince1970, 0,
+            "synthesised rule must have createdAt = epoch 0")
+
+        // Verify runtime store was NOT written
+        let runtimeRules = await rulesStore.list()
+        XCTAssertTrue(runtimeRules.isEmpty,
+            "rule.add on TOML host must not write to runtime store; got \(runtimeRules)")
+    }
+
     func testRuleAddInvalidHostReturnsInvalidParams() async throws {
         let (dispatcher, _, _) = try await makeDispatcher()
         let resp = await dispatcher.dispatch(

@@ -179,6 +179,18 @@ public struct AdminDispatcher: Sendable {
 
         case .ruleAdd:
             let payload = try Self.decode(RuleHostParams.self, from: params)
+            // Spec §3.1: if the host is already defined in TOML, return a
+            // synthesised rule (createdAt = epoch 0, source = .toml) without
+            // touching the runtime store — idempotent no-op.
+            let tomlHosts = Set(await tomlHostsProvider())
+            if tomlHosts.contains(payload.host) {
+                let synthRule = MITMRule(
+                    host: payload.host,
+                    createdAt: Date(timeIntervalSince1970: 0),
+                    source: .toml
+                )
+                return try JSONValue.encoding(synthRule)
+            }
             let rule = try await runtimeRulesStore.add(host: payload.host, now: Date())
             await onRulesChanged()
             return try JSONValue.encoding(rule)
