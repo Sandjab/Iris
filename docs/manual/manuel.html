@@ -400,8 +400,9 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
 
       <li class="group">Annexes</li>
       <li><a href="#annex-status"><span class="num">A.</span>État d'implémentation</a></li>
-      <li><a href="#annex-glossary"><span class="num">B.</span>Glossaire</a></li>
-      <li><a href="#annex-refs"><span class="num">C.</span>Références</a></li>
+      <li><a href="#annex-usage-limits"><span class="num">B.</span>Limites d'usage</a></li>
+      <li><a href="#annex-glossary"><span class="num">C.</span>Glossaire</a></li>
+      <li><a href="#annex-refs"><span class="num">D.</span>Références</a></li>
     </ol>
   </div>
 </nav>
@@ -2152,7 +2153,123 @@ en revanche fonctionne dès aujourd'hui — REST + token plat dans <code>x-goog-
   </tbody>
 </table>
 
-<h2 id="annex-glossary"><span class="chapnum">B</span>Glossaire<a class="anchor" href="#annex-glossary">¶</a></h2>
+<h2 id="annex-usage-limits"><span class="chapnum">B</span>Limites d'usage côté dev solo<a class="anchor" href="#annex-usage-limits">¶</a></h2>
+
+<p class="lead">
+Pendant côté usages du tableau §7 (côté fournisseurs). Inventaire honnête de ce qu'IRIS
+<strong>ne couvre pas</strong>, classé par probabilité qu'un développeur solo croise le mur.
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Usage non couvert</th>
+      <th>Pourquoi</th>
+      <th>Proba</th>
+      <th>Mitigation</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><strong>Apps GUI avec IA intégrée</strong><br><span style="color: var(--fg-muted); font-size: 12.5px;">Cursor, Claude Desktop, Continue, Cody, Zed</span></td>
+      <td>Lancées depuis Dock / Spotlight → n'héritent pas de <code>HTTPS_PROXY</code> (objectif G8 SPECS)</td>
+      <td><span class="badge" style="background: rgba(192,57,43,0.15); color: var(--err);">élevée</span></td>
+      <td>Lancer l'app depuis un terminal (mais <code>open -a</code> ne suffit pas, il faut le binaire direct). Pénible au quotidien.</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>Docker / dev containers</strong></td>
+      <td><code>127.0.0.1</code> côté container ≠ host. Le proxy n'est pas joignable par défaut.</td>
+      <td><span class="badge badge-warn">moyenne</span></td>
+      <td><code>--network host</code> ou <code>host.docker.internal:8888</code> + monter <code>ca.pem</code> en volume. Faisable, à scripter.</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Multi-machine</strong><br><span style="color: var(--fg-muted); font-size: 12.5px;">laptop + desktop, nouvelle machine</span></td>
+      <td>Keychain local, pas de sync (G1 — single-machine)</td>
+      <td><span class="badge badge-warn">moyenne</span></td>
+      <td>Re-ajouter les secrets à la main sur chaque machine. Quelques minutes par machine.</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><strong>LaunchAgents / cron jobs</strong> écrits soi-même</td>
+      <td><code>launchd</code> n'hérite pas du shell env</td>
+      <td><span class="badge badge-warn">moyenne</span></td>
+      <td>Injecter les vars dans le plist (<code>EnvironmentVariables</code>) à la main.</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td><strong>AWS Bedrock</strong> (SigV4)</td>
+      <td>Signature dérivée de la clé secrète, hors modèle de substitution (cf §7, facteur F3)</td>
+      <td><span class="badge badge-ok">faible</span></td>
+      <td>Aucune. Sortir de l'env IRIS (ex. <code>op run</code> ponctuel) pour ces appels.</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td><strong>GCP Vertex AI via SDK gRPC</strong></td>
+      <td>HTTP/2 mandatory ; IRIS MVP force h1.1 en ALPN (cf §7, facteur F2)</td>
+      <td><span class="badge badge-ok">faible</span></td>
+      <td>Utiliser les endpoints REST où ils existent, sinon attendre support HTTP/2 (roadmap).</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td><strong>Binaires Go/Bun à client HTTP custom</strong> ignorant <code>HTTPS_PROXY</code></td>
+      <td>Implémentations non-standard qui n'appellent pas <code>http.ProxyFromEnvironment</code> ou équivalent</td>
+      <td><span class="badge badge-ok">faible</span></td>
+      <td>Si MCP : <code>iris mcp wrap</code> patche le bloc env du serveur. Sinon : config explicite du proxy dans l'outil.</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td><strong>Clients cert-pinnés</strong></td>
+      <td>Refusent le cert leaf émis par la CA locale (cf §7, facteur F1)</td>
+      <td><span class="badge badge-ok">quasi nulle</span></td>
+      <td>Aucune. Surveiller les changelogs des SDK concernés.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Lecture pratique</h3>
+
+<p><strong>Sweet spot 100% couvert</strong> — le workflow CLI agentique standard :</p>
+<ul>
+  <li><code>claude</code> (Claude Code CLI)</li>
+  <li><code>gh</code>, <code>git</code>, <code>curl</code>, <code>wget</code></li>
+  <li>Scripts Python / Node utilisant les SDK Anthropic / OpenAI</li>
+  <li>Serveurs MCP en stdio spawnés par <code>claude</code></li>
+  <li><code>npm install</code> avec token registry privé (npm honore <code>HTTPS_PROXY</code>)</li>
+  <li>Tout binaire qui hérite honnêtement de l'env shell et respecte les conventions proxy</li>
+</ul>
+
+<p><strong>Le vrai blocker en pratique : ligne 1 (GUI editors avec IA)</strong>. Si vous utilisez
+Cursor, Claude Desktop, Continue ou Zed en parallèle de Claude Code, ces outils ne passent pas
+par IRIS. Vu l'adoption massive de Cursor chez les devs solos, c'est probablement le scénario qui
+vous concerne en premier — et la raison pour laquelle des outils comme Cordon ou le sandbox Docker
+existent en parallèle.</p>
+
+<p><strong>Lignes 2–4 (Docker, multi-machine, cron) : friction acceptable</strong>. Solvables par
+config ponctuelle, juste pas zéro-friction. Un dev solo discipliné les absorbe.</p>
+
+<p><strong>Lignes 5–8 : non-événements pour le dev solo classique</strong>. Bedrock et Vertex gRPC
+sont du territoire enterprise. Bun à client HTTP custom et pinning sont des cas rares.</p>
+
+<div class="callout callout-info">
+  <div class="icon">i</div>
+  <div class="body">
+    <p><strong>La bonne question à se poser</strong> n'est pas « IRIS couvre-t-il 100% de mes usages ? »
+    (réponse&nbsp;: non, ligne 1 garantit que non si vous utilisez Cursor), mais
+    <em>« IRIS couvre-t-il les usages les plus risqués ? »</em>. Et là oui&nbsp;: ce sont précisément
+    les agents CLI auto-pilotés (Claude Code en mode <code>--dangerously-skip-permissions</code>,
+    agents MCP avec tools sensibles) qui sont les plus exposés au prompt injection. Cursor en mode
+    "ask-and-apply" supervisé est statistiquement moins risqué — l'humain dans la boucle filtre.</p>
+    <p>Donc même sans couvrir Cursor, le ROI sécurité d'IRIS reste élevé si vous mettez votre clé
+    Anthropic la plus sensible côté <code>claude</code> CLI plutôt que côté Cursor. C'est un choix
+    de répartition, pas un défaut binaire.</p>
+  </div>
+</div>
+
+<h2 id="annex-glossary"><span class="chapnum">C</span>Glossaire<a class="anchor" href="#annex-glossary">¶</a></h2>
 
 <table>
   <tbody>
@@ -2172,7 +2289,7 @@ en revanche fonctionne dès aujourd'hui — REST + token plat dans <code>x-goog-
   </tbody>
 </table>
 
-<h2 id="annex-refs"><span class="chapnum">C</span>Références<a class="anchor" href="#annex-refs">¶</a></h2>
+<h2 id="annex-refs"><span class="chapnum">D</span>Références<a class="anchor" href="#annex-refs">¶</a></h2>
 
 <ul>
   <li><a href="../SPECS.md"><code>SPECS.md</code></a> — spécification technique complète, source de vérité.</li>
