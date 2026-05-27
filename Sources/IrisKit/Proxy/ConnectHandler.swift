@@ -78,7 +78,7 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
     // MARK: - Upgrade
 
     private func performUpgrade(context: ChannelHandlerContext, host: String, port: Int) {
-        guard server.configuration.allowedHosts.contains(host) else {
+        guard server.currentAllowedHosts.contains(host) else {
             // SPECS §8.3: non-whitelisted hosts are CONNECT-tunneled
             // byte-for-byte. The proxy never decrypts the bytes, so any
             // placeholders inside the tunneled TLS are sent encrypted to

@@ -1,5 +1,6 @@
 import Foundation
 import Logging
+import NIOConcurrencyHelpers
 import XCTest
 
 @testable import IrisKit
@@ -30,12 +31,15 @@ final class AdminDispatcherTests: XCTestCase {
     ) async throws -> (AdminDispatcher, FakeDaemon, EventRing) {
         let caManager = CAManager(keyStore: InMemoryCAKeyStore())
         _ = try await caManager.ensureCA()
+        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
+        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
         let dispatcher = AdminDispatcher(
             secretStore: secretStore,
             eventRing: eventRing,
             caManager: caManager,
             daemon: daemon,
             config: config,
+            runtimeRulesStore: rulesStore,
             logger: Logger(label: "test")
         )
         return (dispatcher, daemon, eventRing)
@@ -297,11 +301,14 @@ final class AdminDispatcherTests: XCTestCase {
         _ = try await caManager.ensureCA()
         defer { try? FileManager.default.removeItem(at: tmpURL) }
 
+        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
+        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
         let dispatcher = AdminDispatcher(
             secretStore: InMemorySecretStore(),
             eventRing: EventRing(capacity: 16),
             caManager: caManager,
             daemon: FakeDaemon(),
+            runtimeRulesStore: rulesStore,
             logger: Logger(label: "test")
         )
 
@@ -359,5 +366,185 @@ final class AdminDispatcherTests: XCTestCase {
         let resp = await dispatcher.dispatch(request(.configGet))
         let returned = try unwrapResult(resp).decode(as: Config.self)
         XCTAssertEqual(returned, config)
+    }
+
+    // MARK: - events.clear
+
+    func testEventsClearReturnsDeletedCountAndPreservesTotals() async throws {
+        let ring = EventRing(capacity: 100)
+        for index in 0..<4 {
+            await ring.append(
+                Event(
+                    timestamp: Date(),
+                    kind: .substituted,
+                    host: "h\(index)",
+                    method: "POST",
+                    path: "/v1"
+                )
+            )
+        }
+
+        let (dispatcher, _, _) = try await makeDispatcher(eventRing: ring)
+        let resp = await dispatcher.dispatch(request(.eventsClear))
+        let result = try unwrapResult(resp).decode(as: EventsClearResult.self)
+
+        XCTAssertEqual(result.deletedCount, 4)
+        // Verify entries are gone
+        let remaining = await ring.recent(100)
+        XCTAssertEqual(remaining.count, 0, "entries should be cleared")
+        // Verify totals are preserved
+        let totalSubstituted = await ring.count(of: .substituted)
+        XCTAssertEqual(totalSubstituted, 4, "totals must survive clear()")
+    }
+
+    // MARK: - rule.*
+
+    func testRuleAddListDelete() async throws {
+        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
+        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
+        // Sendable shared state: same pattern as ProxyServer.pauseFlag (Phase 3)
+        // and ProxyServer.allowedHostsBox / securityPolicyBox (Phase 4.x Task 6).
+        let onChangedFlag = NIOLockedValueBox<Bool>(false)
+        let caManager = CAManager(keyStore: InMemoryCAKeyStore())
+        _ = try await caManager.ensureCA()
+        let dispatcher = AdminDispatcher(
+            secretStore: InMemorySecretStore(),
+            eventRing: EventRing(capacity: 64),
+            caManager: caManager,
+            daemon: FakeDaemon(),
+            runtimeRulesStore: rulesStore,
+            onRulesChanged: { onChangedFlag.withLockedValue { $0 = true } },
+            tomlHostsProvider: { ["api.toml.example.com"] },
+            logger: Logger(label: "test")
+        )
+
+        // rule.add
+        let addResp = await dispatcher.dispatch(
+            request(.ruleAdd, params: try JSONValue.encoding(RuleHostParams(host: "api.runtime.example.com")))
+        )
+        let added = try unwrapResult(addResp).decode(as: MITMRule.self)
+        XCTAssertEqual(added.host, "api.runtime.example.com")
+        XCTAssertEqual(added.source, .runtime)
+        XCTAssertTrue(
+            onChangedFlag.withLockedValue { $0 },
+            "onRulesChanged must be called after add"
+        )
+
+        // rule.list — must include both TOML and runtime
+        let listResp = await dispatcher.dispatch(request(.ruleList))
+        let rules = try unwrapResult(listResp).decode(as: [MITMRule].self)
+        let hosts = rules.map(\.host).sorted()
+        XCTAssertEqual(hosts, ["api.runtime.example.com", "api.toml.example.com"])
+        let tomlRule = rules.first { $0.host == "api.toml.example.com" }
+        XCTAssertEqual(tomlRule?.source, .toml, "TOML host must have source=.toml in listing")
+
+        // rule.delete — TOML-sourced host is protected
+        let delTomlResp = await dispatcher.dispatch(
+            request(.ruleDelete, params: try JSONValue.encoding(RuleHostParams(host: "api.toml.example.com")))
+        )
+        XCTAssertEqual(delTomlResp.error?.code, JSONRPCError.ruleProtected.code)
+
+        // rule.delete — runtime host succeeds
+        onChangedFlag.withLockedValue { $0 = false }
+        let delResp = await dispatcher.dispatch(
+            request(.ruleDelete, params: try JSONValue.encoding(RuleHostParams(host: "api.runtime.example.com")))
+        )
+        let deleted = try unwrapResult(delResp).decode(as: RuleDeletedResult.self)
+        XCTAssertTrue(deleted.deleted)
+        XCTAssertTrue(
+            onChangedFlag.withLockedValue { $0 },
+            "onRulesChanged must be called after delete"
+        )
+
+        // rule.delete — not found after deletion
+        let delAgainResp = await dispatcher.dispatch(
+            request(.ruleDelete, params: try JSONValue.encoding(RuleHostParams(host: "api.runtime.example.com")))
+        )
+        XCTAssertEqual(delAgainResp.error?.code, JSONRPCError.ruleNotFound.code)
+    }
+
+    func testRuleAddOnTomlHostReturnsSynthRuleWithoutRuntimeWrite() async throws {
+        // Spec §3.1: rule.add on a TOML-defined host must be an idempotent no-op
+        // that returns a synthesised MITMRule (createdAt=epoch 0, source=.toml)
+        // without writing to the runtime store.
+        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
+        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
+        let caManager = CAManager(keyStore: InMemoryCAKeyStore())
+        _ = try await caManager.ensureCA()
+        let dispatcher = AdminDispatcher(
+            secretStore: InMemorySecretStore(),
+            eventRing: EventRing(capacity: 64),
+            caManager: caManager,
+            daemon: FakeDaemon(),
+            runtimeRulesStore: rulesStore,
+            tomlHostsProvider: { ["api.toml.example.com"] },
+            logger: Logger(label: "test")
+        )
+
+        // rule.add on a TOML host
+        let addResp = await dispatcher.dispatch(
+            request(.ruleAdd, params: try JSONValue.encoding(RuleHostParams(host: "api.toml.example.com")))
+        )
+        let synth = try unwrapResult(addResp).decode(as: MITMRule.self)
+        XCTAssertEqual(synth.host, "api.toml.example.com")
+        XCTAssertEqual(synth.source, .toml)
+        XCTAssertEqual(
+            synth.createdAt.timeIntervalSince1970,
+            0,
+            "synthesised rule must have createdAt = epoch 0"
+        )
+
+        // Verify runtime store was NOT written
+        let runtimeRules = await rulesStore.list()
+        XCTAssertTrue(
+            runtimeRules.isEmpty,
+            "rule.add on TOML host must not write to runtime store; got \(runtimeRules)"
+        )
+    }
+
+    func testRuleAddInvalidHostReturnsInvalidParams() async throws {
+        let (dispatcher, _, _) = try await makeDispatcher()
+        let resp = await dispatcher.dispatch(
+            request(.ruleAdd, params: try JSONValue.encoding(RuleHostParams(host: "not a valid host!")))
+        )
+        XCTAssertEqual(resp.error?.code, JSONRPCError.invalidParams.code)
+    }
+
+    func testRuleListReturnsEmptyWhenNoRulesAndNoToml() async throws {
+        let (dispatcher, _, _) = try await makeDispatcher()
+        let resp = await dispatcher.dispatch(request(.ruleList))
+        let rules = try unwrapResult(resp).decode(as: [MITMRule].self)
+        XCTAssertTrue(rules.isEmpty)
+    }
+
+    func testRuleListTomlWinsOnHostCollision() async throws {
+        // Seed the runtime store with the same host that the tomlHostsProvider provides.
+        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
+        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
+        _ = try await rulesStore.add(host: "api.shared.example.com", now: Date())
+        let caManager = CAManager(keyStore: InMemoryCAKeyStore())
+        _ = try await caManager.ensureCA()
+        let dispatcher = AdminDispatcher(
+            secretStore: InMemorySecretStore(),
+            eventRing: EventRing(capacity: 64),
+            caManager: caManager,
+            daemon: FakeDaemon(),
+            runtimeRulesStore: rulesStore,
+            tomlHostsProvider: { ["api.shared.example.com"] },
+            logger: Logger(label: "test")
+        )
+        let resp = await dispatcher.dispatch(request(.ruleList))
+        let rules = try unwrapResult(resp).decode(as: [MITMRule].self)
+        XCTAssertEqual(rules.count, 1)
+        XCTAssertEqual(rules[0].source, .toml, "TOML wins on host collision")
+    }
+
+    func testEventsClearOnEmptyRingReturnsZero() async throws {
+        let ring = EventRing(capacity: 100)
+        let (dispatcher, _, _) = try await makeDispatcher(eventRing: ring)
+
+        let resp = await dispatcher.dispatch(request(.eventsClear))
+        let result = try unwrapResult(resp).decode(as: EventsClearResult.self)
+        XCTAssertEqual(result.deletedCount, 0)
     }
 }

@@ -65,7 +65,7 @@ final class RedactionTests: XCTestCase {
             allowedHosts: ["api.anthropic.com"],
             createdAt: Date()
         )
-        let evaluator = ExfilRuleEngine(secretStore: store, maxSubstitutionsPerMinute: 60)
+        let evaluator = ExfilRuleEngine(secretStore: store, maxSubstitutionsPerMinuteProvider: { 60 })
         let hit = PlaceholderHit(
             name: secretName,
             location: .header(name: "x-custom"),

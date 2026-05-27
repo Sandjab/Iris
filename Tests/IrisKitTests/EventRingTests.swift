@@ -103,6 +103,35 @@ final class EventRingTests: XCTestCase {
         XCTAssertEqual(stored.last?.host, "h10002")
     }
 
+    // MARK: - clear()
+
+    func testClearEmptiesEntriesAndReturnsDeletedCount() async throws {
+        let ring = EventRing(capacity: 100)
+        for _ in 0..<5 {
+            await ring.append(Self.makeEvent(host: "h1"))
+        }
+        let deleted = await ring.clear()
+        XCTAssertEqual(deleted, 5)
+        let remaining = await ring.recent(100)
+        XCTAssertEqual(remaining.count, 0)
+    }
+
+    func testClearPreservesCumulativeTotals() async throws {
+        let ring = EventRing(capacity: 100)
+        for _ in 0..<3 {
+            await ring.append(Self.makeEvent(host: "h1"))
+        }
+        _ = await ring.clear()
+        let totalSubstituted = await ring.count(of: .substituted)
+        XCTAssertEqual(totalSubstituted, 3, "totals must survive clear()")
+    }
+
+    func testClearOnEmptyRingReturnsZero() async throws {
+        let ring = EventRing(capacity: 100)
+        let deleted = await ring.clear()
+        XCTAssertEqual(deleted, 0)
+    }
+
     // MARK: - Helpers
 
     private static func makeEvent(

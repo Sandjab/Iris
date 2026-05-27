@@ -78,13 +78,34 @@ struct IrisDaemonCLI: AsyncParsableCommand {
             ]
         )
 
+        let resolvedConfigPath: URL? =
+            configPath.map {
+                URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath)
+            }
+            ?? {
+                let defaultPath = ("~/Library/Application Support/iris/config.toml" as NSString)
+                    .expandingTildeInPath
+                let url = URL(fileURLWithPath: defaultPath)
+                return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            }()
+
         let daemon = try await Daemon(
             config: config,
+            configPath: resolvedConfigPath,
             secretBackend: inMemorySecrets ? .inMemoryFromEnvironment : .keychain,
             caBackend: inMemoryCa ? .inMemory : .keychain,
             caPath: caURL,
             logger: logger
         )
+
+        // Install SIGHUP handler to trigger hot reload. The token must live as
+        // long as the daemon to keep the handler armed; `defer` ensures cleanup
+        // even if `daemon.run()` throws.
+        let sighupToken = installSIGHUP {
+            Task { _ = try? await daemon.reload() }
+        }
+        defer { withExtendedLifetime(sighupToken) {} }
+
         try await daemon.run()
     }
 

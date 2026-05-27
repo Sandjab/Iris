@@ -26,9 +26,36 @@ final class ModelsTests: XCTestCase {
     func testMITMRuleRoundTrip() throws {
         let rule = MITMRule(
             host: "api.github.com",
-            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            source: .toml
         )
         XCTAssertEqual(try roundTrip(rule), rule)
+    }
+
+    func testMITMRuleEncodesSourceField() throws {
+        let rule = MITMRule(
+            host: "api.openai.com",
+            createdAt: Date(timeIntervalSince1970: 0),
+            source: .toml
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(rule)
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(
+            json.contains("\"source\":\"toml\""),
+            "wire format must use snake-case source value, got: \(json)"
+        )
+    }
+
+    func testMITMRuleRoundTripRuntimeSource() throws {
+        let original = MITMRule(
+            host: "api.example.com",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            source: .runtime
+        )
+        XCTAssertEqual(try roundTrip(original), original)
+        XCTAssertEqual(original.source, .runtime)
     }
 
     func testEventRoundTripWithAlert() throws {

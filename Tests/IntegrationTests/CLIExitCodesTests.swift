@@ -1,6 +1,35 @@
 import XCTest
 
 final class CLIExitCodesTests: XCTestCase {
+
+    // MARK: - Helpers
+
+    /// Waits for `process` to exit within `timeout` seconds. Terminates (then
+    /// kills) the process if it does not exit in time, and fails the test.
+    private func waitWithTimeout(
+        _ process: Process,
+        timeout: TimeInterval = 10,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+            let killDeadline = Date().addingTimeInterval(2)
+            while process.isRunning && Date() < killDeadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+            }
+            process.waitUntilExit()
+            XCTFail("process did not exit within \(timeout)s", file: file, line: line)
+        }
+    }
+
     func testStatusExitsTwoWhenDaemonUnreachable() throws {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("iris-noexist-\(UUID().uuidString).sock").path
@@ -12,7 +41,7 @@ final class CLIExitCodesTests: XCTestCase {
         process.standardOutput = outPipe
         process.standardError = errPipe
         try process.run()
-        process.waitUntilExit()
+        waitWithTimeout(process)
 
         XCTAssertEqual(process.terminationStatus, 2)
         let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
@@ -31,38 +60,42 @@ final class CLIExitCodesTests: XCTestCase {
         process.standardOutput = outPipe
         process.standardError = errPipe
         try process.run()
-        process.waitUntilExit()
+        waitWithTimeout(process)
 
         XCTAssertEqual(process.terminationStatus, 2)
         let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         XCTAssertTrue(stderr.contains("irisd not running"), "stderr=\(stderr)")
     }
 
-    func testRuleAddExitsUsage() throws {
+    func testRuleAddExitsTwoWhenDaemonUnreachable() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iris-noexist-\(UUID().uuidString).sock").path
         let process = Process()
         process.executableURL = ExecutableLocator.iris
-        process.arguments = ["rule", "add", "foo.example.com"]
+        process.arguments = ["rule", "add", "foo.example.com", "--socket-path", tmp]
         let errPipe = Pipe()
         process.standardOutput = Pipe()
         process.standardError = errPipe
         try process.run()
-        process.waitUntilExit()
-        XCTAssertEqual(process.terminationStatus, 64)
+        waitWithTimeout(process)
+        XCTAssertEqual(process.terminationStatus, 2)
         let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        XCTAssertTrue(stderr.contains("Phase 4.x"))
+        XCTAssertTrue(stderr.contains("irisd not running"), "stderr=\(stderr)")
     }
 
-    func testConfigReloadExitsUsage() throws {
+    func testConfigReloadExitsTwoWhenDaemonUnreachable() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iris-noexist-\(UUID().uuidString).sock").path
         let process = Process()
         process.executableURL = ExecutableLocator.iris
-        process.arguments = ["config", "reload"]
+        process.arguments = ["config", "reload", "--socket-path", tmp]
         process.standardOutput = Pipe()
         let errPipe = Pipe()
         process.standardError = errPipe
         try process.run()
-        process.waitUntilExit()
-        XCTAssertEqual(process.terminationStatus, 64)
+        waitWithTimeout(process)
+        XCTAssertEqual(process.terminationStatus, 2)
         let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        XCTAssertTrue(stderr.contains("Phase 4.x"))
+        XCTAssertTrue(stderr.contains("irisd not running"), "stderr=\(stderr)")
     }
 }

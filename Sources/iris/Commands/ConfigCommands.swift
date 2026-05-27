@@ -54,18 +54,27 @@ struct ConfigCommand: AsyncParsableCommand {
     struct Reload: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "reload",
-            abstract:
-                "Reload config via SIGHUP (Phase 4.x — not yet implemented)."
+            abstract: "Reload daemon config from TOML (equivalent to SIGHUP)."
         )
 
+        @OptionGroup var connection: ConnectionOptions
+        @Flag(name: .customLong("json")) var json: Bool = false
+
         mutating func run() async throws {
-            FileHandle.standardError.write(
-                Data(
-                    "iris config reload: not implemented in Phase 5 (tracked in Phase 4.x — needs SIGHUP handler in irisd)\n"
-                        .utf8
-                )
+            let result = try await withAdminClient(connection) { client in
+                try await client.call(.configReload, returning: ConfigReloadResult.self)
+            }
+            if !result.ignored.isEmpty {
+                let warning =
+                    "warning: ignored structural changes (restart required): "
+                    + "\(result.ignored.joined(separator: ", "))\n"
+                FileHandle.standardError.write(Data(warning.utf8))
+            }
+            try Output.print(
+                humanText: "reloaded: \(result.reloaded)\n",
+                jsonValue: result,
+                json: json
             )
-            Foundation.exit(IrisExitCode.usage)
         }
     }
 }

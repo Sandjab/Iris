@@ -139,6 +139,16 @@ extension JSONRPCError {
     public static func notFound(_ description: String) -> JSONRPCError {
         JSONRPCError(code: -32006, message: "Not found: \(description)")
     }
+
+    public static let ruleProtected = JSONRPCError(
+        code: -32010,
+        message: "rule defined in config TOML — edit the file directly"
+    )
+    public static let ruleNotFound = JSONRPCError(code: -32011, message: "rule not found")
+
+    public static func configReloadFailed(_ reason: String) -> JSONRPCError {
+        JSONRPCError(code: -32012, message: "config.reload failed: \(reason)")
+    }
 }
 
 // MARK: - JSON value

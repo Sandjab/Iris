@@ -41,12 +41,17 @@ struct SlidingMinuteCounter: Sendable {
 
 public actor ExfilRuleEngine {
     private let secretStore: any SecretStore
-    private let maxSubstitutionsPerMinute: Int
+    private let maxSubstitutionsPerMinuteProvider: @Sendable () -> Int
     private var volumeCounters: [String: SlidingMinuteCounter] = [:]
 
-    public init(secretStore: any SecretStore, maxSubstitutionsPerMinute: Int) {
+    /// Initialise with a provider closure so the threshold can be hot-reloaded
+    /// without recreating the engine. The closure is called on every volume check.
+    public init(
+        secretStore: any SecretStore,
+        maxSubstitutionsPerMinuteProvider: @Sendable @escaping () -> Int
+    ) {
         self.secretStore = secretStore
-        self.maxSubstitutionsPerMinute = maxSubstitutionsPerMinute
+        self.maxSubstitutionsPerMinuteProvider = maxSubstitutionsPerMinuteProvider
     }
 
     public func recordSubstitution(secretNames: [String]) {
@@ -59,13 +64,14 @@ public actor ExfilRuleEngine {
     }
 
     private func wouldExceedVolumeLimit(name: String) -> Bool {
+        let limit = maxSubstitutionsPerMinuteProvider()
         let now = Date()
         guard var counter = volumeCounters[name] else {
-            return 1 > maxSubstitutionsPerMinute
+            return 1 > limit
         }
         let willBe = counter.count(at: now) + 1
         volumeCounters[name] = counter  // persist prune
-        return willBe > maxSubstitutionsPerMinute
+        return willBe > limit
     }
 
     public func evaluate(
