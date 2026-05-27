@@ -200,5 +200,5 @@ public struct EventsClearResult: Codable, Sendable, Equatable {
 /// Version string surfaced by `daemon.status`. Embedded into the binary at
 /// build time; for now a literal constant updated alongside releases.
 public enum DaemonVersion {
-    public static let current = "0.3.0-phase3"
+    public static let current = "0.5.2-phase4.x"
 }
