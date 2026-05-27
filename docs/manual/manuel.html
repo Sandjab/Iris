@@ -375,27 +375,28 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
       <li><a href="#flow"><span class="num">4.</span>Flux d'une requête</a></li>
       <li><a href="#threat"><span class="num">5.</span>Modèle de menace</a></li>
       <li><a href="#exfil"><span class="num">6.</span>Détection d'exfiltration</a></li>
+      <li><a href="#provider-compat"><span class="num">7.</span>Compatibilité par fournisseur</a></li>
 
       <li class="group">Partie II — Installer & configurer</li>
-      <li><a href="#install"><span class="num">7.</span>Installation <span class="badge-soon">.pkg</span></a></li>
-      <li><a href="#setup-shell"><span class="num">8.</span>Configuration shell</a></li>
-      <li><a href="#config-toml"><span class="num">9.</span>Fichier config.toml</a></li>
-      <li><a href="#ca-trust"><span class="num">10.</span>CA &amp; trust store</a></li>
+      <li><a href="#install"><span class="num">8.</span>Installation <span class="badge-soon">.pkg</span></a></li>
+      <li><a href="#setup-shell"><span class="num">9.</span>Configuration shell</a></li>
+      <li><a href="#config-toml"><span class="num">10.</span>Fichier config.toml</a></li>
+      <li><a href="#ca-trust"><span class="num">11.</span>CA &amp; trust store</a></li>
 
       <li class="group">Partie III — Utiliser au quotidien</li>
-      <li><a href="#cli-overview"><span class="num">11.</span>CLI — vue d'ensemble</a></li>
-      <li><a href="#cli-secrets"><span class="num">12.</span>Gérer les secrets</a></li>
-      <li><a href="#cli-rules"><span class="num">13.</span>Whitelist MITM</a></li>
-      <li><a href="#cli-monitoring"><span class="num">14.</span>Monitoring &amp; logs</a></li>
-      <li><a href="#cli-mcp"><span class="num">15.</span>Wrapping MCP</a></li>
-      <li><a href="#cli-control"><span class="num">16.</span>Pause / Resume / Doctor</a></li>
-      <li><a href="#menubar"><span class="num">17.</span>App menu bar <span class="badge-soon">à venir</span></a></li>
+      <li><a href="#cli-overview"><span class="num">12.</span>CLI — vue d'ensemble</a></li>
+      <li><a href="#cli-secrets"><span class="num">13.</span>Gérer les secrets</a></li>
+      <li><a href="#cli-rules"><span class="num">14.</span>Whitelist MITM</a></li>
+      <li><a href="#cli-monitoring"><span class="num">15.</span>Monitoring &amp; logs</a></li>
+      <li><a href="#cli-mcp"><span class="num">16.</span>Wrapping MCP</a></li>
+      <li><a href="#cli-control"><span class="num">17.</span>Pause / Resume / Doctor</a></li>
+      <li><a href="#menubar"><span class="num">18.</span>App menu bar <span class="badge-soon">à venir</span></a></li>
 
       <li class="group">Partie IV — Exploitation</li>
-      <li><a href="#launchagent"><span class="num">18.</span>LaunchAgent <span class="badge-soon">à venir</span></a></li>
-      <li><a href="#packaging"><span class="num">19.</span>Distribution <span class="badge-soon">à venir</span></a></li>
-      <li><a href="#troubleshoot"><span class="num">20.</span>Dépannage</a></li>
-      <li><a href="#faq"><span class="num">21.</span>FAQ</a></li>
+      <li><a href="#launchagent"><span class="num">19.</span>LaunchAgent <span class="badge-soon">à venir</span></a></li>
+      <li><a href="#packaging"><span class="num">20.</span>Distribution <span class="badge-soon">à venir</span></a></li>
+      <li><a href="#troubleshoot"><span class="num">21.</span>Dépannage</a></li>
+      <li><a href="#faq"><span class="num">22.</span>FAQ</a></li>
 
       <li class="group">Annexes</li>
       <li><a href="#annex-status"><span class="num">A.</span>État d'implémentation</a></li>
@@ -1022,11 +1023,221 @@ inclus. L'upstream la rejettera comme malformée (auth invalide) — c'est le ba
 </p>
 
 <!-- ============================================================ -->
+<!-- 7. COMPATIBILITÉ FOURNISSEURS -->
+<!-- ============================================================ -->
+<h2 id="provider-compat"><span class="chapnum">7</span>Compatibilité par fournisseur<a class="anchor" href="#provider-compat">¶</a></h2>
+
+<p class="lead">
+La capacité d'IRIS à substituer un secret pour un fournisseur donné dépend de trois facteurs
+indépendants : (1) absence de <em>cert pinning</em> côté client, (2) compatibilité HTTP/1.1
+sur l'endpoint, (3) modèle d'auth statique (token plat dans un header, pas de signature dérivée).
+Si l'un des trois manque, IRIS ne peut pas s'interposer proprement — quel que soit le fournisseur.
+</p>
+
+<h3>Trois facteurs structurels</h3>
+
+<div class="rules-explorer">
+  <div class="rules-grid" id="compatFactorsGrid">
+    <div class="rule-chip active" data-factor="pinning">
+      <div class="rule-id">F1</div>
+      <div class="rule-name">Cert pinning</div>
+      <span class="rule-sev low">RISQUE FAIBLE</span>
+    </div>
+    <div class="rule-chip" data-factor="http2">
+      <div class="rule-id">F2</div>
+      <div class="rule-name">HTTP/2 · gRPC obligatoire</div>
+      <span class="rule-sev medium">RÉEL</span>
+    </div>
+    <div class="rule-chip" data-factor="signing">
+      <div class="rule-id">F3</div>
+      <div class="rule-name">Request signing</div>
+      <span class="rule-sev high">BLOQUANT</span>
+    </div>
+  </div>
+  <div class="rule-detail" id="compatFactorDetail"></div>
+</div>
+
+<script type="application/json" id="compatFactorsData">
+{
+  "pinning": {
+    "title": "F1 — Cert pinning (risque faible aujourd'hui)",
+    "body": "Si le client (CLI, SDK) refuse tout cert non signé par une chaîne précise codée en dur, IRIS ne peut plus terminer TLS : son cert leaf émis par la CA locale est rejeté. Le pinning est massif côté apps mobiles (iOS/Android signés) mais quasi-inexistant dans les SDK serveur des fournisseurs IA : ils casseraient tous les proxies d'inspection TLS d'entreprise. Aucun pinning observé aujourd'hui chez les fournisseurs listés ci-dessous.",
+    "example": "# Sonde : si un cert custom dans le trust store passe,\n# le client ne pinne pas.\nexport NODE_EXTRA_CA_CERTS=$HOME/.../ca.pem\nclaude --version    # OK = pas de pinning Node\ncurl https://api.x.com/  # OK si curl honore le trust store"
+  },
+  "http2": {
+    "title": "F2 — HTTP/2 / gRPC mandatory (risque réel)",
+    "body": "IRIS MVP force ALPN <code>http/1.1</code> sur ses deux côtés. Si un endpoint exige HTTP/2 (négociation ALPN <code>h2</code> obligatoire, pas de downgrade), le handshake côté agent échoue. C'est notamment le cas du SDK <code>google-cloud-aiplatform</code> qui privilégie gRPC sur h2 pour Vertex AI. Endpoints REST h1.1-compatibles restent OK (Gemini AI Studio, par ex.). Support HTTP/2 natif en roadmap.",
+    "example": "# Vérifier le mode ALPN d'un endpoint :\nopenssl s_client -connect api.x.com:443 \\\n  -alpn h2,http/1.1 < /dev/null 2>&1 \\\n  | grep 'ALPN protocol'\n# ALPN protocol: h2          → potentiellement bloquant\n# ALPN protocol: http/1.1    → OK pour IRIS MVP"
+  },
+  "signing": {
+    "title": "F3 — Request signing / dérivation (bloquant par design)",
+    "body": "Si la \"clé\" sert à calculer une signature HMAC sur tout le canonical request (méthode AWS SigV4, GCP service-account JWT signing, certains schémas custom), substituer le placeholder dans un header au dernier moment invalide la signature : elle a été calculée côté SDK <em>avec le placeholder</em>, pas avec la vraie clé. <strong>Hors modèle IRIS</strong>. Demanderait un wrapper SDK ou un reverse-proxy SigV4-aware.",
+    "example": "# AWS SigV4 (schéma simplifié) :\nstringToSign = canonicalRequest(method, path, headers, body)\nsignature    = HMAC-SHA256(secretAccessKey, stringToSign)\n# Si secretAccessKey = '{{kc:…}}', signature est invalide.\n# IRIS ne peut pas re-signer (il n'a pas le hash du body original)."
+  }
+}
+</script>
+
+<h3>État au mieux de notre connaissance</h3>
+
+<p>Inventaire informel des fournisseurs IA et adjacents. <strong>À valider par sonde réelle avant prod</strong> —
+les SDK évoluent et les comportements peuvent changer entre versions.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Fournisseur</th>
+      <th>Endpoint typique</th>
+      <th>F1 pinning</th>
+      <th>F2 h1.1 OK</th>
+      <th>F3 signature</th>
+      <th>Compatible IRIS</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Anthropic</strong></td>
+      <td><code>api.anthropic.com</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-ok">oui</span></td>
+      <td>token plat (<code>x-api-key</code>)</td>
+      <td><span class="badge badge-ok">oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>OpenAI</strong></td>
+      <td><code>api.openai.com</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-ok">oui</span></td>
+      <td>token plat (<code>Authorization: Bearer</code>)</td>
+      <td><span class="badge badge-ok">oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>OpenRouter</strong></td>
+      <td><code>openrouter.ai</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-ok">oui</span></td>
+      <td>token plat (OpenAI-compat)</td>
+      <td><span class="badge badge-ok">oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>Google Gemini</strong> (AI Studio)</td>
+      <td><code>generativelanguage.googleapis.com</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-ok">oui</span></td>
+      <td>token plat (<code>x-goog-api-key</code>)</td>
+      <td><span class="badge badge-ok">oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>Google Vertex AI</strong></td>
+      <td><code>*.aiplatform.googleapis.com</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-warn">REST oui, gRPC non</span></td>
+      <td>JWT signé (service account)</td>
+      <td><span class="badge badge-warn">partiel</span></td>
+    </tr>
+    <tr>
+      <td><strong>Mistral</strong></td>
+      <td><code>api.mistral.ai</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-ok">oui</span></td>
+      <td>token plat</td>
+      <td><span class="badge badge-ok">oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>Cohere</strong></td>
+      <td><code>api.cohere.com</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-ok">oui</span></td>
+      <td>token plat</td>
+      <td><span class="badge badge-ok">oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>Groq</strong></td>
+      <td><code>api.groq.com</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-ok">oui</span></td>
+      <td>token plat (OpenAI-compat)</td>
+      <td><span class="badge badge-ok">oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>Together AI</strong></td>
+      <td><code>api.together.xyz</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-ok">oui</span></td>
+      <td>token plat</td>
+      <td><span class="badge badge-ok">oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>GitHub</strong> (PAT)</td>
+      <td><code>api.github.com</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-ok">oui</span></td>
+      <td>token plat</td>
+      <td><span class="badge badge-ok">oui</span></td>
+    </tr>
+    <tr>
+      <td><strong>AWS Bedrock</strong></td>
+      <td><code>bedrock-runtime.*.amazonaws.com</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-ok">oui</span></td>
+      <td><strong>SigV4</strong> (signature du canonical request)</td>
+      <td><span class="badge badge-warn">hors modèle</span></td>
+    </tr>
+    <tr>
+      <td><strong>Azure OpenAI</strong></td>
+      <td><code>*.openai.azure.com</code></td>
+      <td><span class="badge badge-ok">non</span></td>
+      <td><span class="badge badge-ok">oui</span></td>
+      <td>token plat (<code>api-key</code>) ou Entra ID OAuth</td>
+      <td><span class="badge badge-ok">oui (api-key)</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Récapitulatif</h3>
+
+<ul>
+  <li><strong>OK direct</strong> — Anthropic, OpenAI, OpenRouter, Mistral, Cohere, Groq, Together, Gemini AI Studio, GitHub PAT, Azure OpenAI (mode <code>api-key</code>). Tous des tokens plats dans un header sur HTTP/1.1.</li>
+  <li><strong>OK avec HTTP/2 (roadmap)</strong> — Vertex AI via les endpoints REST. Le SDK officiel préfère gRPC mais l'API REST h1.1 existe et fonctionnera dès le support HTTP/2 livré.</li>
+  <li><strong>Hors modèle de substitution</strong> — AWS Bedrock (SigV4), GCP service accounts à signature JWT. La signature est calculée côté SDK avant que IRIS ne voie la requête : substituer un placeholder au dernier moment casse la signature. Nécessite un mécanisme parallèle (wrapper SDK ou reverse-proxy SigV4-aware), pas dans le scope MVP.</li>
+</ul>
+
+<h3>Comment vérifier votre fournisseur</h3>
+
+<p>Trois sondes pour qualifier un endpoint avant de l'ajouter à votre whitelist :</p>
+
+<pre><code># 1. Vérifier l'ALPN négocié (F2)
+openssl s_client -connect &lt;host&gt;:443 -alpn h2,http/1.1 \
+  &lt; /dev/null 2&gt;&amp;1 | grep 'ALPN protocol'
+# → http/1.1 = compatible IRIS MVP
+# → h2 sans fallback = nécessite support HTTP/2
+
+# 2. Vérifier que le client honore HTTPS_PROXY + custom CA (F1)
+export HTTPS_PROXY=http://127.0.0.1:8888
+export NODE_EXTRA_CA_CERTS=$HOME/Library/Application\ Support/iris/ca.pem
+&lt;client&gt; --version    # ou un appel léger
+# Si l'appel passe sans erreur TLS, pas de pinning.
+
+# 3. Identifier le modèle d'auth (F3)
+&lt;client&gt; --verbose 2&gt;&amp;1 | grep -iE 'authorization|x-.*-key|signature|sigv4'
+# Header simple → OK pour IRIS
+# 'Signature=' ou 'AWS4-HMAC-' → hors modèle</code></pre>
+
+<div class="callout callout-warn">
+  <div class="icon">!</div>
+  <div class="body">
+    <p>Le tableau ci-dessus reflète l'état au moment de la rédaction du manuel et concerne les
+    <strong>SDK/CLI serveur publics</strong>. Une version future d'un SDK peut activer le pinning ou
+    forcer h2 sans préavis. Re-validez les facteurs F1–F3 sur les versions de production avant de
+    confier une clé sensible à IRIS pour un nouveau fournisseur.</p>
+  </div>
+</div>
+
+<!-- ============================================================ -->
 <!-- PARTIE II — INSTALL & CONFIGURE -->
 <!-- ============================================================ -->
 
-<!-- 7. INSTALLATION -->
-<h2 id="install"><span class="chapnum">7</span>Installation <span class="badge badge-soon">.pkg à venir</span><a class="anchor" href="#install">¶</a></h2>
+<!-- 8. INSTALLATION -->
+<h2 id="install"><span class="chapnum">8</span>Installation <span class="badge badge-soon">.pkg à venir</span><a class="anchor" href="#install">¶</a></h2>
 
 <h3>Prérequis</h3>
 <ul>
@@ -1087,7 +1298,7 @@ swift build -c release
 </div>
 
 <!-- 8. CONFIGURATION SHELL -->
-<h2 id="setup-shell"><span class="chapnum">8</span>Configuration shell<a class="anchor" href="#setup-shell">¶</a></h2>
+<h2 id="setup-shell"><span class="chapnum">9</span>Configuration shell<a class="anchor" href="#setup-shell">¶</a></h2>
 
 <p>
 IRIS s'active par injection de trois variables d'environnement dans votre profil shell. Les outils
@@ -1160,7 +1371,7 @@ source ~/.config/fish/config.fish</code></pre>
 </div>
 
 <!-- 9. CONFIG TOML -->
-<h2 id="config-toml"><span class="chapnum">9</span>Fichier <code>config.toml</code><a class="anchor" href="#config-toml">¶</a></h2>
+<h2 id="config-toml"><span class="chapnum">10</span>Fichier <code>config.toml</code><a class="anchor" href="#config-toml">¶</a></h2>
 
 <p>
 Le daemon lit sa configuration depuis <code>~/Library/Application Support/iris/config.toml</code> au
@@ -1219,7 +1430,7 @@ host = "api.openai.com"</code></pre>
 Match exact, case-insensitive, pas de wildcard en MVP.</p>
 
 <!-- 10. CA TRUST -->
-<h2 id="ca-trust"><span class="chapnum">10</span>CA &amp; trust store<a class="anchor" href="#ca-trust">¶</a></h2>
+<h2 id="ca-trust"><span class="chapnum">11</span>CA &amp; trust store<a class="anchor" href="#ca-trust">¶</a></h2>
 
 <p>
 La CA locale est générée automatiquement au premier démarrage du daemon : paire ECDSA P-256, clé
@@ -1276,7 +1487,7 @@ par <code>SecKeyCreateSignature</code> qui garde la clé dans le Keychain.
 <!-- PARTIE III — UTILISER -->
 <!-- ============================================================ -->
 
-<h2 id="cli-overview"><span class="chapnum">11</span>CLI — vue d'ensemble<a class="anchor" href="#cli-overview">¶</a></h2>
+<h2 id="cli-overview"><span class="chapnum">12</span>CLI — vue d'ensemble<a class="anchor" href="#cli-overview">¶</a></h2>
 
 <p>
 La CLI <code>iris</code> est l'interface complète vers le daemon. Toutes les opérations transitent
@@ -1320,7 +1531,7 @@ les permissions FS.
 </table>
 
 <!-- 12. SECRETS -->
-<h2 id="cli-secrets"><span class="chapnum">12</span>Gérer les secrets<a class="anchor" href="#cli-secrets">¶</a></h2>
+<h2 id="cli-secrets"><span class="chapnum">13</span>Gérer les secrets<a class="anchor" href="#cli-secrets">¶</a></h2>
 
 <h3>Ajouter un secret</h3>
 
@@ -1413,7 +1624,7 @@ iris secret list --json
 </div>
 
 <!-- 13. RULES -->
-<h2 id="cli-rules"><span class="chapnum">13</span>Whitelist MITM<a class="anchor" href="#cli-rules">¶</a></h2>
+<h2 id="cli-rules"><span class="chapnum">14</span>Whitelist MITM<a class="anchor" href="#cli-rules">¶</a></h2>
 
 <p>
 La whitelist contrôle quels hosts IRIS accepte de déchiffrer. Tout host absent est traité en
@@ -1455,7 +1666,7 @@ CONNECT-tunnel transparent, donc aucune substitution n'est possible — sécurit
 </div>
 
 <!-- 14. MONITORING -->
-<h2 id="cli-monitoring"><span class="chapnum">14</span>Monitoring &amp; logs<a class="anchor" href="#cli-monitoring">¶</a></h2>
+<h2 id="cli-monitoring"><span class="chapnum">15</span>Monitoring &amp; logs<a class="anchor" href="#cli-monitoring">¶</a></h2>
 
 <h3>État du daemon</h3>
 
@@ -1510,7 +1721,7 @@ iris logs --follow --filter "kind=exfilBlocked"</code></pre>
                      location=body  snippet="…ANTHROPIC_API_KEY={{kc:anthrop…"</code></pre>
 
 <!-- 15. MCP -->
-<h2 id="cli-mcp"><span class="chapnum">15</span>Wrapping MCP<a class="anchor" href="#cli-mcp">¶</a></h2>
+<h2 id="cli-mcp"><span class="chapnum">16</span>Wrapping MCP<a class="anchor" href="#cli-mcp">¶</a></h2>
 
 <p>
 Les serveurs MCP (Model Context Protocol) consomment leurs credentials via un fichier de config JSON
@@ -1614,7 +1825,7 @@ REQUESTS_CA_BUNDLE  = idem</code></pre>
 </ul>
 
 <!-- 16. PAUSE/DOCTOR -->
-<h2 id="cli-control"><span class="chapnum">16</span>Pause, Resume, Doctor<a class="anchor" href="#cli-control">¶</a></h2>
+<h2 id="cli-control"><span class="chapnum">17</span>Pause, Resume, Doctor<a class="anchor" href="#cli-control">¶</a></h2>
 
 <h3>Pause / Resume</h3>
 
@@ -1659,7 +1870,7 @@ Healthy.</code></pre>
 </div>
 
 <!-- 17. MENU BAR APP -->
-<h2 id="menubar"><span class="chapnum">17</span>App menu bar <span class="badge badge-soon">à venir</span><a class="anchor" href="#menubar">¶</a></h2>
+<h2 id="menubar"><span class="chapnum">18</span>App menu bar <span class="badge badge-soon">à venir</span><a class="anchor" href="#menubar">¶</a></h2>
 
 <div class="coming-soon">
   <h3>Phase 6 — En cours de développement</h3>
@@ -1733,7 +1944,7 @@ du contexte aux écrans CLI actuels.</p>
 <!-- PARTIE IV — EXPLOITATION -->
 <!-- ============================================================ -->
 
-<h2 id="launchagent"><span class="chapnum">18</span>LaunchAgent <span class="badge badge-soon">à venir</span><a class="anchor" href="#launchagent">¶</a></h2>
+<h2 id="launchagent"><span class="chapnum">19</span>LaunchAgent <span class="badge badge-soon">à venir</span><a class="anchor" href="#launchagent">¶</a></h2>
 
 <div class="coming-soon">
   <h3>Phase 7 — Non implémenté</h3>
@@ -1772,7 +1983,7 @@ nohup .build/release/irisd > ~/Library/Logs/iris/irisd.log 2>&1 &</code></pre>
 &lt;/dict&gt;
 &lt;/plist&gt;</code></pre>
 
-<h2 id="packaging"><span class="chapnum">19</span>Distribution <span class="badge badge-soon">à venir</span><a class="anchor" href="#packaging">¶</a></h2>
+<h2 id="packaging"><span class="chapnum">20</span>Distribution <span class="badge badge-soon">à venir</span><a class="anchor" href="#packaging">¶</a></h2>
 
 <div class="coming-soon">
   <h3>Phases 9–10 — En préparation</h3>
@@ -1803,7 +2014,7 @@ nohup .build/release/irisd > ~/Library/Logs/iris/irisd.log 2>&1 &</code></pre>
 </div>
 
 <!-- 20. DÉPANNAGE -->
-<h2 id="troubleshoot"><span class="chapnum">20</span>Dépannage<a class="anchor" href="#troubleshoot">¶</a></h2>
+<h2 id="troubleshoot"><span class="chapnum">21</span>Dépannage<a class="anchor" href="#troubleshoot">¶</a></h2>
 
 <h3><code>iris doctor</code> rapporte "Daemon down"</h3>
 
@@ -1869,7 +2080,7 @@ migrer :</p>
 # puis exporter ANTHROPIC_API_KEY='{{kc:anthropic_api_key}}'</code></pre>
 
 <!-- 21. FAQ -->
-<h2 id="faq"><span class="chapnum">21</span>FAQ<a class="anchor" href="#faq">¶</a></h2>
+<h2 id="faq"><span class="chapnum">22</span>FAQ<a class="anchor" href="#faq">¶</a></h2>
 
 <h3>Puis-je commiter mes <code>.env</code> contenant des <code>{{kc:…}}</code> ?</h3>
 <p>Oui. Aucun secret réel n'y figure. C'est un des bénéfices d'IRIS — fin du <code>.env.example</code>
@@ -1899,9 +2110,21 @@ chacun l'ajoute à son propre IRIS.</p>
 <p>Le MITM ajoute typiquement &lt; 5ms par requête (handshake TLS local + scan régex). Le streaming
 SSE est forwardé verbatim, donc zéro overhead sur les longues réponses Anthropic.</p>
 
-<h3>Que se passe-t-il si Anthropic active le cert pinning ?</h3>
-<p>Game over pour la substitution sur ce host — l'agent rejetterait le cert leaf d'IRIS. À ce jour
-Anthropic ne pinne pas dans la CLI. Si ça change, la mitigation propre n'existe pas (cf. SPECS A.9).</p>
+<h3>Que se passe-t-il si un fournisseur active le cert pinning ?</h3>
+<p>Game over pour la substitution sur ce host — l'agent rejetterait le cert leaf d'IRIS. Aucun
+fournisseur IA grand public ne pinne aujourd'hui dans ses SDK/CLI serveur, mais la situation peut
+changer sans préavis. Voir le chapitre <a href="#provider-compat">§7 Compatibilité par fournisseur</a>
+pour le détail des trois facteurs structurels (F1 pinning, F2 HTTP/2 mandatory, F3 request signing)
+et le tableau actualisé fournisseur par fournisseur.</p>
+
+<h3>IRIS marche-t-il avec AWS Bedrock ou GCP Vertex AI ?</h3>
+<p><strong>Bedrock</strong>&nbsp;: non, hors modèle. Le SDK signe le canonical request avec SigV4
+<em>avant</em> l'envoi&nbsp;: substituer le placeholder dans un header au dernier moment invalide la
+signature. Demanderait un wrapper SDK ou un reverse-proxy SigV4-aware.<br>
+<strong>Vertex AI</strong>&nbsp;: partiel. Les endpoints REST h1.1-compatibles fonctionneront dès que
+le support HTTP/2 est livré&nbsp;; le SDK officiel privilégie gRPC, qui exige h2 et n'est donc pas
+intercepté en MVP. <strong>Gemini AI Studio</strong> (<code>generativelanguage.googleapis.com</code>)
+en revanche fonctionne dès aujourd'hui — REST + token plat dans <code>x-goog-api-key</code>.</p>
 
 <!-- ============================================================ -->
 <!-- ANNEXES -->
@@ -2092,14 +2315,34 @@ Anthropic ne pinne pas dans la CLI. Si ça change, la mitigation propre n'existe
       '<p>' + d.body + '</p>' +
       '<pre><code>' + d.example.replace(/</g,'&lt;') + '</code></pre>';
   }
-  document.querySelectorAll('.rule-chip').forEach(chip => {
+  document.querySelectorAll('.rule-chip[data-rule]').forEach(chip => {
     chip.addEventListener('click', () => {
-      document.querySelectorAll('.rule-chip').forEach(c => c.classList.remove('active'));
+      document.querySelectorAll('.rule-chip[data-rule]').forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
       showRule(chip.dataset.rule);
     });
   });
   showRule('r1');
+
+  // ---- Compat factors explorer ----
+  const compatData = JSON.parse(document.getElementById('compatFactorsData').textContent);
+  const compatDetail = document.getElementById('compatFactorDetail');
+  function showFactor(id) {
+    const d = compatData[id];
+    if (!d) return;
+    compatDetail.innerHTML =
+      '<h4>' + d.title + '</h4>' +
+      '<p>' + d.body + '</p>' +
+      '<pre><code>' + d.example.replace(/</g,'&lt;') + '</code></pre>';
+  }
+  document.querySelectorAll('.rule-chip[data-factor]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.rule-chip[data-factor]').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      showFactor(chip.dataset.factor);
+    });
+  });
+  showFactor('pinning');
 })();
 </script>
 </body>
