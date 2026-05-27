@@ -19,6 +19,11 @@ public enum AdminMethod: String, Codable, Sendable, CaseIterable {
     case caFingerprint = "ca.fingerprint"
     case caIsTrusted = "ca.is_trusted"
     case configGet = "config.get"
+    case ruleAdd = "rule.add"
+    case ruleList = "rule.list"
+    case ruleDelete = "rule.delete"
+    case configReload = "config.reload"
+    case eventsClear = "events.clear"
 }
 
 // MARK: - Params
@@ -94,6 +99,11 @@ public struct EventsQueryParams: Codable, Sendable, Equatable {
     }
 }
 
+public struct RuleHostParams: Codable, Sendable, Equatable {
+    public let host: String
+    public init(host: String) { self.host = host }
+}
+
 // MARK: - Results
 
 public struct SecretDeletedResult: Codable, Sendable, Equatable {
@@ -163,6 +173,21 @@ public struct CAFingerprintResult: Codable, Sendable, Equatable {
 public struct CAIsTrustedResult: Codable, Sendable, Equatable {
     public let trusted: Bool
     public init(trusted: Bool) { self.trusted = trusted }
+}
+
+public struct ConfigReloadResult: Codable, Sendable, Equatable {
+    public let reloaded: Bool
+    public let ignored: [String]
+    public init(reloaded: Bool, ignored: [String]) {
+        self.reloaded = reloaded
+        self.ignored = ignored
+    }
+}
+
+public struct EventsClearResult: Codable, Sendable, Equatable {
+    public let deletedCount: Int
+    enum CodingKeys: String, CodingKey { case deletedCount = "deleted_count" }
+    public init(deletedCount: Int) { self.deletedCount = deletedCount }
 }
 
 // MARK: - Daemon version

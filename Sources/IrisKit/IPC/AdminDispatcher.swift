@@ -149,6 +149,26 @@ public struct AdminDispatcher: Sendable {
                 throw JSONRPCError.notFound("config not loaded")
             }
             return try JSONValue.encoding(config)
+
+        case .ruleAdd:
+            // TODO: Phase 6 — runtime rule CRUD
+            throw JSONRPCError.methodNotFound
+
+        case .ruleList:
+            // TODO: Phase 6 — runtime rule CRUD
+            throw JSONRPCError.methodNotFound
+
+        case .ruleDelete:
+            // TODO: Phase 6 — runtime rule CRUD
+            throw JSONRPCError.methodNotFound
+
+        case .configReload:
+            // TODO: Phase 5.5 — dynamic config reload from disk
+            throw JSONRPCError.methodNotFound
+
+        case .eventsClear:
+            // TODO: Phase 4.x — clear event ring for testing/cleanup
+            throw JSONRPCError.methodNotFound
         }
     }
 
