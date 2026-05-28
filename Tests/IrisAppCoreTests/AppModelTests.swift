@@ -5,14 +5,16 @@ import XCTest
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    private var suiteName: String!
     private var defaults: UserDefaults!
 
     override func setUp() async throws {
-        defaults = UserDefaults(suiteName: "io.iris.app.test.\(UUID().uuidString)")!
+        suiteName = "io.iris.app.test.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
     }
 
     override func tearDown() async throws {
-        defaults.removePersistentDomain(forName: defaults.dictionaryRepresentation().keys.first ?? "")
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     func testInitialState() {
