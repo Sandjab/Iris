@@ -63,6 +63,7 @@ public final class SyncCoordinator {
     /// After 3 consecutive `fetchStatus()` failures, mark daemon as down.
     public func runStreamWithReconnect(maxAttempts: Int? = nil) async throws {
         let backoffs: [Double] = [1, 2, 4, 8, 16, 30]
+        let stableRunThreshold: TimeInterval = 5.0
         var statusFailures = 0
         var attempt = 0
         var iterations = 0  // Separate from `attempt` so successful reset doesn't dodge the cap.
@@ -70,13 +71,20 @@ public final class SyncCoordinator {
             if let max = maxAttempts, iterations >= max { return }
             iterations += 1
             attempt += 1
+            let runStarted = Date()
             do {
                 try await runStream()
                 // Stream finished cleanly (server closed) → treat as transient drop.
+                if Date().timeIntervalSince(runStarted) >= stableRunThreshold {
+                    attempt = 0  // Reset backoff: a long stable run earns a fresh 1s start.
+                }
             } catch is CancellationError {
                 return
             } catch {
                 logger.warning("SSE stream error: \(error)")
+                if Date().timeIntervalSince(runStarted) >= stableRunThreshold {
+                    attempt = 0  // Same reset: a long-running connection that errors out also resets.
+                }
             }
 
             let delay = backoffs[min(attempt - 1, backoffs.count - 1)]
