@@ -65,8 +65,10 @@ public final class SyncCoordinator {
         let backoffs: [Double] = [1, 2, 4, 8, 16, 30]
         var statusFailures = 0
         var attempt = 0
+        var iterations = 0  // Separate from `attempt` so successful reset doesn't dodge the cap.
         while true {
-            if let max = maxAttempts, attempt >= max { return }
+            if let max = maxAttempts, iterations >= max { return }
+            iterations += 1
             attempt += 1
             do {
                 try await runStream()
