@@ -7,17 +7,20 @@ public final class SyncCoordinator {
     private let model: AppModel
     private let admin: AdminCalling
     private let events: EventsSubscribing
+    private let sleeper: AsyncSleeper
     private let logger: Logger
 
     public init(
         model: AppModel,
         admin: AdminCalling,
         events: EventsSubscribing,
+        sleeper: AsyncSleeper = SystemSleeper(),
         logger: Logger = Logger(label: "io.iris.app.sync")
     ) {
         self.model = model
         self.admin = admin
         self.events = events
+        self.sleeper = sleeper
         self.logger = logger
     }
 
@@ -50,6 +53,55 @@ public final class SyncCoordinator {
                 model.ingest(event)
             case .ping:
                 continue
+            }
+        }
+    }
+
+    /// Reconnect loop with exponential backoff. `maxAttempts == nil` runs forever (production).
+    /// Tests pass a finite cap. Backoff sequence: 1, 2, 4, 8, 16, 30 s (capped).
+    /// After each successful `fetchStatus()`, reset the backoff counter.
+    /// After 3 consecutive `fetchStatus()` failures, mark daemon as down.
+    public func runStreamWithReconnect(maxAttempts: Int? = nil) async throws {
+        let backoffs: [Double] = [1, 2, 4, 8, 16, 30]
+        var statusFailures = 0
+        var attempt = 0
+        while true {
+            if let max = maxAttempts, attempt >= max { return }
+            attempt += 1
+            do {
+                try await runStream()
+                // Stream finished cleanly (server closed) → treat as transient drop.
+            } catch is CancellationError {
+                return
+            } catch {
+                logger.warning("SSE stream error: \(error)")
+            }
+
+            let delay = backoffs[min(attempt - 1, backoffs.count - 1)]
+            try await sleeper.sleep(seconds: delay)
+
+            do {
+                let status = try await admin.fetchStatus()
+                statusFailures = 0
+                attempt = 0  // Reset backoff so a future drop after stability starts at 1s.
+                if case .up(_, _, let paused) = model.daemonStatus {
+                    model.daemonStatus = .up(
+                        stats: status.stats,
+                        uptime: TimeInterval(status.uptimeS),
+                        paused: paused
+                    )
+                } else {
+                    model.daemonStatus = .up(
+                        stats: status.stats,
+                        uptime: TimeInterval(status.uptimeS),
+                        paused: false
+                    )
+                }
+            } catch {
+                statusFailures += 1
+                if statusFailures >= 3 {
+                    model.daemonStatus = .down(reason: .notRunning)
+                }
             }
         }
     }

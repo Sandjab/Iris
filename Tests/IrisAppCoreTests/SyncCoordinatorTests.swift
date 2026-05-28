@@ -110,4 +110,73 @@ final class SyncCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(model.events.isEmpty)
     }
+
+    func testReconnectBackoffFollowsExponentialSequence() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        // Both transports broken → backoff grows monotonically (no reset path hit).
+        admin.shouldThrow = AdminClientError.connectFailed(path: "/tmp/iris.sock", message: "connection refused")
+        let events = FakeEventsSubscribing()
+        events.autoFinishCount = 100  // every subscribe yields an empty, finished stream
+        let sleeper = FakeSleeper()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events, sleeper: sleeper)
+
+        try await coord.bootstrap()
+        try await coord.runStreamWithReconnect(maxAttempts: 6)
+
+        // 6 attempts → 6 sleeps observed (one per attempt after stream end).
+        XCTAssertEqual(Array(sleeper.delays.prefix(5)), [1, 2, 4, 8, 16])
+    }
+
+    func testReconnectCapsAt30Seconds() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        admin.shouldThrow = AdminClientError.connectFailed(path: "/tmp/iris.sock", message: "connection refused")
+        let events = FakeEventsSubscribing()
+        events.autoFinishCount = 100
+        let sleeper = FakeSleeper()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events, sleeper: sleeper)
+
+        try await coord.bootstrap()
+        try await coord.runStreamWithReconnect(maxAttempts: 10)
+
+        XCTAssertEqual(Array(sleeper.delays.suffix(2)), [30, 30])
+    }
+
+    func testReconnectResetsBackoffAfterSuccessfulStatus() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()  // fetchStatus succeeds throughout
+        let events = FakeEventsSubscribing()
+        events.autoFinishCount = 100
+        let sleeper = FakeSleeper()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events, sleeper: sleeper)
+
+        try await coord.bootstrap()
+        try await coord.runStreamWithReconnect(maxAttempts: 5)
+
+        // Each attempt: drop → sleep(1s) → fetchStatus succeeds → reset → next loop.
+        // So every sleep stays at 1s (not exponential growth) since RPC keeps working.
+        XCTAssertEqual(sleeper.delays, [1, 1, 1, 1, 1])
+    }
+
+    func testReconnectMarksDaemonDownAfterThreeStatusFailures() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        let events = FakeEventsSubscribing()
+        let sleeper = FakeSleeper()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events, sleeper: sleeper)
+
+        // bootstrap fails (daemon down) → status starts as .down
+        admin.shouldThrow = AdminClientError.connectFailed(path: "/tmp/iris.sock", message: "connection refused")
+        events.subscribeError = AdminClientError.connectFailed(path: "/tmp/iris.sock", message: "connection refused")
+        try await coord.bootstrap()
+        // Force a transition to .up so the reconnect path observes 3 status failures
+        // demoting back to .down (proves the failure counter triggers the demotion).
+        model.daemonStatus = .up(stats: .zero, uptime: 0, paused: false)
+        events.autoFinishCount = 4
+
+        try await coord.runStreamWithReconnect(maxAttempts: 4)
+
+        XCTAssertEqual(model.daemonStatus, .down(reason: .notRunning))
+    }
 }
