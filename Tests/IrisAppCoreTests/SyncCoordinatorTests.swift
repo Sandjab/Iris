@@ -51,4 +51,63 @@ final class SyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(model.daemonStatus, .down(reason: .notRunning))
         XCTAssertTrue(model.events.isEmpty)
     }
+
+    func testSSEStreamIngestsEvents() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        let events = FakeEventsSubscribing()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events)
+
+        try await coord.bootstrap()
+        let evt = Event(
+            timestamp: Date(timeIntervalSince1970: 100),
+            kind: .substituted,
+            host: "api.example.com",
+            method: "GET",
+            path: "/x"
+        )
+        // Pre-buffer event and finish — replayed when runStream calls subscribe.
+        events.push(.event(evt))
+        events.finish()
+        try await coord.runStream()
+
+        XCTAssertEqual(model.events.count, 1)
+        XCTAssertEqual(model.events[0].id, evt.id)
+    }
+
+    func testSSESubscribeUsesLastEventTimestampWhenAvailable() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        let preExisting = Event(
+            timestamp: Date(timeIntervalSince1970: 500),
+            kind: .substituted,
+            host: "x.com",
+            method: "GET",
+            path: "/"
+        )
+        admin.stubEvents = [preExisting]
+        let events = FakeEventsSubscribing()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events)
+
+        try await coord.bootstrap()
+        events.finish()  // pre-buffered → consumed when runStream subscribes
+        try await coord.runStream()
+
+        XCTAssertEqual(events.subscribedSince, [Date(timeIntervalSince1970: 500)])
+    }
+
+    func testSSEPingItemsAreIgnoredAndDoNotCrash() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        let events = FakeEventsSubscribing()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events)
+
+        try await coord.bootstrap()
+        events.push(.ping)
+        events.push(.ping)
+        events.finish()
+        try await coord.runStream()
+
+        XCTAssertTrue(model.events.isEmpty)
+    }
 }

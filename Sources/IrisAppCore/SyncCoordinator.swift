@@ -38,4 +38,19 @@ public final class SyncCoordinator {
             model.daemonStatus = .down(reason: .rpcError(String(describing: error)))
         }
     }
+
+    /// Consume SSE stream until the underlying stream finishes or is cancelled.
+    /// Caller is responsible for relaunching on error (Task 9 handles backoff).
+    public func runStream() async throws {
+        let since = model.lastEventTimestamp ?? Date(timeIntervalSinceNow: -60)
+        let stream = try await events.subscribe(since: since)
+        for try await item in stream {
+            switch item {
+            case .event(let event):
+                model.ingest(event)
+            case .ping:
+                continue
+            }
+        }
+    }
 }
