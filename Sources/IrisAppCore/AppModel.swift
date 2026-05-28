@@ -60,4 +60,27 @@ public final class AppModel: ObservableObject {
         }
         unreadAlertCount = alerts.filter { $0.timestamp > cutoff }.count
     }
+
+    public func ingest(_ event: Event) {
+        ingestInto(&events, event: event, cap: Self.eventsCap)
+        if event.kind == .exfilBlocked {
+            ingestInto(&alerts, event: event, cap: Self.alertsCap)
+            recomputeUnreadCount()
+        }
+    }
+
+    public func ingestBatch(_ batch: [Event]) {
+        for event in batch { ingest(event) }
+    }
+
+    private func ingestInto(_ ring: inout [Event], event: Event, cap: Int) {
+        if let idx = ring.firstIndex(where: { $0.id == event.id }) {
+            ring[idx] = event
+            return
+        }
+        ring.insert(event, at: 0)
+        if ring.count > cap {
+            ring.removeLast(ring.count - cap)
+        }
+    }
 }

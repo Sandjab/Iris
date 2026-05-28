@@ -43,4 +43,87 @@ final class AppModelTests: XCTestCase {
         let model2 = AppModel(defaults: defaults)
         XCTAssertEqual(model2.lastAcknowledgedAt, when)
     }
+
+    private func makeEvent(
+        id: UUID = UUID(),
+        timestamp: Date = Date(),
+        kind: Event.Kind = .substituted,
+        host: String = "api.example.com"
+    ) -> Event {
+        Event(id: id, timestamp: timestamp, kind: kind, host: host, method: "GET", path: "/x")
+    }
+
+    private func makeAlertEvent(
+        timestamp: Date = Date(),
+        severity: Alert.Severity = .high
+    ) -> Event {
+        let alert = Alert(
+            severity: severity,
+            rule: .hostMismatch,
+            secretName: "anthropic_api_key",
+            detectedAt: .header,
+            snippet: "x-api-key: {{kc:anthropic_api_key}}"
+        )
+        return Event(
+            timestamp: timestamp,
+            kind: .exfilBlocked,
+            host: "api.github.com",
+            method: "POST",
+            path: "/issues",
+            alert: alert
+        )
+    }
+
+    func testIngestAppendsNewestFirst() {
+        let model = AppModel(defaults: defaults)
+        let older = makeEvent(timestamp: Date(timeIntervalSince1970: 1_000))
+        let newer = makeEvent(timestamp: Date(timeIntervalSince1970: 2_000))
+        model.ingest(older)
+        model.ingest(newer)
+        XCTAssertEqual(model.events.map(\.id), [newer.id, older.id])
+    }
+
+    func testIngestDedupsByUUID() {
+        let model = AppModel(defaults: defaults)
+        let id = UUID()
+        let e1 = makeEvent(id: id, timestamp: Date(timeIntervalSince1970: 1_000))
+        let e2 = makeEvent(id: id, timestamp: Date(timeIntervalSince1970: 2_000))
+        model.ingest(e1)
+        model.ingest(e2)
+        XCTAssertEqual(model.events.count, 1)
+        XCTAssertEqual(model.events[0].id, id)
+    }
+
+    func testIngestRespectsCap() {
+        let model = AppModel(defaults: defaults)
+        for i in 0..<(AppModel.eventsCap + 50) {
+            model.ingest(makeEvent(timestamp: Date(timeIntervalSince1970: Double(i))))
+        }
+        XCTAssertEqual(model.events.count, AppModel.eventsCap)
+    }
+
+    func testExfilEventIsAlsoAddedToAlerts() {
+        let model = AppModel(defaults: defaults)
+        let evt = makeAlertEvent()
+        model.ingest(evt)
+        XCTAssertEqual(model.events.count, 1)
+        XCTAssertEqual(model.alerts.count, 1)
+        XCTAssertEqual(model.alerts[0].id, evt.id)
+    }
+
+    func testUnreadCountIncrementsForNewAlerts() {
+        let model = AppModel(defaults: defaults)
+        model.markAllAlertsRead(now: Date(timeIntervalSince1970: 1_000))
+        let newAlert = makeAlertEvent(timestamp: Date(timeIntervalSince1970: 2_000))
+        model.ingest(newAlert)
+        XCTAssertEqual(model.unreadAlertCount, 1)
+    }
+
+    func testUnreadCountIgnoresAcknowledgedAlerts() {
+        let model = AppModel(defaults: defaults)
+        let oldAlert = makeAlertEvent(timestamp: Date(timeIntervalSince1970: 1_000))
+        model.ingest(oldAlert)
+        model.markAllAlertsRead(now: Date(timeIntervalSince1970: 2_000))
+        XCTAssertEqual(model.unreadAlertCount, 0)
+    }
 }
