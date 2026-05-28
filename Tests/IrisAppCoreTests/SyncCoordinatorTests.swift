@@ -179,4 +179,39 @@ final class SyncCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(model.daemonStatus, .down(reason: .notRunning))
     }
+
+    func testStatsPollUpdatesDaemonStatsWhenUp() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        let events = FakeEventsSubscribing()
+        let sleeper = FakeSleeper()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events, sleeper: sleeper)
+
+        model.daemonStatus = .up(stats: .zero, uptime: 0, paused: false)
+        admin.stubStats = DaemonStats(reqTotal: 42, subTotal: 7, exfilBlockedTotal: 1, errorsTotal: 0)
+
+        try await coord.runStatsPoll(intervalSeconds: 5, maxTicks: 3)
+
+        XCTAssertEqual(sleeper.delays, [5, 5, 5])
+        if case .up(let stats, _, _) = model.daemonStatus {
+            XCTAssertEqual(stats.reqTotal, 42)
+        } else {
+            XCTFail("expected up")
+        }
+    }
+
+    func testStatsPollSkipsUpdateIfNotUp() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        let events = FakeEventsSubscribing()
+        let sleeper = FakeSleeper()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events, sleeper: sleeper)
+
+        model.daemonStatus = .down(reason: .notRunning)
+
+        try await coord.runStatsPoll(intervalSeconds: 5, maxTicks: 2)
+
+        XCTAssertEqual(model.daemonStatus, .down(reason: .notRunning))
+        XCTAssertEqual(admin.calls.filter { $0 == "stats" }.count, 0)
+    }
 }

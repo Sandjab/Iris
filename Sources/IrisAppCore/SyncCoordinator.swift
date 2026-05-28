@@ -107,4 +107,24 @@ public final class SyncCoordinator {
             }
         }
     }
+
+    /// Periodic stats poll. Sleeps `intervalSeconds`, fetches daemon stats, updates `daemonStatus.stats` if daemon is up.
+    /// Skips update if daemon is not up (SSE reconnect path manages state transitions).
+    /// Errors are logged at debug level and swallowed; stats poll errors do not promote daemon to down.
+    /// `maxTicks == nil` runs forever (production). Tests pass a finite cap.
+    public func runStatsPoll(intervalSeconds: Double = 5, maxTicks: Int? = nil) async throws {
+        var ticks = 0
+        while true {
+            if let max = maxTicks, ticks >= max { return }
+            ticks += 1
+            try await sleeper.sleep(seconds: intervalSeconds)
+            guard case .up(_, let uptime, let paused) = model.daemonStatus else { continue }
+            do {
+                let stats = try await admin.fetchStats()
+                model.daemonStatus = .up(stats: stats, uptime: uptime, paused: paused)
+            } catch {
+                logger.debug("stats poll skipped: \(error)")
+            }
+        }
+    }
 }
