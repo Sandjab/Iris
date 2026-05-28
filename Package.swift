@@ -12,6 +12,7 @@ let package = Package(
     ],
     products: [
         .library(name: "IrisKit", targets: ["IrisKit"]),
+        .library(name: "IrisAppCore", targets: ["IrisAppCore"]),
         .executable(name: "irisd", targets: ["irisd"]),
         .executable(name: "iris", targets: ["iris"]),
     ],
@@ -82,6 +83,22 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "X509", package: "swift-certificates"),
                 .product(name: "SwiftASN1", package: "swift-asn1"),
+            ],
+            swiftSettings: strictConcurrency
+        ),
+        .target(
+            name: "IrisAppCore",
+            dependencies: [
+                "IrisKit",
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "IrisAppCoreTests",
+            dependencies: [
+                "IrisAppCore",
+                "IrisKit",
             ],
             swiftSettings: strictConcurrency
         ),
