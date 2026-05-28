@@ -53,12 +53,32 @@ public final class AppModel: ObservableObject {
         recomputeUnreadCount()
     }
 
+    public func togglePause(via admin: AdminCalling) async throws {
+        let wasPaused: Bool
+        switch daemonStatus {
+        case .up(_, _, let paused): wasPaused = paused
+        default: return
+        }
+        if wasPaused {
+            try await admin.resume()
+        } else {
+            try await admin.pause()
+        }
+        if case .up(let s, let u, _) = daemonStatus {
+            daemonStatus = .up(stats: s, uptime: u, paused: !wasPaused)
+        }
+    }
+
     func recomputeUnreadCount() {
         guard let cutoff = lastAcknowledgedAt else {
             unreadAlertCount = alerts.count
             return
         }
         unreadAlertCount = alerts.filter { $0.timestamp > cutoff }.count
+    }
+
+    public var lastEventTimestamp: Date? {
+        events.map(\.timestamp).max()
     }
 
     public func ingest(_ event: Event) {

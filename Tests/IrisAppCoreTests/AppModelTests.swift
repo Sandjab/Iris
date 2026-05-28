@@ -126,4 +126,37 @@ final class AppModelTests: XCTestCase {
         model.markAllAlertsRead(now: Date(timeIntervalSince1970: 2_000))
         XCTAssertEqual(model.unreadAlertCount, 0)
     }
+
+    func testLastEventTimestampReturnsNewestSeen() {
+        let model = AppModel(defaults: defaults)
+        XCTAssertNil(model.lastEventTimestamp)
+        model.ingest(makeEvent(timestamp: Date(timeIntervalSince1970: 1_000)))
+        model.ingest(makeEvent(timestamp: Date(timeIntervalSince1970: 3_000)))
+        model.ingest(makeEvent(timestamp: Date(timeIntervalSince1970: 2_000)))
+        XCTAssertEqual(model.lastEventTimestamp, Date(timeIntervalSince1970: 3_000))
+    }
+
+    func testTogglePauseInvokesAdminPauseWhenUp() async throws {
+        let model = AppModel(defaults: defaults)
+        model.daemonStatus = .up(stats: .zero, uptime: 0, paused: false)
+        let admin = FakeAdminCalling()
+        try await model.togglePause(via: admin)
+        XCTAssertEqual(admin.calls, ["pause"])
+        XCTAssertEqual(
+            model.daemonStatus,
+            .up(stats: .zero, uptime: 0, paused: true)
+        )
+    }
+
+    func testTogglePauseInvokesAdminResumeWhenPaused() async throws {
+        let model = AppModel(defaults: defaults)
+        model.daemonStatus = .up(stats: .zero, uptime: 0, paused: true)
+        let admin = FakeAdminCalling()
+        try await model.togglePause(via: admin)
+        XCTAssertEqual(admin.calls, ["resume"])
+        XCTAssertEqual(
+            model.daemonStatus,
+            .up(stats: .zero, uptime: 0, paused: false)
+        )
+    }
 }
