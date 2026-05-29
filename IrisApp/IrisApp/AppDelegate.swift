@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover?
     private var cancellables: Set<AnyCancellable> = []
     private var pulseWorkItem: DispatchWorkItem?
+    private var popoverMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Multi-instance protection (SPECS §3.3 + §4 edge cases): a second launch exits
@@ -70,7 +71,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let eventsClient = EventsClient(port: 8899)
 
         let popover = NSPopover()
-        popover.behavior = .transient
+        // .applicationDefined (not .transient): a transient popover dismisses itself on the
+        // mouseDown of the status button, then handleClick's mouseUp re-opens it — so a second
+        // click never closes it. We own dismissal explicitly (re-click + outside-click monitor).
+        popover.behavior = .applicationDefined
         popover.contentSize = NSSize(width: 480, height: 600)
         popover.contentViewController = NSHostingController(
             rootView: PopoverView(admin: admin).environmentObject(appModel)
@@ -124,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func togglePopover() {
         guard let popover else { return }
         if popover.isShown {
-            popover.performClose(nil)
+            closePopover()
         } else {
             openPopover()
         }
@@ -135,6 +139,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button, let popover, !popover.isShown else { return }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
+        // .applicationDefined never self-dismisses, so close on any click outside the app.
+        // The status button is handled by handleClick; clicks inside the popover are local
+        // events this global monitor never receives, so they don't dismiss it.
+        popoverMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            self?.closePopover()
+        }
+    }
+
+    private func closePopover() {
+        popover?.performClose(nil)
+        if let monitor = popoverMonitor {
+            NSEvent.removeMonitor(monitor)
+            popoverMonitor = nil
+        }
     }
 
     private func showQuitMenu(from button: NSStatusBarButton) {
