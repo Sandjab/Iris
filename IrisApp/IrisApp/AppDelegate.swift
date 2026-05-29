@@ -1,7 +1,15 @@
 import AppKit
+import Combine
 import IrisAppCore
+import IrisKit
 import SwiftUI
 import UserNotifications
+
+/// Default admin socket path (SPECS §681). Made configurable via Settings in Phase 6.3.
+/// Module-internal so `PopoverView` reuses it without duplicating the literal.
+func defaultAdminSocketPath() -> String {
+    ("~/Library/Application Support/iris/admin.sock" as NSString).expandingTildeInPath
+}
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appModel = AppModel()
@@ -38,8 +46,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 480, height: 600)
-        popover.contentViewController = NSHostingController(rootView: PopoverView())
+        popover.contentViewController = NSHostingController(
+            rootView: PopoverView().environmentObject(appModel)
+        )
         self.popover = popover
+
+        // Live data: connect to the daemon over UDS (admin) + loopback SSE (events).
+        let admin = AdminClient(socketPath: defaultAdminSocketPath())
+        let eventsClient = EventsClient(port: 8899)
+        let sync = SyncCoordinator(model: appModel, admin: admin, events: eventsClient)
+        let model = appModel
+        Task {
+            try? await sync.bootstrap()
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { try? await sync.runStreamWithReconnect() }
+                group.addTask { try? await sync.runStatsPoll() }
+                // Notification fan-out: emit a system notification for each new alert event.
+                group.addTask { @MainActor in
+                    var seenIDs: Set<UUID> = []
+                    for await alertEvents in model.$alerts.values {
+                        for event in alertEvents where !seenIDs.contains(event.id) {
+                            seenIDs.insert(event.id)
+                            if let content = NotificationBuilder.build(from: event) {
+                                coordinator.emit(content)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @objc private func handleClick(_ sender: NSStatusBarButton) {

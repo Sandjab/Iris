@@ -1,14 +1,98 @@
+import IrisAppCore
+import IrisKit
 import SwiftUI
 
 struct PopoverView: View {
+    @EnvironmentObject var model: AppModel
+
     var body: some View {
-        VStack {
-            Text("Iris menu bar — Phase 6.1b WIP")
-                .padding()
-            Text("Real content lands in Task 18.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            HeaderBar()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.bar)
+            Divider()
+            Picker("Tab", selection: $model.selectedTab) {
+                Text("Overview").tag(AppModel.Tab.overview)
+                Text("Logs").tag(AppModel.Tab.logs)
+                Text("Security").tag(AppModel.Tab.security)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            Divider()
+            Group {
+                switch model.selectedTab {
+                case .overview: OverviewTab()
+                case .logs: LogsTab()
+                case .security: SecurityTab()
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: 480, height: 600)
+    }
+}
+
+private struct HeaderBar: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            StatusDot(status: model.daemonStatus)
+            StatusLabel(status: model.daemonStatus)
+            Spacer()
+            if case .up(_, _, let paused) = model.daemonStatus {
+                Button(paused ? "Resume" : "Pause") {
+                    // togglePause is async; fire-and-forget for UI responsiveness.
+                    // The AdminClient is recreated per call (cheap: just a socket path).
+                    Task { try? await model.togglePause(via: makeAdmin()) }
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private func makeAdmin() -> AdminCalling {
+        AdminClient(socketPath: defaultAdminSocketPath())
+    }
+}
+
+private struct StatusDot: View {
+    let status: IrisAppCore.DaemonStatus
+
+    var body: some View {
+        Circle().fill(color).frame(width: 8, height: 8)
+    }
+
+    private var color: Color {
+        switch status {
+        case .up(_, _, let paused): return paused ? .orange : .green
+        case .down: return .red
+        case .connecting: return .gray
+        }
+    }
+}
+
+private struct StatusLabel: View {
+    let status: IrisAppCore.DaemonStatus
+
+    var body: some View {
+        switch status {
+        case .up(_, let uptime, let paused):
+            Text("\(paused ? "Paused" : "Up") • \(formatUptime(uptime))")
+                .font(.callout.monospacedDigit())
+        case .down:
+            Text("Daemon down").foregroundStyle(.red).font(.callout)
+        case .connecting:
+            Text("Connecting…").font(.callout)
+        }
+    }
+
+    private func formatUptime(_ seconds: TimeInterval) -> String {
+        let s = Int(seconds)
+        let h = s / 3600
+        let m = (s % 3600) / 60
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m"
     }
 }
