@@ -62,17 +62,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] _ in self?.pulseIcon() }
             .store(in: &cancellables)
 
+        // One daemon client for the whole app: admin RPC over UDS + loopback SSE.
+        // The same `admin` is reused by both the SyncCoordinator and the popover's
+        // pause/resume control, so we never spin up (and leak) a per-click EventLoopGroup.
+        // It lives for the process lifetime; its owned group is reclaimed at exit.
+        let admin = AdminClient(socketPath: defaultAdminSocketPath())
+        let eventsClient = EventsClient(port: 8899)
+
         let popover = NSPopover()
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 480, height: 600)
         popover.contentViewController = NSHostingController(
-            rootView: PopoverView().environmentObject(appModel)
+            rootView: PopoverView(admin: admin).environmentObject(appModel)
         )
         self.popover = popover
 
-        // Live data: connect to the daemon over UDS (admin) + loopback SSE (events).
-        let admin = AdminClient(socketPath: defaultAdminSocketPath())
-        let eventsClient = EventsClient(port: 8899)
         let sync = SyncCoordinator(model: appModel, admin: admin, events: eventsClient)
         let model = appModel
         Task {
@@ -90,6 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 coordinator.emit(content)
                             }
                         }
+                        // Bound the dedupe set to the current (capped) alert window so it
+                        // cannot grow unbounded as alerts age out of the ring.
+                        seenIDs.formIntersection(alertEvents.map(\.id))
                     }
                 }
             }

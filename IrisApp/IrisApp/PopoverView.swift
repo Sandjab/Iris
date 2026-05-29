@@ -1,13 +1,13 @@
 import IrisAppCore
-import IrisKit
 import SwiftUI
 
 struct PopoverView: View {
     @EnvironmentObject var model: AppModel
+    let admin: AdminCalling
 
     var body: some View {
         VStack(spacing: 0) {
-            HeaderBar()
+            HeaderBar(admin: admin)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(.bar)
@@ -81,6 +81,7 @@ private struct BannersStack: View {
 
 private struct HeaderBar: View {
     @EnvironmentObject var model: AppModel
+    let admin: AdminCalling
 
     var body: some View {
         HStack(spacing: 10) {
@@ -90,16 +91,12 @@ private struct HeaderBar: View {
             if case .up(_, _, let paused) = model.daemonStatus {
                 Button(paused ? "Resume" : "Pause") {
                     // togglePause is async; fire-and-forget for UI responsiveness.
-                    // The AdminClient is recreated per call (cheap: just a socket path).
-                    Task { try? await model.togglePause(via: makeAdmin()) }
+                    // Reuses the app-wide admin client (no per-click EventLoopGroup).
+                    Task { try? await model.togglePause(via: admin) }
                 }
                 .buttonStyle(.bordered)
             }
         }
-    }
-
-    private func makeAdmin() -> AdminCalling {
-        AdminClient(socketPath: defaultAdminSocketPath())
     }
 }
 
