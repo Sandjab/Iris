@@ -12,6 +12,7 @@ struct PopoverView: View {
                 .padding(.vertical, 8)
                 .background(.bar)
             Divider()
+            BannersStack()
             Picker("Tab", selection: $model.selectedTab) {
                 Text("Overview").tag(AppModel.Tab.overview)
                 Text("Logs").tag(AppModel.Tab.logs)
@@ -30,6 +31,51 @@ struct PopoverView: View {
             }
         }
         .frame(width: 480, height: 600)
+    }
+}
+
+private struct BannersStack: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if case .down(let reason) = model.daemonStatus {
+                banner(
+                    text: reasonText(reason),
+                    color: .red,
+                    cta: "Retry",
+                    action: {}  // No-op: SyncCoordinator reconnects automatically each backoff tick.
+                )
+            }
+            if !model.notificationsEnabled {
+                banner(
+                    text: "Notifications disabled. Enable in System Settings → Notifications → Iris.",
+                    color: .orange,
+                    cta: nil,
+                    action: nil
+                )
+            }
+        }
+    }
+
+    private func reasonText(_ reason: IrisAppCore.DaemonStatus.DownReason) -> String {
+        switch reason {
+        case .notRunning: return "Daemon stopped. Restart via launchctl or relaunch Iris."
+        case .rpcError(let msg): return "Daemon unreachable: \(msg)"
+        }
+    }
+
+    @ViewBuilder
+    private func banner(text: String, color: Color, cta: String?, action: (() -> Void)?) -> some View {
+        HStack {
+            Text(text).font(.callout)
+            Spacer()
+            if let cta, let action {
+                Button(cta, action: action).buttonStyle(.bordered)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(color.opacity(0.15))
     }
 }
 
