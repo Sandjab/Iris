@@ -86,7 +86,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 group.addTask { try? await sync.runStatsPoll() }
                 // Notification fan-out: emit a system notification for each new alert event.
                 group.addTask { @MainActor in
-                    var seenIDs: Set<UUID> = []
+                    // Seed with alerts already loaded by bootstrap() so historical alerts
+                    // don't trigger a notification flood on launch.
+                    var seenIDs = Set(model.alerts.map(\.id))
                     for await alertEvents in model.$alerts.values {
                         for event in alertEvents where !seenIDs.contains(event.id) {
                             seenIDs.insert(event.id)
@@ -108,7 +110,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             togglePopover()
             return
         }
-        if event.type == .rightMouseUp {
+        // Ctrl+left-click is the standard macOS secondary-click shortcut.
+        let isSecondaryClick =
+            event.type == .rightMouseUp
+            || (event.type == .leftMouseUp && event.modifierFlags.contains(.control))
+        if isSecondaryClick {
             showQuitMenu(from: sender)
         } else {
             togglePopover()

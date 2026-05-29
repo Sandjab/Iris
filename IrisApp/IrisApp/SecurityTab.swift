@@ -65,7 +65,7 @@ private struct AlertRow: View {
             }
         }
         .padding(.vertical, 4)
-        .background(focused ? Color.accentColor.opacity(0.15) : Color.clear)
+        .listRowBackground(focused ? Color.accentColor.opacity(0.15) : nil)
     }
 
     private var severityChip: some View {

@@ -40,12 +40,9 @@ private struct BannersStack: View {
     var body: some View {
         VStack(spacing: 0) {
             if case .down(let reason) = model.daemonStatus {
-                banner(
-                    text: reasonText(reason),
-                    color: .red,
-                    cta: "Retry",
-                    action: {}  // No-op: SyncCoordinator reconnects automatically each backoff tick.
-                )
+                // No CTA: the SyncCoordinator reconnects automatically on a backoff timer, so a
+                // "Retry" button would be a no-op (confusing). The banner is informational only.
+                banner(text: reasonText(reason), color: .red, cta: nil, action: nil)
             }
             if !model.notificationsEnabled {
                 banner(
