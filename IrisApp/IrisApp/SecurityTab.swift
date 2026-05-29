@@ -29,6 +29,9 @@ struct SecurityTab: View {
                 .listStyle(.plain)
             }
         }
+        // Clear the notification-driven highlight once the user leaves this tab,
+        // so a previously clicked alert is not left highlighted indefinitely.
+        .onDisappear { model.focusedAlertID = nil }
     }
 
     private var sortedAlerts: [Event] {
