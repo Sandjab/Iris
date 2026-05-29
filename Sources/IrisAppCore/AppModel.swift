@@ -13,6 +13,9 @@ public final class AppModel: ObservableObject {
     @Published public var alerts: [Event] = []
     @Published public var unreadAlertCount: Int = 0
     @Published public var streamPaused: Bool = false
+    /// Frozen copy of `events` captured when the Logs stream was paused. Lives on the
+    /// model (not a view's `@State`) so the paused list survives tab switches.
+    @Published public private(set) var pausedSnapshot: [Event] = []
     @Published public var logFilters: LogFilters = LogFilters()
     @Published public var focusedAlertID: UUID?
     @Published public var notificationsEnabled: Bool = true
@@ -51,6 +54,15 @@ public final class AppModel: ObservableObject {
         lastAcknowledgedAt = bound
         defaults.set(bound, forKey: Self.ackKey)
         recomputeUnreadCount()
+    }
+
+    /// Pause/resume the Logs live stream. Captures the snapshot on the transition into
+    /// paused so the frozen list is owned by the model and survives view teardown.
+    public func setStreamPaused(_ paused: Bool) {
+        if paused && !streamPaused {
+            pausedSnapshot = events
+        }
+        streamPaused = paused
     }
 
     public func togglePause(via admin: AdminCalling) async throws {

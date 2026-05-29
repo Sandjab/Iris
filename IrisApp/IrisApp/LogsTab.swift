@@ -4,7 +4,6 @@ import SwiftUI
 
 struct LogsTab: View {
     @EnvironmentObject var model: AppModel
-    @State private var snapshotEvents: [Event] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,7 +14,7 @@ struct LogsTab: View {
     }
 
     private var filteredEvents: [Event] {
-        let base = model.streamPaused ? snapshotEvents : model.events
+        let base = model.streamPaused ? model.pausedSnapshot : model.events
         return base.filter { model.logFilters.matches($0) }
     }
 
@@ -49,10 +48,7 @@ struct LogsTab: View {
     private var pauseBinding: Binding<Bool> {
         Binding(
             get: { model.streamPaused },
-            set: { newValue in
-                if newValue { snapshotEvents = model.events }
-                model.streamPaused = newValue
-            }
+            set: { newValue in model.setStreamPaused(newValue) }
         )
     }
 

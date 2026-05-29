@@ -27,6 +27,35 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.logFilters, LogFilters())
         XCTAssertNil(model.focusedAlertID)
         XCTAssertEqual(model.selectedTab, .overview)
+        XCTAssertTrue(model.pausedSnapshot.isEmpty)
+    }
+
+    func testSetStreamPausedSnapshotsEventsAndFreezesThem() {
+        let model = AppModel(defaults: defaults)
+        model.ingest(makeEvent())
+        model.ingest(makeEvent())
+
+        // Pausing captures the current events as a frozen snapshot owned by the model.
+        model.setStreamPaused(true)
+        XCTAssertTrue(model.streamPaused)
+        XCTAssertEqual(model.pausedSnapshot.count, 2)
+        let frozen = model.pausedSnapshot.map(\.id)
+        XCTAssertEqual(frozen, model.events.map(\.id))
+
+        // Events keep flowing in while paused, but the snapshot must stay frozen — this is
+        // the bug the fix prevents (a paused Logs list that empties when the view rebuilds).
+        model.ingest(makeEvent())
+        XCTAssertEqual(model.events.count, 3)
+        XCTAssertEqual(model.pausedSnapshot.map(\.id), frozen)
+
+        // Re-asserting pause while already paused must NOT re-capture (no transition).
+        model.setStreamPaused(true)
+        XCTAssertEqual(model.pausedSnapshot.map(\.id), frozen)
+
+        // A fresh pause cycle re-captures the now-larger event set.
+        model.setStreamPaused(false)
+        model.setStreamPaused(true)
+        XCTAssertEqual(model.pausedSnapshot.count, 3)
     }
 
     func testSelectedTabPersistsAcrossInstances() {
