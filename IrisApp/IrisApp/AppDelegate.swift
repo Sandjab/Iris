@@ -1,7 +1,11 @@
 import AppKit
+import IrisAppCore
 import SwiftUI
+import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let appModel = AppModel()
+    private var notifications: NotificationCoordinator?
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
 
@@ -13,6 +17,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+
+        let coordinator = NotificationCoordinator(model: appModel) { [weak self] in
+            self?.openPopover()
+        }
+        notifications = coordinator
+        Task { await coordinator.requestAuthorization() }
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
@@ -45,13 +55,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func togglePopover() {
-        guard let button = statusItem?.button, let popover else { return }
+        guard let popover else { return }
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            openPopover()
         }
+    }
+
+    // Extracted so the notification click handler can force the popover open (not toggle).
+    private func openPopover() {
+        guard let button = statusItem?.button, let popover, !popover.isShown else { return }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
     }
 
     private func showQuitMenu(from button: NSStatusBarButton) {
