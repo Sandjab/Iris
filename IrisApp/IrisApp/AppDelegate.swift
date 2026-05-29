@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notifications: NotificationCoordinator?
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    private var cancellables: Set<AnyCancellable> = []
+    private var pulseWorkItem: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Multi-instance protection (SPECS §3.3 + §4 edge cases): a second launch exits
@@ -42,6 +44,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         statusItem = item
+
+        // Badge: mirror unreadAlertCount onto the status item title.
+        appModel.$unreadAlertCount
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] count in self?.updateBadge(count) }
+            .store(in: &cancellables)
+
+        // SPECS §15.1 — subtle "active" pulse on the icon after each new substituted event.
+        // Explicit closure types + an eraseToAnyPublisher keep the chain cheap to type-check.
+        appModel.$events
+            .compactMap { (events: [Event]) -> Event? in events.first }
+            .removeDuplicates { (lhs: Event, rhs: Event) -> Bool in lhs.id == rhs.id }
+            .filter { (event: Event) -> Bool in event.kind == .substituted }
+            .eraseToAnyPublisher()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.pulseIcon() }
+            .store(in: &cancellables)
 
         let popover = NSPopover()
         popover.behavior = .transient
@@ -115,6 +134,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // status item. Avoids the recursion risk of synthesising a click via performClick
         // (which would re-enter handleClick and could re-trigger showQuitMenu).
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+    }
+
+    private func updateBadge(_ count: Int) {
+        guard let button = statusItem?.button else { return }
+        button.title = count == 0 ? "" : " \(count)"
+    }
+
+    private func pulseIcon() {
+        guard let button = statusItem?.button else { return }
+        pulseWorkItem?.cancel()
+        button.alphaValue = 0.6
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.4
+            button.animator().alphaValue = 1.0
+        }
+        // Re-arm after 5s so the next pulse feels fresh.
+        let work = DispatchWorkItem { [weak button] in button?.alphaValue = 1.0 }
+        pulseWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: work)
     }
 
     @objc private func quit() {
