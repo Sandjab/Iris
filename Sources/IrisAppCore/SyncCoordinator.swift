@@ -87,7 +87,7 @@ public final class SyncCoordinator {
                 }
             }
 
-            let delay = backoffs[min(attempt - 1, backoffs.count - 1)]
+            let delay = Self.backoffDelay(attempt: attempt, backoffs: backoffs)
             try await sleeper.sleep(seconds: delay)
 
             do {
@@ -114,6 +114,16 @@ public final class SyncCoordinator {
                 }
             }
         }
+    }
+
+    /// Backoff delay (seconds) for `attempt`, clamped into the table bounds.
+    /// `attempt == 0` occurs after a stability reset and maps to the shortest delay;
+    /// clamping the lower bound prevents the negative-index crash from `attempt - 1`
+    /// when a stream that ran ≥ stableRunThreshold then drops.
+    static func backoffDelay(attempt: Int, backoffs: [Double]) -> Double {
+        guard !backoffs.isEmpty else { return 0 }
+        let index = min(max(attempt - 1, 0), backoffs.count - 1)
+        return backoffs[index]
     }
 
     /// Periodic stats poll. Sleeps `intervalSeconds`, fetches daemon stats, updates `daemonStatus.stats` if daemon is up.
