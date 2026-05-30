@@ -43,11 +43,13 @@ struct SecretFormView: View {
                 TextField("allowed hosts (comma-separated)", text: $form.hostsInput)
                     .textFieldStyle(.roundedBorder)
                 if !hostSuggestions.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(hostSuggestions, id: \.self) { host in
-                            Button(host) { appendHost(host) }
-                                .buttonStyle(.borderless)
-                                .font(.caption2)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(hostSuggestions, id: \.self) { host in
+                                Button(host) { appendHost(host) }
+                                    .buttonStyle(.borderless)
+                                    .font(.caption2)
+                            }
                         }
                     }
                 }
@@ -122,9 +124,11 @@ struct SecretFormView: View {
     }
 
     private func appendHost(_ host: String) {
-        let trimmed = form.hostsInput.trimmingCharacters(in: .whitespaces)
+        let trimmed = form.hostsInput.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             form.hostsInput = host
+        } else if trimmed.hasSuffix(",") {
+            form.hostsInput = trimmed + " " + host
         } else {
             form.hostsInput = trimmed + ", " + host
         }

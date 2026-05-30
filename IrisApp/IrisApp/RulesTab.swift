@@ -9,6 +9,7 @@ struct RulesTab: View {
     @State private var newHost = ""
     @State private var errorText: String?
     @State private var pendingDelete: MITMRule?
+    @State private var submitting = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,7 +19,7 @@ struct RulesTab: View {
                 Button("Add") {
                     Task { await addRule() }
                 }
-                .disabled(!IrisKit.Secret.isValidHost(newHost.trimmingCharacters(in: .whitespaces)))
+                .disabled(submitting || !IrisKit.Secret.isValidHost(newHost.trimmingCharacters(in: .whitespaces)))
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -79,6 +80,9 @@ struct RulesTab: View {
     }
 
     private func addRule() async {
+        guard !submitting else { return }
+        submitting = true
+        defer { submitting = false }
         errorText = nil
         do {
             try await model.addRule(host: newHost.trimmingCharacters(in: .whitespaces), via: admin)

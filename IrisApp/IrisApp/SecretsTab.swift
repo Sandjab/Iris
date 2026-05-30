@@ -22,7 +22,6 @@ struct SecretsTab: View {
         case .form(let mode):
             SecretFormView(mode: mode, admin: admin) {
                 route = .list
-                Task { await refresh() }
             }
         }
     }
