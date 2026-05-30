@@ -4,6 +4,11 @@ import IrisKit
 /// Pure validation state for the secret Add / Edit / Rotate forms. UI binds to this;
 /// all validation lives here (testable headless). Mirrors the daemon-side rules so the
 /// app never sends an RPC that the daemon will reject.
+///
+/// Validation is split into three concerns so a pristine form is not littered with errors:
+/// - `canSubmit` gates the submit button (all required fields valid).
+/// - `displayError` surfaces a message ONLY for input the user typed that is malformed.
+/// - `incompleteHint` is a neutral "what's still missing" hint when nothing is malformed.
 @MainActor
 public final class SecretFormState: ObservableObject {
     public enum Mode: Equatable {
@@ -48,25 +53,47 @@ public final class SecretFormState: ObservableObject {
         Data(value.utf8)
     }
 
-    public var validationError: String? {
+    /// Whether the form can be submitted (all required fields valid). Drives the submit button.
+    public var canSubmit: Bool {
         switch mode {
         case .add:
-            if !nameIsValid {
-                return "Name must match [a-zA-Z0-9_-], 1–64 chars."
-            }
-            if value.isEmpty {
-                return "Value is required."
-            }
-            return hostsError
+            return nameIsValid && !value.isEmpty && hostsSubmittable
         case .edit:
-            return hostsError
+            return hostsSubmittable
         case .rotate:
-            return value.isEmpty ? "Value is required." : nil
+            return !value.isEmpty
         }
     }
 
-    public var canSubmit: Bool {
-        validationError == nil
+    /// A message shown ONLY for input the user typed that is malformed (a bad name, a bad host).
+    /// Empty/required fields produce no message here — the disabled button plus `incompleteHint`
+    /// communicate that — so a pristine form is not covered in red text.
+    public var displayError: String? {
+        switch mode {
+        case .add:
+            if !name.isEmpty, !nameIsValid {
+                return "Name must match [a-zA-Z0-9_-], 1–64 chars."
+            }
+            return malformedHostError
+        case .edit:
+            return malformedHostError
+        case .rotate:
+            return nil
+        }
+    }
+
+    /// A neutral hint shown when the form is incomplete but nothing is malformed, so the user
+    /// knows what is still required without an alarming error.
+    public var incompleteHint: String? {
+        guard !canSubmit, displayError == nil else { return nil }
+        switch mode {
+        case .add:
+            return "Enter a name, a value, and at least one allowed host."
+        case .edit:
+            return "Enter at least one allowed host."
+        case .rotate:
+            return "Enter a new value."
+        }
     }
 
     private var nameIsValid: Bool {
@@ -78,14 +105,18 @@ public final class SecretFormState: ObservableObject {
         }
     }
 
-    private var hostsError: String? {
-        let parsed = hosts
-        if parsed.isEmpty {
-            return "At least one allowed host is required."
-        }
-        if let bad = parsed.first(where: { !Secret.isValidHost($0) }) {
+    /// The first non-empty host token that is malformed, as an error message; nil when no host
+    /// has been typed or all are valid.
+    private var malformedHostError: String? {
+        if let bad = hosts.first(where: { !Secret.isValidHost($0) }) {
             return "Invalid host: \(bad)"
         }
         return nil
+    }
+
+    /// At least one host entered and every entered host valid (matches the daemon's rule).
+    private var hostsSubmittable: Bool {
+        let parsed = hosts
+        return !parsed.isEmpty && parsed.allSatisfy { Secret.isValidHost($0) }
     }
 }

@@ -4,16 +4,16 @@ import XCTest
 
 @MainActor
 final class RuleFormStateTests: XCTestCase {
-    func testEmptyHostNotSubmittable() {
+    func testPristineShowsNoErrorAndCannotSubmit() {
         let f = RuleFormState()
-        XCTAssertEqual(f.validationError, "Host is required.")
+        XCTAssertNil(f.displayError)  // no premature error on an empty field
         XCTAssertFalse(f.canSubmit)
     }
 
     func testValidHostSubmittable() {
         let f = RuleFormState()
         f.host = "api.anthropic.com"
-        XCTAssertNil(f.validationError)
+        XCTAssertNil(f.displayError)
         XCTAssertTrue(f.canSubmit)
     }
 
@@ -24,11 +24,17 @@ final class RuleFormStateTests: XCTestCase {
         XCTAssertTrue(f.canSubmit)
     }
 
-    func testRejectsMalformed() {
+    func testMalformedShowsErrorOnceTyped() {
         let f = RuleFormState()
         f.host = "has space.com"
-        XCTAssertEqual(f.validationError, "Invalid host (DNS-like, ≤253 chars).")
+        XCTAssertEqual(f.displayError, "Invalid host (DNS-like, ≤253 chars).")
+        XCTAssertFalse(f.canSubmit)
+    }
+
+    func testOverlongHostNotSubmittable() {
+        let f = RuleFormState()
         f.host = String(repeating: "a", count: 254)
         XCTAssertFalse(f.canSubmit)
+        XCTAssertNotNil(f.displayError)
     }
 }

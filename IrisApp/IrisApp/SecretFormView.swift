@@ -58,8 +58,11 @@ struct SecretFormView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if let msg = form.validationError {
+            if let msg = form.displayError {
                 Text(msg).font(.caption).foregroundStyle(.orange)
+            }
+            if let hint = form.incompleteHint {
+                Text(hint).font(.caption2).foregroundStyle(.secondary)
             }
             if let errorText {
                 Text(errorText).font(.caption).foregroundStyle(.red)

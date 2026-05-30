@@ -6,7 +6,7 @@ struct RulesTab: View {
     @EnvironmentObject var model: AppModel
     let admin: AdminCalling
 
-    @State private var newHost = ""
+    @StateObject private var ruleForm = RuleFormState()
     @State private var errorText: String?
     @State private var pendingDelete: MITMRule?
     @State private var submitting = false
@@ -14,15 +14,23 @@ struct RulesTab: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                TextField("host.example.com", text: $newHost)
+                TextField("host.example.com", text: $ruleForm.host)
                     .textFieldStyle(.roundedBorder)
                 Button("Add") {
                     Task { await addRule() }
                 }
-                .disabled(submitting || !IrisKit.Secret.isValidHost(newHost.trimmingCharacters(in: .whitespaces)))
+                .disabled(submitting || !ruleForm.canSubmit)
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
+
+            if let msg = ruleForm.displayError {
+                Text(msg)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 2)
+            }
 
             if let errorText {
                 Text(errorText)
@@ -86,8 +94,8 @@ struct RulesTab: View {
         defer { submitting = false }
         errorText = nil
         do {
-            try await model.addRule(host: newHost.trimmingCharacters(in: .whitespaces), via: admin)
-            newHost = ""
+            try await model.addRule(host: ruleForm.trimmedHost, via: admin)
+            ruleForm.host = ""
         } catch {
             errorText = userMessage(error)
         }
