@@ -13,20 +13,17 @@ struct PopoverView: View {
                 .background(.bar)
             Divider()
             BannersStack()
-            Picker("Tab", selection: $model.selectedTab) {
-                Text("Overview").tag(AppModel.Tab.overview)
-                Text("Logs").tag(AppModel.Tab.logs)
-                Text("Security").tag(AppModel.Tab.security)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            TabBar(selection: $model.selectedTab)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
             Divider()
             Group {
                 switch model.selectedTab {
                 case .overview: OverviewTab()
                 case .logs: LogsTab()
                 case .security: SecurityTab()
+                case .secrets: SecretsTab(admin: admin)
+                case .rules: RulesTab(admin: admin)
                 }
             }
         }
@@ -134,5 +131,48 @@ private struct StatusLabel: View {
         let m = (s % 3600) / 60
         if h > 0 { return "\(h)h \(m)m" }
         return "\(m)m"
+    }
+}
+
+private struct TabBar: View {
+    @Binding var selection: AppModel.Tab
+
+    private struct Item: Identifiable {
+        let tab: AppModel.Tab
+        let title: String
+        let symbol: String
+        var id: AppModel.Tab { tab }
+    }
+
+    private let items: [Item] = [
+        Item(tab: .overview, title: "Overview", symbol: "chart.bar"),
+        Item(tab: .logs, title: "Logs", symbol: "list.bullet"),
+        Item(tab: .security, title: "Security", symbol: "exclamationmark.shield"),
+        Item(tab: .secrets, title: "Secrets", symbol: "key"),
+        Item(tab: .rules, title: "Rules", symbol: "network"),
+    ]
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(items) { item in
+                Button {
+                    selection = item.tab
+                } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: item.symbol).font(.system(size: 13))
+                        Text(item.title).font(.caption2)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 5)
+                    .background(
+                        selection == item.tab ? Color.accentColor.opacity(0.2) : Color.clear
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(selection == item.tab ? Color.accentColor : Color.secondary)
+            }
+        }
     }
 }
