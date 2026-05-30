@@ -27,6 +27,58 @@ extension AdminClient: AdminCalling {
             returning: [Event].self
         )
     }
+
+    public func listSecrets() async throws -> [Secret] {
+        try await call(.secretList, returning: [Secret].self)
+    }
+
+    public func addSecret(name: String, allowedHosts: [String], value: Data) async throws -> Secret {
+        try await call(
+            .secretAdd,
+            params: SecretAddParams(name: name, allowedHosts: allowedHosts, value: value),
+            returning: Secret.self
+        )
+    }
+
+    public func updateSecret(name: String, allowedHosts: [String]) async throws -> Secret {
+        try await call(
+            .secretUpdate,
+            params: SecretUpdateParams(name: name, allowedHosts: allowedHosts),
+            returning: Secret.self
+        )
+    }
+
+    public func rotateSecret(name: String, value: Data) async throws -> Secret {
+        try await call(
+            .secretRotate,
+            params: SecretRotateParams(name: name, value: value),
+            returning: Secret.self
+        )
+    }
+
+    public func deleteSecret(name: String) async throws {
+        _ = try await call(
+            .secretDelete,
+            params: SecretNameParams(name: name),
+            returning: SecretDeletedResult.self
+        )
+    }
+
+    public func listRules() async throws -> [MITMRule] {
+        try await call(.ruleList, returning: [MITMRule].self)
+    }
+
+    public func addRule(host: String) async throws -> MITMRule {
+        try await call(.ruleAdd, params: RuleHostParams(host: host), returning: MITMRule.self)
+    }
+
+    public func deleteRule(host: String) async throws {
+        _ = try await call(
+            .ruleDelete,
+            params: RuleHostParams(host: host),
+            returning: RuleDeletedResult.self
+        )
+    }
 }
 
 // MARK: - EventsClient + EventsSubscribing
