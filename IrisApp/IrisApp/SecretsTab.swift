@@ -87,6 +87,7 @@ struct SecretsTab: View {
     private func refresh() async {
         do {
             try await model.refreshSecrets(via: admin)
+            errorText = nil
         } catch {
             errorText = userMessage(error)
         }

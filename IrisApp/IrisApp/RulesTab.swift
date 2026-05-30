@@ -74,6 +74,7 @@ struct RulesTab: View {
     private func refresh() async {
         do {
             try await model.refreshRules(via: admin)
+            errorText = nil
         } catch {
             errorText = userMessage(error)
         }
