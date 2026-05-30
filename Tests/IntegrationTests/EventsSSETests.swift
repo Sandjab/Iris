@@ -222,6 +222,67 @@ final class EventsSSETests: XCTestCase {
         XCTAssertEqual(unwrapped.host, "isolated.example.com")
     }
 
+    /// Locks the multi-line / multi-frame byte parsing in `drainLines`: each SSE
+    /// frame is `event:`/`id:`/`data:` + a blank line (already several lines per
+    /// `channelRead`), and back-to-back events advance the buffer's readerIndex
+    /// across iterations. If the line-length math were wrong for anything past
+    /// the first line, the second event would be garbled or never arrive. Both
+    /// must surface, in order.
+    func testEventsClientReceivesMultipleEvents() async throws {
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        let bus = EventsBus()
+        let ring = EventRing(capacity: 32, bus: bus)
+        let server = EventsServer(
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+            bus: bus,
+            eventRing: ring,
+            group: group
+        )
+        let address = try await server.start()
+        let port = try XCTUnwrap(address.port)
+
+        let client = EventsClient(host: "127.0.0.1", port: port, group: group)
+        let stream = try await client.subscribe(since: nil)
+
+        let received = Task { () -> [Event] in
+            var events: [Event] = []
+            for try await item in stream {
+                if case .event(let event) = item {
+                    events.append(event)
+                    if events.count == 2 { return events }
+                }
+            }
+            return events
+        }
+
+        try await waitForSubscriber(bus: bus)
+        let first = makeEvent(host: "first.example.com")
+        let second = makeEvent(host: "second.example.com")
+        await ring.append(first)
+        await ring.append(second)
+
+        let got = try await withThrowingTaskGroup(of: [Event]?.self) { taskGroup -> [Event]? in
+            taskGroup.addTask { try await received.value }
+            taskGroup.addTask {
+                try await Task.sleep(nanoseconds: 5_000_000_000)  // 5 s deadline
+                return nil
+            }
+            let firstResult = try await taskGroup.next() ?? nil
+            taskGroup.cancelAll()
+            return firstResult
+        }
+
+        received.cancel()
+        try? await server.stop()
+        try? await group.shutdownGracefully()
+
+        let events = try XCTUnwrap(got, "EventsClient did not deliver both events within 5s")
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events[0].host, "first.example.com")
+        XCTAssertEqual(events[1].host, "second.example.com")
+    }
+
     // MARK: - Raw NIO collector
 
     /// Opens an HTTP/1.1 connection to the SSE server, sends a `GET /events`

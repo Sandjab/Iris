@@ -215,8 +215,15 @@ private final class SSEInboundHandler: ChannelInboundHandler, @unchecked Sendabl
     /// line that materializes a frame — the core fix. No look-ahead, so an
     /// isolated event flushes the instant its terminating blank line arrives.
     private func drainLines(context: ChannelHandlerContext) {
-        while let lfIndex = pending.readableBytesView.firstIndex(of: 0x0A) {
-            let lineLength = lfIndex - pending.readerIndex
+        while true {
+            let view = pending.readableBytesView
+            guard let lfIndex = view.firstIndex(of: 0x0A) else { break }
+            // `distance(from:to:)` yields the line length whatever the view's
+            // index base is. `readableBytesView` indices are buffer-absolute
+            // (startIndex == readerIndex), so this equals `lfIndex - readerIndex`
+            // — but expressing it as a Collection distance keeps the parser from
+            // coupling to that internal detail.
+            let lineLength = view.distance(from: view.startIndex, to: lfIndex)
             guard var lineSlice = pending.readSlice(length: lineLength) else { break }
             pending.moveReaderIndex(forwardBy: 1)  // consume the LF
             var line = lineSlice.readString(length: lineSlice.readableBytes) ?? ""
