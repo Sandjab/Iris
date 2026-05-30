@@ -40,7 +40,10 @@ final class SyncCoordinatorTests: XCTestCase {
 
         try await coord.bootstrap()
 
-        XCTAssertEqual(admin.calls, ["status", "queryEvents(since:-1.0,limit:100)"])
+        XCTAssertEqual(
+            admin.calls,
+            ["status", "queryEvents(since:-1.0,limit:100)", "listSecrets", "listRules"]
+        )
         XCTAssertEqual(model.events.count, 1)
         if case .up(let stats, let uptime, let paused) = model.daemonStatus {
             XCTAssertEqual(stats.reqTotal, 5)
@@ -225,5 +228,21 @@ final class SyncCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(model.daemonStatus, .down(reason: .notRunning))
         XCTAssertEqual(admin.calls.filter { $0 == "stats" }.count, 0)
+    }
+
+    func testBootstrapPopulatesSecretsAndRules() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        admin.stubSecrets = [
+            Secret(name: "z", allowedHosts: ["z.com"], createdAt: .distantPast),
+            Secret(name: "a", allowedHosts: ["a.com"], createdAt: .distantPast),
+        ]
+        admin.stubRules = [MITMRule(host: "api.anthropic.com", createdAt: .distantPast, source: .toml)]
+        let coord = SyncCoordinator(model: model, admin: admin, events: FakeEventsSubscribing())
+
+        try await coord.bootstrap()
+
+        XCTAssertEqual(model.secrets.map(\.name), ["a", "z"])  // sorted
+        XCTAssertEqual(model.rules.map(\.host), ["api.anthropic.com"])
     }
 }
