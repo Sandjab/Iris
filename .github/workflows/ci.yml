@@ -28,10 +28,16 @@ jobs:
       - name: Test
         run: swift test
 
-      # continue-on-error in 6.1: macos-14 runner Xcode may predate the project's
-      # objectVersion 77 (Xcode 16+). Promote to a hard gate (and bump the runner) in 6.2.
-      - name: Build IrisApp via xcodebuild
-        continue-on-error: true
+  xcode-build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: xcodebuild -version
+
+      - name: Build IrisApp via xcodebuild (hard gate)
         run: |
           xcodebuild \
             -project IrisApp/IrisApp.xcodeproj \
