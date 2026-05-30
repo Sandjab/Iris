@@ -5,12 +5,14 @@ import IrisKit
 @MainActor
 public final class AppModel: ObservableObject {
     public enum Tab: String, Sendable, CaseIterable, Codable {
-        case overview, logs, security
+        case overview, logs, security, secrets, rules
     }
 
     @Published public var daemonStatus: DaemonStatus = .connecting
     @Published public var events: [Event] = []
     @Published public var alerts: [Event] = []
+    @Published public var secrets: [Secret] = []
+    @Published public var rules: [MITMRule] = []
     @Published public var unreadAlertCount: Int = 0
     @Published public var streamPaused: Bool = false
     /// Frozen copy of `events` captured when the Logs stream was paused. Lives on the
@@ -114,5 +116,55 @@ public final class AppModel: ObservableObject {
         if ring.count > cap {
             ring.removeLast(ring.count - cap)
         }
+    }
+
+    // MARK: - Secrets / Rules CRUD (Phase 6.2)
+    // All mutations go through admin RPC, then re-fetch the list (SPECS §15.4 — no optimistic update).
+
+    public func refreshSecrets(via admin: AdminCalling) async throws {
+        secrets = try await admin.listSecrets().sorted { $0.name < $1.name }
+    }
+
+    public func refreshRules(via admin: AdminCalling) async throws {
+        rules = try await admin.listRules().sorted { $0.host < $1.host }
+    }
+
+    public func addSecret(
+        name: String,
+        allowedHosts: [String],
+        value: Data,
+        via admin: AdminCalling
+    ) async throws {
+        _ = try await admin.addSecret(name: name, allowedHosts: allowedHosts, value: value)
+        try await refreshSecrets(via: admin)
+    }
+
+    public func updateSecret(
+        name: String,
+        allowedHosts: [String],
+        via admin: AdminCalling
+    ) async throws {
+        _ = try await admin.updateSecret(name: name, allowedHosts: allowedHosts)
+        try await refreshSecrets(via: admin)
+    }
+
+    public func rotateSecret(name: String, value: Data, via admin: AdminCalling) async throws {
+        _ = try await admin.rotateSecret(name: name, value: value)
+        try await refreshSecrets(via: admin)
+    }
+
+    public func deleteSecret(name: String, via admin: AdminCalling) async throws {
+        try await admin.deleteSecret(name: name)
+        try await refreshSecrets(via: admin)
+    }
+
+    public func addRule(host: String, via admin: AdminCalling) async throws {
+        _ = try await admin.addRule(host: host)
+        try await refreshRules(via: admin)
+    }
+
+    public func deleteRule(host: String, via admin: AdminCalling) async throws {
+        try await admin.deleteRule(host: host)
+        try await refreshRules(via: admin)
     }
 }

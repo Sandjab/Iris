@@ -36,6 +36,9 @@ playground.xcworkspace
 # Claude Code session-local config
 .claude/
 
+# Superpowers brainstorm visual-companion artifacts (transient)
+.superpowers/
+
 # CocoaPods
 #
 # We recommend against adding the Pods directory to your .gitignore. However
