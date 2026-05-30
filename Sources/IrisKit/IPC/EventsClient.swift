@@ -1,4 +1,8 @@
 import Foundation
+import NIO
+import NIOCore
+import NIOHTTP1
+import NIOPosix
 
 // MARK: - Errors
 
@@ -27,17 +31,26 @@ public enum EventsClientItem: Sendable, Equatable {
 
 // MARK: - Client
 
-/// Minimal SSE consumer for the `/events` endpoint (SPECS §14). Uses
-/// `URLSession.bytes(for:)` to stream the HTTP response body and parses
-/// the standard `event:` / `id:` / `data:` SSE format.
+/// Minimal SSE consumer for the `/events` endpoint (SPECS §14). Uses a
+/// swift-nio HTTP/1.1 client (loopback, plain HTTP) and parses the standard
+/// `event:` / `id:` / `data:` SSE format.
+///
+/// The inbound handler splits the response body on the LF byte (`0x0A`) and
+/// emits every completed line — **including the blank line that terminates a
+/// frame** — the instant it arrives. This is the whole reason for moving off
+/// `URLSession.bytes.lines`: its `AsyncLineSequence` retained a frame's
+/// trailing blank line until a *later* byte arrived, so an isolated event
+/// never materialized in real time (it surfaced only when the next event or
+/// the 15 s heartbeat pushed the buffered blank line through).
 public struct EventsClient: Sendable {
     public let baseURL: URL
-    private let session: URLSession
+    private let group: EventLoopGroup
+    private let ownsGroup: Bool
 
     public init(
         host: String = "127.0.0.1",
         port: Int,
-        session: URLSession = URLSession(configuration: .ephemeral)
+        group: EventLoopGroup? = nil
     ) {
         // URLComponents path/host parsing is overkill here: assemble the
         // loopback URL by string and force-unwrap with a precondition. If
@@ -46,7 +59,23 @@ public struct EventsClient: Sendable {
             preconditionFailure("EventsClient cannot build URL from host=\(host) port=\(port)")
         }
         self.baseURL = url
-        self.session = session
+        if let group = group {
+            self.group = group
+            self.ownsGroup = false
+        } else {
+            self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+            self.ownsGroup = true
+        }
+    }
+
+    /// Caller-owned lifecycle: invoke `await shutdown()` before dropping the
+    /// client when no `group` was supplied at init. Mirrors `AdminClient`: we
+    /// never shut down from `deinit` (a blocking call from ARC teardown can
+    /// deadlock), and never touch a group the caller injected.
+    public func shutdown() async throws {
+        if ownsGroup {
+            try await group.shutdownGracefully()
+        }
     }
 
     public func subscribe(
@@ -69,46 +98,71 @@ public struct EventsClient: Sendable {
             queryItems.append(URLQueryItem(name: "host", value: host))
         }
         components?.queryItems = queryItems.isEmpty ? nil : queryItems
-        guard let url = components?.url else {
+        guard let url = components?.url,
+            let connectHost = url.host,
+            let connectPort = url.port
+        else {
             throw EventsClientError.invalidURL(baseURL.absoluteString)
         }
-
-        var request = URLRequest(url: url)
-        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-
-        let (bytes, response) = try await session.bytes(for: request)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw EventsClientError.httpStatus(http.statusCode)
+        var uri = url.path
+        if let query = url.query {
+            uri += "?" + query
         }
 
-        return AsyncThrowingStream { continuation in
-            let parserTask = Task {
-                var current: SSEFrame = SSEFrame()
-                do {
-                    for try await line in bytes.lines {
-                        if line.isEmpty {
-                            // Frame boundary: flush whatever we accumulated.
-                            if let item = try Self.materialize(frame: current) {
-                                continuation.yield(item)
-                            }
-                            current = SSEFrame()
-                            continue
-                        }
-                        if line.hasPrefix(":") {
-                            // SSE comment — used as heartbeat by the server.
-                            continuation.yield(.ping)
-                            continue
-                        }
-                        Self.absorb(line: line, into: &current)
+        // Build the stream and capture its continuation synchronously (the
+        // build closure runs inline). Done before connecting so the SSE handler
+        // can yield into it. No `Task {}` is spawned: `subscribe` is already
+        // `async`, so we connect in line — that also keeps the connect/HTTP
+        // errors surfacing from `subscribe()` itself, as the URLSession version
+        // did, and avoids a `sending`-closure capture race under Swift 6.
+        var capturedContinuation: AsyncThrowingStream<EventsClientItem, Error>.Continuation?
+        let stream = AsyncThrowingStream<EventsClientItem, Error> { capturedContinuation = $0 }
+        guard let continuation = capturedContinuation else {
+            // Unreachable: the build closure above runs synchronously.
+            throw EventsClientError.streamClosed
+        }
+
+        let bootstrap = ClientBootstrap(group: group)
+            .channelInitializer { channel in
+                channel.pipeline.addHTTPClientHandlers().flatMap {
+                    channel.eventLoop.makeCompletedFuture {
+                        try channel.pipeline.syncOperations.addHandler(
+                            SSEInboundHandler(continuation: continuation)
+                        )
                     }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
                 }
             }
-            continuation.onTermination = { _ in parserTask.cancel() }
+
+        let channel = try await bootstrap.connect(host: connectHost, port: connectPort).get()
+
+        var head = HTTPRequestHead(version: .http1_1, method: .GET, uri: uri)
+        head.headers.add(name: "Host", value: "\(connectHost):\(connectPort)")
+        head.headers.add(name: "Accept", value: "text/event-stream")
+        channel.write(HTTPClientRequestPart.head(head), promise: nil)
+        do {
+            try await channel.writeAndFlush(HTTPClientRequestPart.end(nil))
+        } catch {
+            channel.close(promise: nil)
+            throw error
         }
+
+        // The handler drives every yield; this closure just tears down the
+        // connection when the consumer stops iterating (or the stream is
+        // dropped). `Channel.close` is thread-safe off the event loop; a stored
+        // `ChannelHandlerContext` would not be — the CONNECT-502 lesson.
+        continuation.onTermination = { _ in channel.close(promise: nil) }
+        return stream
     }
+}
+
+// MARK: - Per-connection inbound handler
+
+/// Parses the SSE wire format off the inbound `ByteBuffer`s. All state is
+/// confined to the channel's event loop (touched only from `channelRead` /
+/// `errorCaught` / `channelInactive`), so `@unchecked Sendable` is sound —
+/// same pattern as `UpstreamResponseCollector`.
+private final class SSEInboundHandler: ChannelInboundHandler, @unchecked Sendable {
+    typealias InboundIn = HTTPClientResponsePart
 
     private struct SSEFrame {
         var eventName: String?
@@ -116,7 +170,85 @@ public struct EventsClient: Sendable {
         var data: String = ""
     }
 
-    private static func absorb(line: String, into frame: inout SSEFrame) {
+    private let continuation: AsyncThrowingStream<EventsClientItem, Error>.Continuation
+    private var streamOK = false
+    private var finished = false
+    private var pending = ByteBuffer()
+    private var frame = SSEFrame()
+
+    init(continuation: AsyncThrowingStream<EventsClientItem, Error>.Continuation) {
+        self.continuation = continuation
+    }
+
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        switch Self.unwrapInboundIn(data) {
+        case .head(let head):
+            if head.status.code == 200 {
+                streamOK = true
+            } else {
+                finish(throwing: EventsClientError.httpStatus(Int(head.status.code)))
+                context.close(promise: nil)
+            }
+        case .body(var chunk):
+            guard streamOK else { return }
+            pending.writeBuffer(&chunk)
+            drainLines(context: context)
+        case .end:
+            finish(throwing: nil)
+            context.close(promise: nil)
+        }
+    }
+
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        finish(throwing: error)
+        context.close(promise: nil)
+    }
+
+    func channelInactive(context: ChannelHandlerContext) {
+        // Clean EOF: finish WITHOUT throwing so `SyncCoordinator`'s reconnect
+        // loop treats it as a transient drop (a stable run resets its backoff).
+        finish(throwing: nil)
+        context.fireChannelInactive()
+    }
+
+    /// Emit every complete line in `pending` (split on LF), including the blank
+    /// line that materializes a frame — the core fix. No look-ahead, so an
+    /// isolated event flushes the instant its terminating blank line arrives.
+    private func drainLines(context: ChannelHandlerContext) {
+        while let lfIndex = pending.readableBytesView.firstIndex(of: 0x0A) {
+            let lineLength = lfIndex - pending.readerIndex
+            guard var lineSlice = pending.readSlice(length: lineLength) else { break }
+            pending.moveReaderIndex(forwardBy: 1)  // consume the LF
+            var line = lineSlice.readString(length: lineSlice.readableBytes) ?? ""
+            if line.hasSuffix("\r") { line.removeLast() }  // tolerate CRLF
+            handle(line: line, context: context)
+            if finished { return }
+        }
+        pending.discardReadBytes()
+    }
+
+    private func handle(line: String, context: ChannelHandlerContext) {
+        if line.isEmpty {
+            do {
+                if let item = try materialize(frame: frame) {
+                    continuation.yield(item)
+                }
+            } catch {
+                finish(throwing: error)  // already `.decodeFailed` from materialize
+                context.close(promise: nil)
+            }
+            frame = SSEFrame()
+            return
+        }
+        if line.hasPrefix(":") {
+            // SSE comment — used as heartbeat / connection primer by the server.
+            continuation.yield(.ping)
+            return
+        }
+        absorb(line: line, into: &frame)
+    }
+
+    private func absorb(line: String, into frame: inout SSEFrame) {
         // Each line is `field: value` or `field:value`.
         guard let colonIndex = line.firstIndex(of: ":") else { return }
         let field = String(line[..<colonIndex])
@@ -136,7 +268,7 @@ public struct EventsClient: Sendable {
         }
     }
 
-    private static func materialize(frame: SSEFrame) throws -> EventsClientItem? {
+    private func materialize(frame: SSEFrame) throws -> EventsClientItem? {
         guard frame.eventName != nil else { return nil }
         guard let payloadData = frame.data.data(using: .utf8) else { return nil }
         do {
@@ -144,6 +276,16 @@ public struct EventsClient: Sendable {
             return .event(event)
         } catch {
             throw EventsClientError.decodeFailed("\(error)")
+        }
+    }
+
+    private func finish(throwing error: Error?) {
+        guard !finished else { return }
+        finished = true
+        if let error = error {
+            continuation.finish(throwing: error)
+        } else {
+            continuation.finish()
         }
     }
 }

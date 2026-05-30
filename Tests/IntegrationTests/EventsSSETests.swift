@@ -72,11 +72,12 @@ final class EventsSSETests: XCTestCase {
 
     // MARK: - Live event streaming (raw NIO client)
 
-    /// We bypass `EventsClient` (URLSession-based) in this integration test
-    /// because URLSession's chunked-transfer buffering swallows the first
-    /// small body chunk on the loopback for several seconds — works fine
-    /// against real apps in production, but makes the test flaky. A raw
-    /// NIO HTTP client reads exactly what the server writes, no buffering.
+    /// This test uses a raw NIO HTTP client (not `EventsClient`) to assert on
+    /// the exact bytes the server writes. Historically `EventsClient` was
+    /// URLSession-based and its `bytes.lines` retained a frame's terminating
+    /// blank line until a later byte arrived, so it could not surface an
+    /// isolated event in real time. `EventsClient` is now swift-nio-based and
+    /// is exercised directly by `testEventsClientReceivesSingleIsolatedEvent`.
     func testServerStreamsEventBytesAfterRingAppend() async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         defer { try? group.syncShutdownGracefully() }
@@ -149,6 +150,76 @@ final class EventsSSETests: XCTestCase {
         await collector.close()
 
         try await server.stop()
+    }
+
+    // MARK: - EventsClient end-to-end (real client + real server)
+
+    /// Regression test for the SSE live bug. The old URLSession-based
+    /// `EventsClient` consumed the body via `bytes.lines`, an `AsyncSequence`
+    /// that retains the blank line terminating an SSE frame until a *later*
+    /// byte arrives. An isolated event therefore never materialized in real
+    /// time — only when a second event (or the 15 s heartbeat) pushed the
+    /// buffered blank line through. Here we publish EXACTLY ONE event and keep
+    /// the stream open: it MUST arrive within the deadline. Encodes the intent
+    /// (Rule 9): a single live event must surface immediately, not wait for the
+    /// next frame.
+    func testEventsClientReceivesSingleIsolatedEvent() async throws {
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        let bus = EventsBus()
+        let ring = EventRing(capacity: 32, bus: bus)
+        let server = EventsServer(
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+            bus: bus,
+            eventRing: ring,
+            group: group
+        )
+        let address = try await server.start()
+        let port = try XCTUnwrap(address.port)
+
+        // Real client over the shared group (the test owns the ELG lifetime).
+        let client = EventsClient(host: "127.0.0.1", port: port, group: group)
+        let stream = try await client.subscribe(since: nil)
+
+        // Drive the stream in a child task; capture the first `.event`,
+        // ignoring the priming `: connected` heartbeat (.ping).
+        let received = Task { () -> Event? in
+            for try await item in stream {
+                if case .event(let event) = item { return event }
+            }
+            return nil
+        }
+
+        try await waitForSubscriber(bus: bus)
+        let event = makeEvent(host: "isolated.example.com")
+        await ring.append(event)  // EXACTLY ONE event; nothing else published
+
+        let got = try await withThrowingTaskGroup(of: Event?.self) { taskGroup -> Event? in
+            taskGroup.addTask { try await received.value }
+            taskGroup.addTask {
+                try await Task.sleep(nanoseconds: 5_000_000_000)  // 5 s deadline
+                return nil
+            }
+            let first = try await taskGroup.next() ?? nil
+            taskGroup.cancelAll()
+            return first
+        }
+
+        // Ordered async teardown BEFORE asserting: cancelling the consumer
+        // closes the SSE channel (via onTermination), then we stop the server
+        // and shut the group down with the non-blocking async API. Doing this
+        // first means a failed assertion can never strand an open connection on
+        // a blocking `syncShutdownGracefully`.
+        received.cancel()
+        try? await server.stop()
+        try? await group.shutdownGracefully()
+
+        let unwrapped = try XCTUnwrap(
+            got,
+            "EventsClient did not deliver the isolated event within 5s"
+        )
+        XCTAssertEqual(unwrapped.id, event.id)
+        XCTAssertEqual(unwrapped.host, "isolated.example.com")
     }
 
     // MARK: - Raw NIO collector
