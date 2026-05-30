@@ -1,0 +1,194 @@
+import AppKit
+import Combine
+import IrisAppCore
+import IrisKit
+import SwiftUI
+import UserNotifications
+
+/// Default admin socket path (SPECS §681). Made configurable via Settings in Phase 6.3.
+/// Module-internal so `PopoverView` reuses it without duplicating the literal.
+func defaultAdminSocketPath() -> String {
+    ("~/Library/Application Support/iris/admin.sock" as NSString).expandingTildeInPath
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let appModel = AppModel()
+    private var notifications: NotificationCoordinator?
+    private var statusItem: NSStatusItem?
+    private var popover: NSPopover?
+    private var cancellables: Set<AnyCancellable> = []
+    private var pulseWorkItem: DispatchWorkItem?
+    private var popoverMonitor: Any?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Multi-instance protection (SPECS §3.3 + §4 edge cases): a second launch exits
+        // immediately so we never end up with two status items fighting over one daemon.
+        let bundleID = Bundle.main.bundleIdentifier ?? "io.iris.app"
+        if NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).count > 1 {
+            NSApp.terminate(nil)
+            return
+        }
+
+        let coordinator = NotificationCoordinator(model: appModel) { [weak self] in
+            self?.openPopover()
+        }
+        notifications = coordinator
+        Task { await coordinator.requestAuthorization() }
+
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            // Template icon: monochrome SF Symbol. Replaced by xcassets in Task 19.
+            button.image = NSImage(systemSymbolName: "key.fill", accessibilityDescription: "Iris")
+            button.image?.isTemplate = true
+            button.target = self
+            button.action = #selector(handleClick(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+        statusItem = item
+
+        // Badge: mirror unreadAlertCount onto the status item title.
+        appModel.$unreadAlertCount
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] count in self?.updateBadge(count) }
+            .store(in: &cancellables)
+
+        // SPECS §15.1 — subtle "active" pulse on the icon after each new substituted event.
+        // Explicit closure types + an eraseToAnyPublisher keep the chain cheap to type-check.
+        appModel.$events
+            .compactMap { (events: [Event]) -> Event? in events.first }
+            .removeDuplicates { (lhs: Event, rhs: Event) -> Bool in lhs.id == rhs.id }
+            .filter { (event: Event) -> Bool in event.kind == .substituted }
+            .eraseToAnyPublisher()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.pulseIcon() }
+            .store(in: &cancellables)
+
+        // One daemon client for the whole app: admin RPC over UDS + loopback SSE.
+        // The same `admin` is reused by both the SyncCoordinator and the popover's
+        // pause/resume control, so we never spin up (and leak) a per-click EventLoopGroup.
+        // It lives for the process lifetime; its owned group is reclaimed at exit.
+        let admin = AdminClient(socketPath: defaultAdminSocketPath())
+        let eventsClient = EventsClient(port: 8899)
+
+        let popover = NSPopover()
+        // .applicationDefined (not .transient): a transient popover dismisses itself on the
+        // mouseDown of the status button, then handleClick's mouseUp re-opens it — so a second
+        // click never closes it. We own dismissal explicitly (re-click + outside-click monitor).
+        popover.behavior = .applicationDefined
+        popover.contentSize = NSSize(width: 480, height: 600)
+        popover.contentViewController = NSHostingController(
+            rootView: PopoverView(admin: admin).environmentObject(appModel)
+        )
+        self.popover = popover
+
+        let sync = SyncCoordinator(model: appModel, admin: admin, events: eventsClient)
+        let model = appModel
+        Task {
+            try? await sync.bootstrap()
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { try? await sync.runStreamWithReconnect() }
+                group.addTask { try? await sync.runStatsPoll() }
+                // Notification fan-out: emit a system notification for each new alert event.
+                group.addTask { @MainActor in
+                    // Seed with alerts already loaded by bootstrap() so historical alerts
+                    // don't trigger a notification flood on launch.
+                    var seenIDs = Set(model.alerts.map(\.id))
+                    for await alertEvents in model.$alerts.values {
+                        for event in alertEvents where !seenIDs.contains(event.id) {
+                            seenIDs.insert(event.id)
+                            if let content = NotificationBuilder.build(from: event) {
+                                coordinator.emit(content)
+                            }
+                        }
+                        // Bound the dedupe set to the current (capped) alert window so it
+                        // cannot grow unbounded as alerts age out of the ring.
+                        seenIDs.formIntersection(alertEvents.map(\.id))
+                    }
+                }
+            }
+        }
+    }
+
+    @objc private func handleClick(_ sender: NSStatusBarButton) {
+        guard let event = NSApp.currentEvent else {
+            togglePopover()
+            return
+        }
+        // Ctrl+left-click is the standard macOS secondary-click shortcut.
+        let isSecondaryClick =
+            event.type == .rightMouseUp
+            || (event.type == .leftMouseUp && event.modifierFlags.contains(.control))
+        if isSecondaryClick {
+            showQuitMenu(from: sender)
+        } else {
+            togglePopover()
+        }
+    }
+
+    private func togglePopover() {
+        guard let popover else { return }
+        if popover.isShown {
+            closePopover()
+        } else {
+            openPopover()
+        }
+    }
+
+    // Extracted so the notification click handler can force the popover open (not toggle).
+    private func openPopover() {
+        guard let button = statusItem?.button, let popover, !popover.isShown else { return }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+        // .applicationDefined never self-dismisses, so close on any click outside the app.
+        // The status button is handled by handleClick; clicks inside the popover are local
+        // events this global monitor never receives, so they don't dismiss it.
+        popoverMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            self?.closePopover()
+        }
+    }
+
+    private func closePopover() {
+        popover?.performClose(nil)
+        if let monitor = popoverMonitor {
+            NSEvent.removeMonitor(monitor)
+            popoverMonitor = nil
+        }
+    }
+
+    private func showQuitMenu(from button: NSStatusBarButton) {
+        let menu = NSMenu()
+        let quitItem = NSMenuItem(title: "Quit Iris", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+        // NSMenu.popUp(positioning:at:in:) is the modern (non-deprecated) replacement for
+        // statusItem.popUpMenu(_:). Anchored to the button so the menu drops down from the
+        // status item. Avoids the recursion risk of synthesising a click via performClick
+        // (which would re-enter handleClick and could re-trigger showQuitMenu).
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+    }
+
+    private func updateBadge(_ count: Int) {
+        guard let button = statusItem?.button else { return }
+        button.title = count == 0 ? "" : " \(count)"
+    }
+
+    private func pulseIcon() {
+        guard let button = statusItem?.button else { return }
+        pulseWorkItem?.cancel()
+        button.alphaValue = 0.6
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.4
+            button.animator().alphaValue = 1.0
+        }
+        // Re-arm after 5s so the next pulse feels fresh.
+        let work = DispatchWorkItem { [weak button] in button?.alphaValue = 1.0 }
+        pulseWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: work)
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
+    }
+}

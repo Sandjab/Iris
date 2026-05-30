@@ -5,6 +5,18 @@ import XCTest
 
 @MainActor
 final class SyncCoordinatorTests: XCTestCase {
+    func testBackoffDelayClampsBoundsAndNeverCrashes() {
+        let backoffs: [Double] = [1, 2, 4, 8, 16, 30]
+        // Regression: attempt == 0 occurs right after a stable-run reset. The old code did
+        // backoffs[min(-1, 5)] == backoffs[-1] and crashed with "Index out of range".
+        // It must clamp the lower bound to the shortest delay instead.
+        XCTAssertEqual(SyncCoordinator.backoffDelay(attempt: 0, backoffs: backoffs), 1)
+        XCTAssertEqual(SyncCoordinator.backoffDelay(attempt: 1, backoffs: backoffs), 1)
+        XCTAssertEqual(SyncCoordinator.backoffDelay(attempt: 2, backoffs: backoffs), 2)
+        XCTAssertEqual(SyncCoordinator.backoffDelay(attempt: 6, backoffs: backoffs), 30)
+        XCTAssertEqual(SyncCoordinator.backoffDelay(attempt: 100, backoffs: backoffs), 30)
+    }
+
     func testBootstrapWithDaemonUpFetchesStatusAndEvents() async throws {
         let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
         let admin = FakeAdminCalling()
