@@ -132,6 +132,10 @@ public struct AdminDispatcher: Sendable {
             let payload = try Self.decode(SecretNameParams.self, from: params)
             try await secretStore.delete(named: payload.name)
             return try JSONValue.encoding(SecretDeletedResult(deleted: true))
+        case .secretSetQuarantined:
+            let payload = try Self.decode(SecretQuarantineParams.self, from: params)
+            let secret = try await secretStore.setQuarantined(payload.quarantined, named: payload.name)
+            return try JSONValue.encoding(secret)
 
         case .daemonStatus:
             let stats = await currentStats()

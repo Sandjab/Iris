@@ -10,6 +10,7 @@ public enum AdminMethod: String, Codable, Sendable, CaseIterable {
     case secretUpdate = "secret.update"
     case secretRotate = "secret.rotate"
     case secretDelete = "secret.delete"
+    case secretSetQuarantined = "secret.set_quarantined"
     case daemonStatus = "daemon.status"
     case daemonStats = "daemon.stats"
     case daemonPause = "daemon.pause"
@@ -74,6 +75,16 @@ public struct SecretRotateParams: Codable, Sendable, Equatable {
     public init(name: String, value: Data) {
         self.name = name
         self.value = value
+    }
+}
+
+public struct SecretQuarantineParams: Codable, Sendable, Equatable {
+    public let name: String
+    public let quarantined: Bool
+
+    public init(name: String, quarantined: Bool) {
+        self.name = name
+        self.quarantined = quarantined
     }
 }
 
@@ -200,5 +211,5 @@ public struct EventsClearResult: Codable, Sendable, Equatable {
 /// Version string surfaced by `daemon.status`. Embedded into the binary at
 /// build time; for now a literal constant updated alongside releases.
 public enum DaemonVersion {
-    public static let current = "0.5.2-phase4.x"
+    public static let current = "0.6.0-phase6.2.x"
 }
