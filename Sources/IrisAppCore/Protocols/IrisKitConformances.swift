@@ -64,6 +64,14 @@ extension AdminClient: AdminCalling {
         )
     }
 
+    public func setQuarantined(name: String, quarantined: Bool) async throws -> Secret {
+        try await call(
+            .secretSetQuarantined,
+            params: SecretQuarantineParams(name: name, quarantined: quarantined),
+            returning: Secret.self
+        )
+    }
+
     public func listRules() async throws -> [MITMRule] {
         try await call(.ruleList, returning: [MITMRule].self)
     }

@@ -7,7 +7,9 @@ struct SecretCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "secret",
         abstract: "Manage stored secrets (name + allowed-hosts only; values never leave the daemon).",
-        subcommands: [Add.self, List.self, Show.self, Edit.self, Rotate.self, Remove.self]
+        subcommands: [
+            Add.self, List.self, Show.self, Edit.self, Rotate.self, Remove.self, Quarantine.self, Unquarantine.self,
+        ]
     )
 
     // MARK: - secret add
@@ -91,6 +93,7 @@ struct SecretCommand: AsyncParsableCommand {
                 let rows = secrets.map { s in
                     [
                         s.name,
+                        s.quarantined ? "QUARANTINED" : "active",
                         TextFormatter.uptime(seconds: UInt64(max(0, Int(Date().timeIntervalSince(s.createdAt)))))
                             + " ago",
                         s.lastUsedAt.map {
@@ -102,7 +105,7 @@ struct SecretCommand: AsyncParsableCommand {
                 }
                 if rows.isEmpty { return "no secrets" }
                 return TextFormatter.table(
-                    headers: ["NAME", "CREATED", "LAST_USED", "USES", "HOSTS"],
+                    headers: ["NAME", "STATUS", "CREATED", "LAST_USED", "USES", "HOSTS"],
                     rows: rows
                 )
             }()
@@ -132,7 +135,7 @@ struct SecretCommand: AsyncParsableCommand {
             }
             try Output.print(
                 humanText:
-                    "name: \(secret.name)\nhosts: \(secret.allowedHosts.joined(separator: ","))\ncreated: \(secret.createdAt)\nuses: \(secret.usageCount)",
+                    "name: \(secret.name)\nhosts: \(secret.allowedHosts.joined(separator: ","))\ncreated: \(secret.createdAt)\nuses: \(secret.usageCount)\nquarantined: \(secret.quarantined)",
                 jsonValue: secret,
                 json: json
             )
@@ -213,6 +216,54 @@ struct SecretCommand: AsyncParsableCommand {
                 jsonValue: secret,
                 json: json
             )
+        }
+    }
+
+    // MARK: - secret quarantine
+
+    struct Quarantine: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "quarantine",
+            abstract: "Disable substitution for a secret (reversible)."
+        )
+
+        @OptionGroup var connection: ConnectionOptions
+        @Argument var name: String
+        @Flag(name: .customLong("json")) var json: Bool = false
+
+        mutating func run() async throws {
+            let secret = try await withAdminClient(connection) { client in
+                try await client.call(
+                    .secretSetQuarantined,
+                    params: SecretQuarantineParams(name: name, quarantined: true),
+                    returning: Secret.self
+                )
+            }
+            try Output.print(humanText: "quarantined \(secret.name)", jsonValue: secret, json: json)
+        }
+    }
+
+    // MARK: - secret unquarantine
+
+    struct Unquarantine: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "unquarantine",
+            abstract: "Re-enable substitution for a secret."
+        )
+
+        @OptionGroup var connection: ConnectionOptions
+        @Argument var name: String
+        @Flag(name: .customLong("json")) var json: Bool = false
+
+        mutating func run() async throws {
+            let secret = try await withAdminClient(connection) { client in
+                try await client.call(
+                    .secretSetQuarantined,
+                    params: SecretQuarantineParams(name: name, quarantined: false),
+                    returning: Secret.self
+                )
+            }
+            try Output.print(humanText: "unquarantined \(secret.name)", jsonValue: secret, json: json)
         }
     }
 

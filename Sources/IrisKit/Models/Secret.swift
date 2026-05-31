@@ -6,6 +6,7 @@ public struct Secret: Codable, Sendable, Hashable {
     public let createdAt: Date
     public let lastUsedAt: Date?
     public let usageCount: UInt64
+    public let quarantined: Bool
 
     enum CodingKeys: String, CodingKey {
         case name
@@ -13,6 +14,7 @@ public struct Secret: Codable, Sendable, Hashable {
         case createdAt = "created_at"
         case lastUsedAt = "last_used_at"
         case usageCount = "usage_count"
+        case quarantined
     }
 
     public init(
@@ -20,13 +22,25 @@ public struct Secret: Codable, Sendable, Hashable {
         allowedHosts: [String],
         createdAt: Date,
         lastUsedAt: Date? = nil,
-        usageCount: UInt64 = 0
+        usageCount: UInt64 = 0,
+        quarantined: Bool = false
     ) {
         self.name = name
         self.allowedHosts = allowedHosts
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.usageCount = usageCount
+        self.quarantined = quarantined
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.allowedHosts = try c.decode([String].self, forKey: .allowedHosts)
+        self.createdAt = try c.decode(Date.self, forKey: .createdAt)
+        self.lastUsedAt = try c.decodeIfPresent(Date.self, forKey: .lastUsedAt)
+        self.usageCount = try c.decode(UInt64.self, forKey: .usageCount)
+        self.quarantined = try c.decodeIfPresent(Bool.self, forKey: .quarantined) ?? false
     }
 }
 

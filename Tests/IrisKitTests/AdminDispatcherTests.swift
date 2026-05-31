@@ -547,4 +547,26 @@ final class AdminDispatcherTests: XCTestCase {
         let result = try unwrapResult(resp).decode(as: EventsClearResult.self)
         XCTAssertEqual(result.deletedCount, 0)
     }
+
+    func testSecretSetQuarantinedRoundTrips() async throws {
+        let store = InMemorySecretStore()
+        _ = try await store.add(Data("v".utf8), named: "a", allowedHosts: ["h"], createdAt: Date())
+        let (dispatcher, _, _) = try await makeDispatcher(secretStore: store)
+
+        let onParams = try JSONValue.encoding(SecretQuarantineParams(name: "a", quarantined: true))
+        let onResp = await dispatcher.dispatch(request(.secretSetQuarantined, params: onParams))
+        let onResult = try unwrapResult(onResp)
+        XCTAssertTrue(try onResult.decode(as: Secret.self).quarantined)
+
+        let offParams = try JSONValue.encoding(SecretQuarantineParams(name: "a", quarantined: false))
+        let offResp = await dispatcher.dispatch(request(.secretSetQuarantined, params: offParams))
+        XCTAssertFalse(try unwrapResult(offResp).decode(as: Secret.self).quarantined)
+    }
+
+    func testSecretSetQuarantinedUnknownReturnsError() async throws {
+        let (dispatcher, _, _) = try await makeDispatcher()
+        let params = try JSONValue.encoding(SecretQuarantineParams(name: "ghost", quarantined: true))
+        let resp = await dispatcher.dispatch(request(.secretSetQuarantined, params: params))
+        XCTAssertNotNil(resp.error)
+    }
 }

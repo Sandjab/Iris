@@ -93,7 +93,6 @@ public actor ExfilRuleEngine {
 
         // Look up metadata for each hit name once.
         var metadataByName: [String: Secret] = [:]
-        var knownHits: [PlaceholderHit] = []
         for hit in hits where metadataByName[hit.name] == nil {
             do {
                 let secret = try await secretStore.secret(named: hit.name)
@@ -102,7 +101,16 @@ public actor ExfilRuleEngine {
                 // Unknown — excluded from resolvable, not blocked.
             }
         }
-        for hit in hits where metadataByName[hit.name] != nil {
+
+        // Phase 6.2.x — quarantined secrets are inert: removed from the working
+        // hit set entirely so they are neither substituted nor scored by any
+        // exfil rule. No value is ever substituted for a quarantined secret, so
+        // nothing can leak. Unknown names (no metadata) stay so R3 typo
+        // detection is preserved.
+        let effectiveHits = hits.filter { metadataByName[$0.name]?.quarantined != true }
+
+        var knownHits: [PlaceholderHit] = []
+        for hit in effectiveHits where metadataByName[hit.name] != nil {
             knownHits.append(hit)
         }
 
@@ -119,7 +127,7 @@ public actor ExfilRuleEngine {
                     detectedAt: alertLocation(from: hit.location),
                     snippet: hit.snippet
                 )
-                return .block(alert: alert, allHits: hits)
+                return .block(alert: alert, allHits: effectiveHits)
             }
         }
 
@@ -133,19 +141,19 @@ public actor ExfilRuleEngine {
                     detectedAt: alertLocation(from: hit.location),
                     snippet: hit.snippet
                 )
-                return .block(alert: alert, allHits: hits)
+                return .block(alert: alert, allHits: effectiveHits)
             }
         }
 
         // R3 — multiple distinct secrets (medium). Counts all hits, including
         // unknown names (design §7.1): mixed known + typo is exactly the pattern
         // we want to flag.
-        let distinctNames = Set(hits.map(\.name))
+        let distinctNames = Set(effectiveHits.map(\.name))
         if distinctNames.count >= 2 {
             guard let triggeringName = distinctNames.sorted().first else {
                 return .allow(resolvable: knownHits)
             }
-            let triggeringHit = hits.first { $0.name == triggeringName } ?? hits[0]
+            let triggeringHit = effectiveHits.first { $0.name == triggeringName } ?? effectiveHits[0]
             let alert = Alert(
                 severity: .medium,
                 rule: .multipleSecrets,
@@ -153,11 +161,11 @@ public actor ExfilRuleEngine {
                 detectedAt: alertLocation(from: triggeringHit.location),
                 snippet: triggeringHit.snippet
             )
-            return .block(alert: alert, allHits: hits)
+            return .block(alert: alert, allHits: effectiveHits)
         }
 
         // R4 — suspicious content type (medium)
-        if let triggeringHit = Self.suspiciousContentTypeFires(hits: hits, context: context) {
+        if let triggeringHit = Self.suspiciousContentTypeFires(hits: effectiveHits, context: context) {
             let alert = Alert(
                 severity: .medium,
                 rule: .suspiciousContentType,
@@ -165,7 +173,7 @@ public actor ExfilRuleEngine {
                 detectedAt: .body,
                 snippet: triggeringHit.snippet
             )
-            return .block(alert: alert, allHits: hits)
+            return .block(alert: alert, allHits: effectiveHits)
         }
 
         // R5 — volume anomaly (low). Checks only KNOWN hits because we count
@@ -179,7 +187,7 @@ public actor ExfilRuleEngine {
                     detectedAt: alertLocation(from: hit.location),
                     snippet: hit.snippet
                 )
-                return .block(alert: alert, allHits: hits)
+                return .block(alert: alert, allHits: effectiveHits)
             }
         }
 

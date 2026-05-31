@@ -29,7 +29,8 @@ public actor KeychainSecretStore: SecretStore {
             allowedHosts: allowedHosts,
             createdAt: createdAt,
             lastUsedAt: nil,
-            usageCount: 0
+            usageCount: 0,
+            quarantined: false
         )
         let metadataBlob = try encode(metadata)
 
@@ -60,7 +61,8 @@ public actor KeychainSecretStore: SecretStore {
             allowedHosts: allowedHosts,
             createdAt: current.createdAt,
             lastUsedAt: current.lastUsedAt,
-            usageCount: current.usageCount
+            usageCount: current.usageCount,
+            quarantined: current.quarantined
         )
         try updateMetadata(name: name, metadata: metadata)
         return Secret(
@@ -68,7 +70,8 @@ public actor KeychainSecretStore: SecretStore {
             allowedHosts: allowedHosts,
             createdAt: current.createdAt,
             lastUsedAt: current.lastUsedAt,
-            usageCount: current.usageCount
+            usageCount: current.usageCount,
+            quarantined: current.quarantined
         )
     }
 
@@ -151,7 +154,8 @@ public actor KeychainSecretStore: SecretStore {
                     allowedHosts: metadata.allowedHosts,
                     createdAt: metadata.createdAt,
                     lastUsedAt: metadata.lastUsedAt,
-                    usageCount: metadata.usageCount
+                    usageCount: metadata.usageCount,
+                    quarantined: metadata.quarantined
                 )
             }.sorted { $0.name < $1.name }
         case errSecItemNotFound:
@@ -167,7 +171,8 @@ public actor KeychainSecretStore: SecretStore {
             allowedHosts: current.allowedHosts,
             createdAt: current.createdAt,
             lastUsedAt: date,
-            usageCount: current.usageCount &+ 1
+            usageCount: current.usageCount &+ 1,
+            quarantined: current.quarantined
         )
         try updateMetadata(name: name, metadata: metadata)
         return Secret(
@@ -175,7 +180,28 @@ public actor KeychainSecretStore: SecretStore {
             allowedHosts: current.allowedHosts,
             createdAt: current.createdAt,
             lastUsedAt: date,
-            usageCount: current.usageCount &+ 1
+            usageCount: current.usageCount &+ 1,
+            quarantined: current.quarantined
+        )
+    }
+
+    public func setQuarantined(_ quarantined: Bool, named name: String) async throws -> Secret {
+        let current = try fetchSecret(named: name)
+        let metadata = StoredMetadata(
+            allowedHosts: current.allowedHosts,
+            createdAt: current.createdAt,
+            lastUsedAt: current.lastUsedAt,
+            usageCount: current.usageCount,
+            quarantined: quarantined
+        )
+        try updateMetadata(name: name, metadata: metadata)
+        return Secret(
+            name: name,
+            allowedHosts: current.allowedHosts,
+            createdAt: current.createdAt,
+            lastUsedAt: current.lastUsedAt,
+            usageCount: current.usageCount,
+            quarantined: quarantined
         )
     }
 
@@ -186,6 +212,34 @@ public actor KeychainSecretStore: SecretStore {
         let createdAt: Date
         let lastUsedAt: Date?
         let usageCount: UInt64
+        let quarantined: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case allowedHosts, createdAt, lastUsedAt, usageCount, quarantined
+        }
+
+        init(
+            allowedHosts: [String],
+            createdAt: Date,
+            lastUsedAt: Date?,
+            usageCount: UInt64,
+            quarantined: Bool
+        ) {
+            self.allowedHosts = allowedHosts
+            self.createdAt = createdAt
+            self.lastUsedAt = lastUsedAt
+            self.usageCount = usageCount
+            self.quarantined = quarantined
+        }
+
+        init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.allowedHosts = try c.decode([String].self, forKey: .allowedHosts)
+            self.createdAt = try c.decode(Date.self, forKey: .createdAt)
+            self.lastUsedAt = try c.decodeIfPresent(Date.self, forKey: .lastUsedAt)
+            self.usageCount = try c.decode(UInt64.self, forKey: .usageCount)
+            self.quarantined = try c.decodeIfPresent(Bool.self, forKey: .quarantined) ?? false
+        }
     }
 
     private func baseQuery(for name: String) -> [String: Any] {
@@ -216,7 +270,8 @@ public actor KeychainSecretStore: SecretStore {
                 allowedHosts: metadata.allowedHosts,
                 createdAt: metadata.createdAt,
                 lastUsedAt: metadata.lastUsedAt,
-                usageCount: metadata.usageCount
+                usageCount: metadata.usageCount,
+                quarantined: metadata.quarantined
             )
         case errSecItemNotFound:
             throw SecretStoreError.unknownSecret(name)

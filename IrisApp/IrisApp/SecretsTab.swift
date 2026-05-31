@@ -59,7 +59,8 @@ struct SecretsTab: View {
                         secret: secret,
                         onEdit: { route = .form(.edit(existing: secret)) },
                         onRotate: { route = .form(.rotate(existing: secret)) },
-                        onDelete: { pendingDelete = secret }
+                        onDelete: { pendingDelete = secret },
+                        onToggleQuarantine: { Task { await toggleQuarantine(secret) } }
                     )
                 }
                 .listStyle(.plain)
@@ -101,6 +102,15 @@ struct SecretsTab: View {
             errorText = userMessage(error)
         }
     }
+
+    private func toggleQuarantine(_ secret: IrisKit.Secret) async {
+        errorText = nil
+        do {
+            try await model.setQuarantined(name: secret.name, quarantined: !secret.quarantined, via: admin)
+        } catch {
+            errorText = userMessage(error)
+        }
+    }
 }
 
 private struct SecretRow: View {
@@ -108,12 +118,26 @@ private struct SecretRow: View {
     let onEdit: () -> Void
     let onRotate: () -> Void
     let onDelete: () -> Void
+    let onToggleQuarantine: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text(secret.name).font(.callout.bold())
+                Text(secret.name)
+                    .font(.callout.bold())
+                    .foregroundStyle(secret.quarantined ? Color.red : Color.primary)
+                    .italic(secret.quarantined)
+                if secret.quarantined {
+                    Text("QUARANTINED")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.red)
+                }
                 Spacer()
+                Button(action: onToggleQuarantine) {
+                    Image(systemName: secret.quarantined ? "lock.open" : "lock.slash")
+                }
+                .buttonStyle(.borderless)
+                .help(secret.quarantined ? "Lift quarantine" : "Quarantine (disable substitution)")
                 Button(action: onEdit) { Image(systemName: "pencil") }
                     .buttonStyle(.borderless)
                     .help("Edit allowed hosts")

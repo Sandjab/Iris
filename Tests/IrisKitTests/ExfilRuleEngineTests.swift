@@ -460,4 +460,61 @@ final class ExfilRuleEngineTests: XCTestCase {
         XCTAssertEqual(alert.severity, .high)
         XCTAssertEqual(allHits.count, 2)
     }
+
+    // MARK: Quarantine (Phase 6.2.x — inert semantics)
+
+    private func makeStoreAndEngine(
+        secrets: [(name: String, allowedHosts: [String], quarantined: Bool)],
+        maxPerMinute: Int = 60
+    ) async throws -> ExfilRuleEngine {
+        let store = InMemorySecretStore()
+        for s in secrets {
+            _ = try await store.add(Data("v".utf8), named: s.name, allowedHosts: s.allowedHosts, createdAt: Date())
+            if s.quarantined { _ = try await store.setQuarantined(true, named: s.name) }
+        }
+        return ExfilRuleEngine(secretStore: store, maxSubstitutionsPerMinuteProvider: { maxPerMinute })
+    }
+
+    func testQuarantinedNotResolvableOnAllowedHost() async throws {
+        let ev = try await makeStoreAndEngine(secrets: [("foo", ["api.anthropic.com"], true)])
+        let hits = [PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .allow(let resolvable) = decision else { return XCTFail("expected allow") }
+        XCTAssertTrue(resolvable.isEmpty, "quarantined secret must not be resolvable")
+    }
+
+    func testQuarantinedNotBlockedOnDisallowedHost() async throws {
+        // A non-quarantined secret here would block via R1 hostMismatch.
+        let ev = try await makeStoreAndEngine(secrets: [("foo", ["api.anthropic.com"], true)])
+        let hits = [PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(hits: hits, context: ctx(host: "api.github.com"))
+        guard case .allow(let resolvable) = decision else { return XCTFail("expected allow (inert), not block") }
+        XCTAssertTrue(resolvable.isEmpty)
+    }
+
+    func testQuarantinedDoesNotTriggerR3WithActiveSecret() async throws {
+        let ev = try await makeStoreAndEngine(secrets: [
+            ("active", ["api.anthropic.com"], false),
+            ("quar", ["api.anthropic.com"], true),
+        ])
+        let hits = [
+            PlaceholderHit(name: "active", location: .header(name: "authorization"), snippet: "{{kc:active}}"),
+            PlaceholderHit(name: "quar", location: .header(name: "x-api-key"), snippet: "{{kc:quar}}"),
+        ]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .allow(let resolvable) = decision else { return XCTFail("expected allow, not R3 block") }
+        XCTAssertEqual(resolvable.map(\.name), ["active"])
+    }
+
+    func testUnquarantineRestoresResolvable() async throws {
+        let store = InMemorySecretStore()
+        _ = try await store.add(Data("v".utf8), named: "foo", allowedHosts: ["api.anthropic.com"], createdAt: Date())
+        _ = try await store.setQuarantined(true, named: "foo")
+        _ = try await store.setQuarantined(false, named: "foo")
+        let ev = ExfilRuleEngine(secretStore: store, maxSubstitutionsPerMinuteProvider: { 60 })
+        let hits = [PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}")]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .allow(let resolvable) = decision else { return XCTFail("expected allow") }
+        XCTAssertEqual(resolvable.map(\.name), ["foo"])
+    }
 }

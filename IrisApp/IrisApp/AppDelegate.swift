@@ -11,6 +11,7 @@ func defaultAdminSocketPath() -> String {
     ("~/Library/Application Support/iris/admin.sock" as NSString).expandingTildeInPath
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appModel = AppModel()
     private var notifications: NotificationCoordinator?
