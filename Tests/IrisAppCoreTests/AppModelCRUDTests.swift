@@ -72,4 +72,14 @@ final class AppModelCRUDTests: XCTestCase {
         let json = String(data: try JSONEncoder().encode(model.secrets), encoding: .utf8) ?? ""
         XCTAssertFalse(json.contains(secret), "secret value must never appear in AppModel state (I2)")
     }
+
+    func testSetQuarantinedCallsRPCThenRefetches() async throws {
+        let fake = FakeAdminCalling()
+        fake.stubSecrets = [Secret(name: "a", allowedHosts: ["h"], createdAt: Date())]
+        let model = makeModel()
+        try await model.setQuarantined(name: "a", quarantined: true, via: fake)
+        XCTAssertTrue(fake.calls.contains("setQuarantined(a,true)"))
+        XCTAssertTrue(fake.calls.contains("listSecrets"))
+        XCTAssertEqual(model.secrets.first { $0.name == "a" }?.quarantined, true)
+    }
 }

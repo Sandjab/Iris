@@ -34,6 +34,9 @@ public protocol AdminCalling: Sendable {
     /// Delete a secret (removes the Keychain item daemon-side).
     func deleteSecret(name: String) async throws
 
+    /// Toggle quarantine on a secret (disable/enable substitution). Returns the updated Secret.
+    func setQuarantined(name: String, quarantined: Bool) async throws -> Secret
+
     /// List MITM rules (host + source).
     func listRules() async throws -> [MITMRule]
 

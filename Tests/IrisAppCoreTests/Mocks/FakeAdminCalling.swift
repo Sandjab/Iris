@@ -84,6 +84,23 @@ final class FakeAdminCalling: AdminCalling, @unchecked Sendable {
         stubSecrets.removeAll { $0.name == name }
     }
 
+    func setQuarantined(name: String, quarantined: Bool) async throws -> Secret {
+        calls.append("setQuarantined(\(name),\(quarantined))")
+        if let e = shouldThrow { throw e }
+        let existing = stubSecrets.first { $0.name == name }
+        let s = Secret(
+            name: name,
+            allowedHosts: existing?.allowedHosts ?? [],
+            createdAt: existing?.createdAt ?? Date(timeIntervalSince1970: 0),
+            lastUsedAt: existing?.lastUsedAt,
+            usageCount: existing?.usageCount ?? 0,
+            quarantined: quarantined
+        )
+        stubSecrets.removeAll { $0.name == name }
+        stubSecrets.append(s)
+        return s
+    }
+
     func listRules() async throws -> [MITMRule] {
         calls.append("listRules")
         if let e = shouldThrow { throw e }

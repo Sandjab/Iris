@@ -158,6 +158,11 @@ public final class AppModel: ObservableObject {
         try await refreshSecrets(via: admin)
     }
 
+    public func setQuarantined(name: String, quarantined: Bool, via admin: AdminCalling) async throws {
+        _ = try await admin.setQuarantined(name: name, quarantined: quarantined)
+        try await refreshSecrets(via: admin)
+    }
+
     public func addRule(host: String, via admin: AdminCalling) async throws {
         _ = try await admin.addRule(host: host)
         try await refreshRules(via: admin)
