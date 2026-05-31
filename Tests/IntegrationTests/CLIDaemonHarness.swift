@@ -194,7 +194,7 @@ final class CLIDaemonHarness {
         // subcommand words). All known subcommand words come first; inject
         // --socket-path right after them.
         let subcommandWords: Set<String> = [
-            "secret", "add", "list", "show", "edit", "rotate", "rm",
+            "secret", "add", "list", "show", "edit", "rotate", "rm", "quarantine", "unquarantine",
             "status", "pause", "resume", "ca", "get", "reload",
             "config", "rule", "logs", "doctor",
             "mcp", "wrap",
@@ -292,7 +292,7 @@ final class CLIDaemonHarness {
     /// Use for long-running subcommands like `mcp wrap --watch`.
     func runIrisBackground(_ args: [String]) throws -> BackgroundIris {
         let subcommandWords: Set<String> = [
-            "secret", "add", "list", "show", "edit", "rotate", "rm",
+            "secret", "add", "list", "show", "edit", "rotate", "rm", "quarantine", "unquarantine",
             "status", "pause", "resume", "ca", "get", "reload",
             "config", "rule", "logs", "doctor",
             "mcp", "wrap",
