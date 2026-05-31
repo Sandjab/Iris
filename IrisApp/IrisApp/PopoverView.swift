@@ -21,7 +21,7 @@ struct PopoverView: View {
                 switch model.selectedTab {
                 case .overview: OverviewTab()
                 case .logs: LogsTab()
-                case .security: SecurityTab()
+                case .security: SecurityTab(admin: admin)
                 case .secrets: SecretsTab(admin: admin)
                 case .rules: RulesTab(admin: admin)
                 }

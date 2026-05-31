@@ -4,6 +4,8 @@ import SwiftUI
 
 struct SecurityTab: View {
     @EnvironmentObject var model: AppModel
+    let admin: AdminCalling
+    @State private var errorText: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,13 +20,24 @@ struct SecurityTab: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             Divider()
+            if let errorText {
+                Text(errorText)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+            }
             if model.alerts.isEmpty {
                 Spacer()
                 Text("No alerts.").foregroundStyle(.secondary)
                 Spacer()
             } else {
                 List(sortedAlerts) { event in
-                    AlertRow(event: event, focused: event.id == model.focusedAlertID)
+                    AlertRow(
+                        event: event,
+                        focused: event.id == model.focusedAlertID,
+                        onQuarantine: { await quarantine(event) }
+                    )
                 }
                 .listStyle(.plain)
             }
@@ -42,11 +55,22 @@ struct SecurityTab: View {
             return lhs.timestamp > rhs.timestamp
         }
     }
+
+    private func quarantine(_ event: Event) async {
+        guard let name = event.alert?.secretName, !name.isEmpty else { return }
+        errorText = nil
+        do {
+            try await model.setQuarantined(name: name, quarantined: true, via: admin)
+        } catch {
+            errorText = userMessage(error)
+        }
+    }
 }
 
 private struct AlertRow: View {
     let event: Event
     let focused: Bool
+    let onQuarantine: () async -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -58,6 +82,14 @@ private struct AlertRow: View {
                 Spacer()
                 Text(event.timestamp.formatted(date: .omitted, time: .standard))
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Button {
+                    Task { await onQuarantine() }
+                } label: {
+                    Image(systemName: "lock.slash")
+                }
+                .buttonStyle(.borderless)
+                .help("Quarantine \(event.alert?.secretName ?? "secret")")
+                .disabled((event.alert?.secretName ?? "").isEmpty)
             }
             if let snippet = event.alert?.snippet {
                 Text(snippet).font(.callout.monospaced()).foregroundStyle(.secondary)
