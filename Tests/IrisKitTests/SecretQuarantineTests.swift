@@ -26,4 +26,46 @@ final class SecretQuarantineTests: XCTestCase {
         let decoded = try JSONDecoder().decode(Secret.self, from: legacy)
         XCTAssertFalse(decoded.quarantined)
     }
+
+    func testSetQuarantinedTogglesFlag() async throws {
+        let store = InMemorySecretStore()
+        _ = try await store.add(Data("v".utf8), named: "a", allowedHosts: ["h"], createdAt: Date())
+        let q = try await store.setQuarantined(true, named: "a")
+        XCTAssertTrue(q.quarantined)
+        let back = try await store.setQuarantined(false, named: "a")
+        XCTAssertFalse(back.quarantined)
+    }
+
+    func testSetQuarantinedUnknownThrows() async throws {
+        let store = InMemorySecretStore()
+        do {
+            _ = try await store.setQuarantined(true, named: "ghost")
+            XCTFail("expected unknownSecret")
+        } catch SecretStoreError.unknownSecret {}
+    }
+
+    func testUpdatePreservesQuarantined() async throws {
+        let store = InMemorySecretStore()
+        _ = try await store.add(Data("v".utf8), named: "a", allowedHosts: ["h"], createdAt: Date())
+        _ = try await store.setQuarantined(true, named: "a")
+        let updated = try await store.update(named: "a", allowedHosts: ["h2"])
+        XCTAssertTrue(updated.quarantined, "editing allowed_hosts must not lift quarantine")
+        XCTAssertEqual(updated.allowedHosts, ["h2"])
+    }
+
+    func testRecordUsagePreservesQuarantined() async throws {
+        let store = InMemorySecretStore()
+        _ = try await store.add(Data("v".utf8), named: "a", allowedHosts: ["h"], createdAt: Date())
+        _ = try await store.setQuarantined(true, named: "a")
+        let used = try await store.recordUsage(of: "a", at: Date())
+        XCTAssertTrue(used.quarantined)
+    }
+
+    func testRotatePreservesQuarantined() async throws {
+        let store = InMemorySecretStore()
+        _ = try await store.add(Data("v".utf8), named: "a", allowedHosts: ["h"], createdAt: Date())
+        _ = try await store.setQuarantined(true, named: "a")
+        let rotated = try await store.rotate(named: "a", newValue: Data("w".utf8))
+        XCTAssertTrue(rotated.quarantined)
+    }
 }

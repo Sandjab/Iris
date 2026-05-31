@@ -18,6 +18,8 @@ public protocol SecretStore: Sendable {
     func list() async throws -> [Secret]
 
     func recordUsage(of name: String, at date: Date) async throws -> Secret
+
+    func setQuarantined(_ quarantined: Bool, named name: String) async throws -> Secret
 }
 
 public enum SecretStoreError: Error, LocalizedError, Equatable {

@@ -37,7 +37,8 @@ public actor InMemorySecretStore: SecretStore {
             allowedHosts: allowedHosts,
             createdAt: entry.metadata.createdAt,
             lastUsedAt: entry.metadata.lastUsedAt,
-            usageCount: entry.metadata.usageCount
+            usageCount: entry.metadata.usageCount,
+            quarantined: entry.metadata.quarantined
         )
         entry.metadata = updated
         items[name] = entry
@@ -88,7 +89,25 @@ public actor InMemorySecretStore: SecretStore {
             allowedHosts: entry.metadata.allowedHosts,
             createdAt: entry.metadata.createdAt,
             lastUsedAt: date,
-            usageCount: entry.metadata.usageCount &+ 1
+            usageCount: entry.metadata.usageCount &+ 1,
+            quarantined: entry.metadata.quarantined
+        )
+        entry.metadata = updated
+        items[name] = entry
+        return updated
+    }
+
+    public func setQuarantined(_ quarantined: Bool, named name: String) async throws -> Secret {
+        guard var entry = items[name] else {
+            throw SecretStoreError.unknownSecret(name)
+        }
+        let updated = Secret(
+            name: entry.metadata.name,
+            allowedHosts: entry.metadata.allowedHosts,
+            createdAt: entry.metadata.createdAt,
+            lastUsedAt: entry.metadata.lastUsedAt,
+            usageCount: entry.metadata.usageCount,
+            quarantined: quarantined
         )
         entry.metadata = updated
         items[name] = entry
