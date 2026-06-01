@@ -12,7 +12,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		9940D5B82FCA223400B560D4 /* IrisApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IrisApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9940D5B82FCA223400B560D4 /* Iris.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Iris.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -60,7 +60,7 @@
 		9940D5B92FCA223400B560D4 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				9940D5B82FCA223400B560D4 /* IrisApp.app */,
+				9940D5B82FCA223400B560D4 /* Iris.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -89,7 +89,7 @@
 				9940D5C92FCA23F900B560D4 /* IrisKit */,
 			);
 			productName = IrisApp;
-			productReference = 9940D5B82FCA223400B560D4 /* IrisApp.app */;
+			productReference = 9940D5B82FCA223400B560D4 /* Iris.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -288,7 +288,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.iris.app;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Iris;
 				REGISTER_APP_GROUPS = NO;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -319,7 +319,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.iris.app;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Iris;
 				REGISTER_APP_GROUPS = NO;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
