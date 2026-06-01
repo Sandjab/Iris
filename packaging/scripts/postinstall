@@ -1,0 +1,6 @@
+#!/bin/bash
+# IRIS postinstall — Phase 9a : crée le dossier de support. PAS d'auto-start (Phase 7).
+set -euo pipefail
+USER_HOME="$(eval echo "~${USER}")"
+mkdir -p "${USER_HOME}/Library/Application Support/iris"
+exit 0

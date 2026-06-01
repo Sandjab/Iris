@@ -1,0 +1,4 @@
+#!/bin/bash
+# IRIS preinstall — Phase 9a : rien à migrer/arrêter (pas d'auto-start avant Phase 7).
+set -euo pipefail
+exit 0
