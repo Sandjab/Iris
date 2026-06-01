@@ -60,12 +60,13 @@ référencé** dans le `.pbxproj`.
 
 ### 2.2 — Signature inner-first (déviation assumée de `--deep`)
 
-La spec §18.1 écrit `codesign --force --deep`. Apple **déconseille `--deep` pour
-signer** du code embarqué : il ne pose pas correctement le hardened runtime ni les
-entitlements par binaire (`--deep` est conçu pour la *vérification*, pas la
-signature). On signe donc explicitement : **`irisd` d'abord** (avec ses
-entitlements + `--options runtime`), **puis le bundle** (re-scelle CodeResources,
-qui couvre `irisd` signé + le plist).
+La spec §18.1 écrit `codesign --force --deep`. La doc Apple **« Creating
+distribution-signed code for macOS »** a une section explicite *« Avoid deep code
+signing »* : `--deep` applique les mêmes options à tous les items (or app et `irisd`
+peuvent différer) et ne signe pas le code dans les emplacements non-standard. On
+signe donc explicitement, **de l'intérieur vers l'extérieur** : **`irisd` d'abord**
+(`-o runtime`, et `-i io.iris.daemon` car c'est du code non-bundle), **puis le
+bundle** (re-scelle CodeResources, qui couvre `irisd` signé + le plist).
 
 `--deep` reste utilisé pour la **vérification** (`codesign --verify --deep
 --strict`), usage légitime.
@@ -114,8 +115,7 @@ brancher un trigger ignoré). `postinstall` se limite à créer
 | Fichier | Rôle |
 |---|---|
 | `IrisApp/IrisApp/io.iris.daemon.plist` | Plist LaunchAgent (contenu = §17.2). Embarqué via phase **Copy Files** Xcode (destination *Wrapper*, sous-chemin `Library/LaunchAgents/`). Fichier seulement, pas d'enregistrement. |
-| `packaging/IrisApp.entitlements` | Entitlements de l'app sous hardened runtime. App **non sandboxée** (SPECS §21.6). Contenu minimal — figé au plan. Appliqué par le script (re-signature du bundle, 5b) ; sa référence éventuelle côté Xcode (`CODE_SIGN_ENTITLEMENTS`) est tranchée au plan selon la CI-safety (§2.4). |
-| `packaging/irisd.entitlements` | Entitlements du `irisd` embarqué. Probablement minimal (réseau autorisé par défaut sous HR ; accès Keychain `SecItem` n'exige pas d'entitlement HR). Figé au plan. |
+| _(pas de fichier entitlements en 9a)_ | **Vérifié contre Apple** (« Creating distribution-signed code for macOS ») : app **non sandboxée**, aucun entitlement restreint (`keychain-access-groups` = Phase 8), réseau autorisé par défaut sous HR. Le hardened runtime vient de `-o runtime` à la signature, **pas** d'un fichier. On n'en crée donc aucun (YAGNI) ; si le smoke runtime révèle un blocage, on ajoutera. |
 | `packaging/build-pkg.sh` | Orchestration ① (cf §3.2). |
 | `packaging/notarize.sh` | **Squelette** : `notarytool submit --wait` + `stapler staple` + `spctl --assess`. Non exécuté en 9a. |
 | `packaging/scripts/postinstall` | **Squelette inerte** : crée `~/Library/Application Support/iris`. |
@@ -126,7 +126,7 @@ brancher un trigger ignoré). `postinstall` se limite à créer
 
 | Fichier | Changement |
 |---|---|
-| `IrisApp/IrisApp.xcodeproj/project.pbxproj` | Phase **Copy Files** pour le plist ; référence(s) d'entitlements selon §2.4. **Pas** d'identité Developer ID figée dans la config partagée (CI-safe). |
+| `IrisApp/IrisApp.xcodeproj/project.pbxproj` | **Uniquement** la phase **Copy Files** du plist (CI-safe : aucun cert requis pour un simple build). Aucune identité Developer ID ni hardened runtime figés dans la config partagée — la signature + `-o runtime` sont appliqués par `build-pkg.sh` (overrides `xcodebuild` + `codesign` manuel, §2.4). |
 
 Deux invariants :
 1. `irisd` n'est **pas** une cible Xcode (§2.1) → absent du `.pbxproj`.
@@ -154,19 +154,16 @@ Deux invariants :
      -exportOptionsPlist packaging/exportOptions.plist -exportPath build/export
    → build/export/Iris.app (signée par l'export, SANS irisd)
 
-4. EMBED
-   cp .build/release/irisd build/export/Iris.app/Contents/MacOS/irisd
+4. EMBED (ditto, pas cp — préserve la structure de code, recommandé Apple)
+   ditto .build/release/irisd build/export/Iris.app/Contents/MacOS/irisd
 
-5. SIGNATURE INNER-FIRST (pas de --deep)
-   a. irisd D'ABORD :
-      codesign --force --options runtime --timestamp \
-        --entitlements packaging/irisd.entitlements \
-        --sign "Developer ID Application: … (TEAM)" \
+5. SIGNATURE INNER-FIRST (pas de --deep ; jamais sous sudo)
+   a. irisd D'ABORD (code non-bundle → -i obligatoire ; aucun entitlements) :
+      codesign -s "Developer ID Application" -f --timestamp -o runtime \
+        -i io.iris.daemon \
         build/export/Iris.app/Contents/MacOS/irisd
    b. le BUNDLE ENSUITE (re-scelle CodeResources → couvre irisd + plist) :
-      codesign --force --options runtime --timestamp \
-        --entitlements packaging/IrisApp.entitlements \
-        --sign "Developer ID Application: … (TEAM)" \
+      codesign -s "Developer ID Application" -f --timestamp -o runtime \
         build/export/Iris.app
 
 6. VÉRIF signature (--deep légitime ici = vérification)
