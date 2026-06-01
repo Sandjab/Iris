@@ -15,6 +15,9 @@ DerivedData/
 *.dSYM.zip
 *.dSYM
 
+## IRIS packaging outputs (build-pkg.sh)
+build/
+
 ## Playgrounds
 timeline.xctimeline
 playground.xcworkspace
