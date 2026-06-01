@@ -5,8 +5,8 @@
 set -euo pipefail
 
 # --- Config ---------------------------------------------------------------
-APP_IDENTITY="Developer ID Application"
-INSTALLER_IDENTITY="Developer ID Installer"
+APP_IDENTITY="${IRIS_APP_IDENTITY:-Developer ID Application}"
+INSTALLER_IDENTITY="${IRIS_INSTALLER_IDENTITY:-Developer ID Installer}"
 SCHEME="IrisApp"
 PROJECT="IrisApp/IrisApp.xcodeproj"
 BUILD="build"

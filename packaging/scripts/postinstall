@@ -1,6 +1,12 @@
 #!/bin/bash
-# IRIS postinstall — Phase 9a : crée le dossier de support. PAS d'auto-start (Phase 7).
+# IRIS postinstall — Phase 9a : crée le dossier de support, possédé par l'utilisateur
+# installateur. Un postinstall de .pkg s'exécute en root → on résout l'utilisateur réel
+# (console, ou SUDO_USER si lancé en terminal) et on crée le dossier sous son identité.
+# PAS d'auto-start (Phase 7).
 set -euo pipefail
-USER_HOME="$(eval echo "~${USER}")"
-mkdir -p "${USER_HOME}/Library/Application Support/iris"
+INSTALL_USER="${SUDO_USER:-$(stat -f '%Su' /dev/console)}"
+if [ -n "$INSTALL_USER" ] && [ "$INSTALL_USER" != "root" ] && [ "$INSTALL_USER" != "loginwindow" ]; then
+    USER_HOME="$(eval echo "~$INSTALL_USER")"
+    sudo -u "$INSTALL_USER" mkdir -p "$USER_HOME/Library/Application Support/iris"
+fi
 exit 0
