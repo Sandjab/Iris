@@ -8,9 +8,9 @@
 
 ## 1. Pré-requis
 
-- [ ] Apple Developer Program **payant** validé (compte gratuit insuffisant).
-- [ ] Xcode 13+ installé (`xcrun notarytool` requiert Xcode 13 minimum).
-- [ ] 2FA actif sur l'Apple ID lié au compte développeur.
+- [X] Apple Developer Program **payant** validé (compte gratuit insuffisant).
+- [X] Xcode 13+ installé (`xcrun notarytool` requiert Xcode 13 minimum).
+- [X] 2FA actif sur l'Apple ID lié au compte développeur.
 
 Vérification rapide :
 
@@ -110,8 +110,8 @@ xcrun notarytool store-credentials "iris-notary" \
 
 Xcode → **Settings** → **Accounts** → ton compte Apple → bouton **Manage Certificates…** → bouton **+** :
 
-- [ ] `Developer ID Application` — signe `irisd`, `iris` (CLI), `Iris.app`
-- [ ] `Developer ID Installer` — signe le `.pkg` produit par `productbuild`
+- [X] `Developer ID Application` — signe `irisd`, `iris` (CLI), `Iris.app`
+- [X] `Developer ID Installer` — signe le `.pkg` produit par `productbuild`
 
 ### 3.2 Vérifier la présence dans le trousseau
 
@@ -157,17 +157,17 @@ Pour chacun des deux certificats :
 
 À cocher en séquence :
 
-- [ ] **2.1** API Key créée dans App Store Connect (rôle `Developer`)
-- [ ] **2.2** `.p8` téléchargé + Key ID + Issuer ID notés
-- [ ] **2.3** `.p8` placé dans `~/.appstoreconnect/private_keys/` avec `chmod 600`
-- [ ] **2.3** Backup chiffré du `.p8` effectué
-- [ ] **2.4** `xcrun notarytool store-credentials "iris-notary" …` exécuté avec succès
-- [ ] **2.5** `xcrun notarytool history --keychain-profile "iris-notary"` retourne `Successfully received submission history.`
-- [ ] **3.1** Certificat `Developer ID Application` créé via Xcode
-- [ ] **3.1** Certificat `Developer ID Installer` créé via Xcode
-- [ ] **3.2** `security find-identity` liste les deux identités
-- [ ] **3.3** Backup `.p12` `Developer ID Application` (cert + clé privée) effectué
-- [ ] **3.3** Backup `.p12` `Developer ID Installer` (cert + clé privée) effectué
+- [x] **2.1** API Key créée dans App Store Connect (rôle `Developer`)
+- [x] **2.2** `.p8` téléchargé + Key ID + Issuer ID notés
+- [x] **2.3** `.p8` placé dans `~/.appstoreconnect/private_keys/` avec `chmod 600`
+- [x] **2.3** Backup chiffré du `.p8` effectué
+- [x] **2.4** `xcrun notarytool store-credentials "iris-notary" …` exécuté avec succès
+- [x] **2.5** `xcrun notarytool history --keychain-profile "iris-notary"` retourne `Successfully received submission history.`
+- [x] **3.1** Certificat `Developer ID Application` créé via Xcode
+- [x] **3.1** Certificat `Developer ID Installer` créé via Xcode
+- [x] **3.2** `security find-identity` liste les deux identités
+- [x] **3.3** Backup `.p12` `Developer ID Application` (cert + clé privée) effectué
+- [x] **3.3** Backup `.p12` `Developer ID Installer` (cert + clé privée) effectué
 
 Une fois ces 11 cases cochées, la Phase 9 peut démarrer sans blocage administratif.
 
