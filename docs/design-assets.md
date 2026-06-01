@@ -1,7 +1,7 @@
 # Ressources graphiques — IRIS
 
 > Inventaire et préparation des assets visuels du projet IRIS, du logo aux screenshots GitHub.
-> Cibles : `Iris.app` (Phase 6), distribution `.dmg` (Phase 9-10), release publique (Phase 10).
+> Cibles : `Iris.app` (Phase 6), distribution `.pkg` signé + notarisé (Phase 9-10), release publique (Phase 10).
 > Sources : [Icon Composer](https://developer.apple.com/documentation/xcode/creating-your-app-icon-using-icon-composer), [Apple Design Resources](https://developer.apple.com/design/resources/), [SF Symbols](https://developer.apple.com/sf-symbols/).
 
 ---
@@ -12,7 +12,7 @@
 
 - [ ] **Xcode 26+** (inclut Icon Composer pour macOS Tahoe Liquid Glass icons)
 - [ ] **SF Symbols app** — https://developer.apple.com/sf-symbols/ (browser + export d'icônes système)
-- [ ] **create-dmg** — `brew install create-dmg` (assemblage DMG scripté pour Phase 9-10)
+- [ ] **productbuild** — fourni avec les Xcode Command Line Tools, aucun install (assemblage `.pkg` signé, déjà utilisé par `packaging/build-pkg.sh`)
 - [ ] **vhs** ou **asciinema** — pour capturer le flow CLI en SVG/GIF animé (Phase 10 README)
 
 Outils de design optionnels (selon préférence) : Figma, Sketch, Affinity Designer, ou tout outil capable d'exporter du SVG / PNG haute résolution.
@@ -97,33 +97,21 @@ Custom à produire seulement en **Phase 10 hardening**, et seulement si jugé wo
 
 ---
 
-## 4. Assets DMG (Phase 9-10, si distribution `.dmg`)
+## 4. Assets de l'installeur `.pkg` (Phase 9-10, optionnels)
 
-Optionnels mais ce qui distingue une app pro d'une app amateur.
+La distribution est un `.pkg` **guidé** (assistant pas-à-pas), pas un `.dmg` drag-and-drop. Les assets DMG classiques (image de fond avec flèche, volume icon, alias `/Applications`) **ne s'appliquent pas**. Un `.pkg` se personnalise via un fichier **Distribution XML** passé à `productbuild --distribution` :
 
 | Asset | Spec | Utilité |
 |---|---|---|
-| Background DMG | 540×380 px, PNG ou TIFF | Image de fond avec flèche : `Iris.app → /Applications` |
-| Volume icon | 512×512 px, `.icns` | Icône du DMG monté dans le Finder |
-| Alias `Applications` | symbolic link `/Applications` dans le DMG | Drag-and-drop target |
-| Window layout | dimensions + positions des icônes | Mis en place par `create-dmg` |
+| `welcome` | RTF / HTML | Écran d'accueil de l'assistant |
+| `readme` | RTF / HTML | Notes (prérequis, étape « Install CA », setup shell) |
+| `license` | RTF / texte | Licence (cf `LICENSE`) |
+| `conclusion` | RTF / HTML | Écran final (« Iris installé — ouvrez l'app pour installer la CA ») |
+| `background` | PNG (@1x + @2x) | Image de fond de l'assistant (panneau gauche) |
 
-Exemple `create-dmg` :
+État actuel : `packaging/build-pkg.sh` utilise `productbuild --component` (paquet simple, aucun écran custom). Pour ajouter ces écrans, passer à `productbuild --distribution <Distribution.xml>` (Phase 9-10).
 
-```sh
-create-dmg \
-  --volname "IRIS" \
-  --volicon "assets/dmg/volume.icns" \
-  --background "assets/dmg/background.png" \
-  --window-size 540 380 \
-  --icon "Iris.app" 140 190 \
-  --app-drop-link 400 190 \
-  --no-internet-enable \
-  "Iris.dmg" \
-  "Iris.app"
-```
-
-Sans ces assets : le DMG s'ouvre sur une fenêtre vide, l'utilisateur doit deviner. Avec : install en 3 secondes.
+Sans ces assets : l'installeur reste fonctionnel mais minimal. Avec : parcours soigné + l'étape « Install CA » expliquée en clair.
 
 ---
 
@@ -183,7 +171,7 @@ Avant de produire le moindre asset final, **arbitrer la direction visuelle**. À
 | Direction visuelle décidée | Avant Phase 6 | ⚠ | 1h réflexion |
 | SF Symbol menu bar (placeholder) + états | Phase 6 | ✅ | 30 min |
 | Icône app `Iris.app` finale | Phase 9-10 | Cosmétique | 4-8h ou outsourcing |
-| Background DMG + volume icon | Phase 9-10 | Cosmétique | 2-3h |
+| Écrans installeur `.pkg` (welcome/readme/background) | Phase 9-10 | Cosmétique | 2-3h |
 | Icône menu bar custom | Phase 10 | Non (SF Symbol acceptable) | 2-4h |
 | Bannière README | Phase 10 | Non | 1-2h |
 | Screenshots app | Phase 10 | Oui pour release | 1h |
@@ -199,7 +187,6 @@ Avant de produire le moindre asset final, **arbitrer la direction visuelle**. À
 
 - [ ] Vérifier que Xcode 26+ est installé (`xcodebuild -version`)
 - [ ] Installer SF Symbols app
-- [ ] Installer `create-dmg` : `brew install create-dmg`
 - [ ] Créer le dossier `assets/` à la racine du repo (versionné, contient les sources de design)
 
 ### Avant Phase 6
@@ -216,8 +203,8 @@ Avant de produire le moindre asset final, **arbitrer la direction visuelle**. À
 ### Phase 9-10 (distribution)
 
 - [ ] Icône `Iris.app` finale via Icon Composer (fichier `.icon` source dans `assets/`)
-- [ ] Background DMG + alias Applications + volume icon
-- [ ] Script `create-dmg` dans `packaging/build-dmg.sh`
+- [ ] Écrans installeur `.pkg` (welcome / readme / license / conclusion / background) via Distribution XML
+- [ ] (optionnel) Passer `packaging/build-pkg.sh` de `--component` à `--distribution`
 - [ ] Bannière README + intégration `README.md`
 - [ ] 3-5 screenshots de l'app en action
 - [ ] Asciicast / GIF du flow CLI
@@ -239,10 +226,10 @@ assets/
 │       ├── paused.pdf
 │       ├── alert.pdf
 │       └── error.pdf
-├── dmg/
-│   ├── background.png         # 540×380
-│   ├── volume.icns
-│   └── layout.sh              # invocation create-dmg
+├── installer/
+│   ├── background.png         # fond assistant .pkg (@1x + @2x)
+│   ├── welcome.html           # écrans Distribution XML (productbuild --distribution)
+│   └── conclusion.html
 ├── readme/
 │   ├── banner.png             # 1280×640
 │   ├── screenshots/
@@ -266,5 +253,5 @@ assets/
 - [Liquid Glass design overview](https://developer.apple.com/documentation/technologyoverviews/liquid-glass)
 - [Human Interface Guidelines — App icons](https://developer.apple.com/design/human-interface-guidelines/app-icons)
 - [Human Interface Guidelines — The menu bar](https://developer.apple.com/design/human-interface-guidelines/the-menu-bar)
-- [create-dmg sur GitHub](https://github.com/create-dmg/create-dmg)
+- [Distribution XML reference (productbuild)](https://developer.apple.com/library/archive/documentation/DeveloperTools/Reference/DistributionDefinitionRef/Chapters/Distribution_XML_Ref.html)
 - [vhs (Charm)](https://github.com/charmbracelet/vhs) — terminal recordings reproductibles
