@@ -1,11 +1,11 @@
 #!/bin/bash
 # IRIS notarize — Phase 9b (squelette ; NON exécuté en Phase 9a).
-# Pré-requis : profil keychain notarytool "iris-notarization" (cf docs/phase-9-notarization-prep.md),
+# Pré-requis : profil keychain notarytool "iris-notary" (cf docs/phase-9-notarization-prep.md),
 # et un build/Iris.pkg signé produit par build-pkg.sh.
 set -euo pipefail
 
 PKG="${1:-build/Iris.pkg}"
-PROFILE="${IRIS_NOTARY_PROFILE:-iris-notarization}"
+PROFILE="${IRIS_NOTARY_PROFILE:-iris-notary}"
 
 [ -f "$PKG" ] || { echo "error: pkg introuvable: $PKG" >&2; exit 1; }
 
