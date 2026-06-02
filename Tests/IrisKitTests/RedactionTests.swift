@@ -89,4 +89,51 @@ final class RedactionTests: XCTestCase {
         )
         XCTAssertTrue(alert.snippet.contains("{{kc:\(secretName)}}"))
     }
+
+    func testEncodedSubstitutedEventNeverContainsSecretValue() throws {
+        // CLAUDE.md §6.1: the SSE-encoded event must not carry secret values.
+        // For a .substituted event, path is the ORIGINAL URI (placeholders),
+        // substitutedSecrets holds names only.
+        let secretValue = "sk-supersecret-DO-NOT-LEAK-SSE"
+        let event = Event(
+            timestamp: Date(),
+            kind: .substituted,
+            host: "api.anthropic.com",
+            method: "POST",
+            path: "/v1/messages?t={{kc:foo}}",
+            statusCode: 200,
+            durationMs: 12,
+            substitutedSecrets: ["foo"],
+            alert: nil
+        )
+        let json = try JSONRPCCoder.makeEncoder().encode(event)
+        let text = try XCTUnwrap(String(data: json, encoding: .utf8))
+        XCTAssertFalse(text.contains(secretValue))
+        XCTAssertTrue(text.contains("{{kc:foo}}"))
+    }
+
+    func testEncodedExfilBlockedEventNeverContainsSecretValue() throws {
+        // For a .exfilBlocked event, the alert snippet is the placeholder literal.
+        let secretValue = "sk-supersecret-DO-NOT-LEAK-SSE"
+        let alert = Alert(
+            severity: .high,
+            rule: .hostMismatch,
+            secretName: "foo",
+            detectedAt: .header,
+            snippet: "x-api-key: {{kc:foo}}"
+        )
+        let event = Event(
+            timestamp: Date(),
+            kind: .exfilBlocked,
+            host: "evil.example.com",
+            method: "POST",
+            path: "/v1/messages",
+            substitutedSecrets: [],
+            alert: alert
+        )
+        let json = try JSONRPCCoder.makeEncoder().encode(event)
+        let text = try XCTUnwrap(String(data: json, encoding: .utf8))
+        XCTAssertFalse(text.contains(secretValue))
+        XCTAssertTrue(text.contains("{{kc:foo}}"))
+    }
 }
