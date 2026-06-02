@@ -31,9 +31,12 @@ notarisé — impact nul sur le binaire distribué.
   asseyant I1/I2/I3 sur chaque input (corpus nommé + N itérations seedées).
 - Combler le trou redaction **encodage SSE** : un Event/Alert sérialisé pour le flux
   ne contient jamais la valeur brute du secret.
-- **Un** test d'intégration ciblé : secret hors-scope poussé via le proxy → rien ne
-  fuit upstream (bloqué) + l'event SSE ne porte pas la valeur. Réutilise le harnais
-  d'intégration existant (`CLIDaemonHarness`, `MockUpstream`).
+- **Un** test d'intégration ciblé : secret hors-scope poussé via le proxy → la
+  **valeur** du secret n'atteint jamais l'upstream. ⚠️ Comportement réel vérifié à
+  l'implémentation : sur blocage, le proxy **forwarde quand même** la requête upstream,
+  mais avec le **placeholder littéral** (jamais la valeur). L'invariant testé est donc
+  l'absence de la valeur dans la requête reçue upstream (+ placeholder verbatim), pas
+  l'absence de requête. Réutilise le harnais d'intégration existant (`MockUpstream`).
 
 **Hors périmètre (frontières explicites) :**
 - ❌ Dépendance de fuzzing tierce (SwiftCheck, swift-property-based…) → interdit par
@@ -105,7 +108,7 @@ Tout sous `Tests/` (aucun impact binaire) :
 | `Tests/IrisKitTests/Fuzzing/AdversarialInputGenerator.swift` | Produit des triplets (headers, uri, body) adverses : NAME hors-grammaire et aux limites (0 / 64 / 65 chars), milliers d'occurrences, unicode / homoglyphes / combining marks, accolades déséquilibrées et imbrication `{{kc:{{kc:x}}}}`, séquences d'échappement, caractères de contrôle / null, body non-UTF8, casse mixte des noms de header, placement en path / query / body. Expose le corpus nommé **et** le générateur seedé. |
 | `Tests/IrisKitTests/Fuzzing/PlaceholderFuzzTests.swift` | Harnais XCTest : pour chaque input (corpus + 2000 itérations seedées), exécute scan → evaluate → substitute avec `InMemorySecretStore` à sentinelles, asseoit I1/I2/I3. |
 | `Tests/IrisKitTests/RedactionTests.swift` (extension) | Comble le trou **encodage SSE** : un Event/Alert sérialisé pour le flux ne contient jamais la sentinelle. |
-| `Tests/IntegrationTests/<nouveau ou extension>` | **Un** test E2E : secret hors-`allowed_hosts` poussé via le proxy → requête bloquée, rien ne fuit upstream, et l'event diffusé sur SSE ne porte pas la sentinelle. Réutilise `CLIDaemonHarness` + `MockUpstream`. |
+| `Tests/IntegrationTests/ProxyExfilBlockTests.swift` | **Un** test E2E : secret hors-`allowed_hosts` poussé via le proxy → la **valeur** du secret n'atteint jamais l'upstream. ⚠️ Réel : sur blocage la requête est forwardée avec le placeholder littéral (jamais la valeur) ; on asserte l'absence de la valeur upstream + placeholder verbatim. Réutilise `MockUpstream`. |
 
 ## 4. Les trois invariants asséyés
 

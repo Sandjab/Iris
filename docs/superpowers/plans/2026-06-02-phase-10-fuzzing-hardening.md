@@ -709,7 +709,9 @@ git commit -m "test(phase-10): non-fuite à l'encodage des events SSE (substitut
 **Files:**
 - Create: `Tests/IntegrationTests/ProxyExfilBlockTests.swift`
 
-**Context (lu dans la source) :** `ProxyEndToEndTests.testSubstitutedValueReachesUpstream` montre le pattern in-process (`CAManager` + `MockUpstream.start` + `ProxyServer` + `TestProxyClient.send`). `MITMHandler.processRequest` confirme que sur décision `.block` (R1 host mismatch), l'`outcome` est `.blocked(alert:)` et la requête **n'est ni réassemblée ni forwardée** → l'upstream ne reçoit rien. Ce test réutilise le pattern avec un secret **hors-scope**.
+**Context (lu dans la source) :** `ProxyEndToEndTests.testSubstitutedValueReachesUpstream` montre le pattern in-process (`CAManager` + `MockUpstream.start` + `ProxyServer` + `TestProxyClient.send`).
+
+⚠️ **CORRECTION post-implémentation (l'affirmation initiale ci-dessous était fausse).** Sur décision `.block`, l'`outcome` est bien `.blocked(alert:)`, mais `MITMHandler.forwardRequest` **forwarde quand même** la requête upstream : le `switch` sur `.blocked` ne fait que logger / pauser, puis `upstreamClient.send(processed.head, processed.body)` est appelé **inconditionnellement** — avec le **placeholder littéral**, jamais la valeur résolue (la substitution n'a lieu que dans la branche `.allow`). C'est confirmé par le test existant `testHostMismatchEmitsExfilBlockedEventAndForwardsPlaceholder` (« forwards the placeholder verbatim »). L'invariant E2E correct est donc : **la valeur du secret n'apparaît jamais dans la requête reçue upstream** (+ placeholder forwardé verbatim), pas « l'upstream ne reçoit rien ». Le skeleton ci-dessous reflète l'affirmation erronée (`XCTAssertNil(received)`) ; **la source de vérité est le test committé `ProxyExfilBlockTests.swift`**, qui asserte le bon invariant. Ce test réutilise le pattern avec un secret **hors-scope**.
 
 - [ ] **Step 1: Write the test**
 
