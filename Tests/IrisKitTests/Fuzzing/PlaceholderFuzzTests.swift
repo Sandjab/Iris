@@ -62,7 +62,9 @@ final class PlaceholderFuzzTests: XCTestCase {
 
     // MARK: I1 — robustness
 
-    func testScanNeverCrashesOnAdversarialCorpus() {
+    // The assertion checks boundedness directly; a crash would abort the run and
+    // a hang would trip the test timeout, so robustness (I1) stays fully covered.
+    func testScanStaysBoundedOnAdversarialCorpus() {
         for input in allInputs() {
             let bodyText = input.body.flatMap { String(data: $0, encoding: .utf8) }
             let hits = PlaceholderScanner.scan(
@@ -193,8 +195,11 @@ final class PlaceholderFuzzTests: XCTestCase {
         for (input, host) in outOfScopeCorpus {
             let (decision, payload) = try await runPipeline(input, store: store, host: host)
             guard case .block = decision else {
-                return XCTFail("expected block for out-of-scope case \(input.label)")
+                XCTFail("expected block for out-of-scope case \(input.label)")
+                continue
             }
+            // Documents the harness contract (runPipeline returns a nil payload on
+            // .block); the load-bearing production assertion is the .block guard above.
             XCTAssertNil(
                 payload,
                 "blocked request must not produce a substituted payload (\(input.label))"
