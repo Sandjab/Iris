@@ -12,12 +12,18 @@ LOG_JSON="build/notarization-log.json"
 
 [ -f "$PKG" ] || { echo "error: pkg introuvable: $PKG" >&2; exit 1; }
 
+# S'assurer que le dossier des fichiers JSON existe (SUBMIT_JSON et LOG_JSON partagent ce dossier).
+mkdir -p "$(dirname "$SUBMIT_JSON")"
+
 # 1. Soumettre et attendre le verdict (JSON pour parsing robuste).
+#    '|| true' : sur un verdict "Invalid", notarytool peut sortir ≠ 0 ; on tolère pour
+#    toujours récupérer le log à l'étape 3. Un échec réel (réseau) produit un JSON
+#    vide/invalide → plutil échoue à l'étape 2 et set -e arrête proprement le script.
 echo "→ soumission notarisation: $PKG (profil: $PROFILE)"
 xcrun notarytool submit "$PKG" \
   --keychain-profile "$PROFILE" \
   --wait \
-  --output-format json > "$SUBMIT_JSON"
+  --output-format json > "$SUBMIT_JSON" || true
 
 # 2. Extraire id + status (plutil natif, pas de jq).
 id="$(plutil -extract id raw -o - "$SUBMIT_JSON")"
