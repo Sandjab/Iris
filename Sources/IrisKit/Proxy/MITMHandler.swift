@@ -126,6 +126,10 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         // SQLite — violating CLAUDE.md §6.1.
         let originalURI = head.uri
         let originalMethod = head.method.rawValue
+        // Tracks whether the response head has been relayed yet, so a stream
+        // failure can choose between a 502 (nothing sent) and a truncated close
+        // (head already on the wire). EL-confined to the client/upstream loop.
+        let headWritten = NIOLoopBoundBox(false, eventLoop: eventLoop)
 
         eventLoop.makeFutureWithTask { () async throws -> ProcessedRequest in
             let processed = try await Self.processRequest(
@@ -149,7 +153,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 host: host,
                 port: server.configuration.upstreamPort,
                 to: channel,
-                on: eventLoop
+                on: eventLoop,
+                headWritten: headWritten
             ).map { (processed, $0) }
         }.whenComplete { result in
             let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
@@ -181,7 +186,29 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                     "Upstream stream failed",
                     metadata: ["host": "\(host)", "error": "\(error)"]
                 )
+                if !headWritten.value {
+                    // Nothing relayed yet (e.g. upstream unreachable) → surface a
+                    // 502 before closing, matching the passthrough path (§5 case 1).
+                    Self.writeBadGateway(to: channel)
+                    return
+                }
+            // Head already on the wire → cannot change status; truncate by
+            // closing (§5 case 2).
             }
+            channel.close(promise: nil)
+        }
+    }
+
+    /// Writes `502 Bad Gateway` (empty body) to the client and closes. Routes
+    /// via `Channel.write` (thread-safe), never `context` — this runs in a
+    /// future callback that is not guaranteed to be a handler context (the
+    /// CONNECT-502 lesson).
+    private static func writeBadGateway(to channel: Channel) {
+        var headers = HTTPHeaders()
+        headers.add(name: "Content-Length", value: "0")
+        let head = HTTPResponseHead(version: .http1_1, status: .badGateway, headers: headers)
+        channel.write(HTTPServerResponsePart.head(head), promise: nil)
+        channel.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { _ in
             channel.close(promise: nil)
         }
     }

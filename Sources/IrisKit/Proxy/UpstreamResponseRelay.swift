@@ -28,14 +28,24 @@ final class UpstreamResponseRelay: ChannelDuplexHandler, @unchecked Sendable {
 
     private let clientChannel: Channel
     private let completion: EventLoopPromise<StreamOutcome>
+    /// Set to `true` the moment the response head is relayed to the client.
+    /// `MITMHandler` reads it on stream failure to decide between a `502`
+    /// (no head yet) and a truncated close (head already sent). EL-confined to
+    /// the shared client/upstream EventLoop.
+    private let headWritten: NIOLoopBoundBox<Bool>
     private var context: ChannelHandlerContext?
     private var status: Int = 0
     private var done = false
     private var pendingRead = false
 
-    init(clientChannel: Channel, completion: EventLoopPromise<StreamOutcome>) {
+    init(
+        clientChannel: Channel,
+        completion: EventLoopPromise<StreamOutcome>,
+        headWritten: NIOLoopBoundBox<Bool>
+    ) {
         self.clientChannel = clientChannel
         self.completion = completion
+        self.headWritten = headWritten
     }
 
     func handlerAdded(context: ChannelHandlerContext) {
@@ -52,6 +62,7 @@ final class UpstreamResponseRelay: ChannelDuplexHandler, @unchecked Sendable {
         switch unwrapInboundIn(data) {
         case .head(let head):
             status = Int(head.status.code)
+            headWritten.value = true
             // Route via `clientChannel` (typed Channel.write overload, preferred
             // per ConnectHandler): the response traverses the client pipeline's
             // HTTPResponseEncoder.

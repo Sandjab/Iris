@@ -27,7 +27,8 @@ final class UpstreamClient: @unchecked Sendable {
         host: String,
         port: Int,
         to clientChannel: Channel,
-        on eventLoop: EventLoop
+        on eventLoop: EventLoop,
+        headWritten: NIOLoopBoundBox<Bool>
     ) -> EventLoopFuture<StreamOutcome> {
         let completion = eventLoop.makePromise(of: StreamOutcome.self)
         do {
@@ -42,7 +43,11 @@ final class UpstreamClient: @unchecked Sendable {
             // when the client drains and closes the upstream if the client drops.
             // `stream` runs on the client EL (forwardRequest flatMap), so
             // syncOperations on the client pipeline is valid here.
-            let relay = UpstreamResponseRelay(clientChannel: clientChannel, completion: completion)
+            let relay = UpstreamResponseRelay(
+                clientChannel: clientChannel,
+                completion: completion,
+                headWritten: headWritten
+            )
             let clientSide = ClientWritabilityHandler(relay: relay)
             try clientChannel.pipeline.syncOperations.addHandler(clientSide)
             let boundRelay = NIOLoopBound(relay, eventLoop: eventLoop)
@@ -75,8 +80,15 @@ final class UpstreamClient: @unchecked Sendable {
                     if let body = body, body.readableBytes > 0 {
                         upstream.write(HTTPClientRequestPart.body(.byteBuffer(body)), promise: nil)
                     }
-                    upstream.writeAndFlush(HTTPClientRequestPart.end(nil))
-                        .cascadeFailure(to: completion)
+                    // On a request-write failure, close the upstream rather than
+                    // failing `completion` directly: the channel is active here,
+                    // so closing fires `channelInactive` → the relay resolves
+                    // `completion` exactly once. (Avoids the double-completion a
+                    // `cascadeFailure` would cause when both the write future and
+                    // the relay's inactivity race to fail the same promise.)
+                    upstream.writeAndFlush(HTTPClientRequestPart.end(nil)).whenFailure { _ in
+                        upstream.close(promise: nil)
+                    }
                     // Close the upstream once the stream is done (either end).
                     completion.futureResult.whenComplete { _ in upstream.close(promise: nil) }
                 }

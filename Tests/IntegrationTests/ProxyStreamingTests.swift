@@ -160,6 +160,48 @@ final class ProxyStreamingTests: XCTestCase {
     }
 }
 
+extension ProxyStreamingTests {
+    /// Upstream unreachable (connect refused) before any response head is
+    /// relayed → the client must receive a `502 Bad Gateway`, mirroring the
+    /// passthrough path (SPECS §5 case 1). The buffered `send` is fine: 502 is a
+    /// complete small response.
+    func testUnreachableUpstreamReturns502() async throws {
+        let proxyCA = CAManager(keyStore: InMemoryCAKeyStore())
+        let proxyCACert = try await proxyCA.ensureCA()
+        // upstreamPort 1 is reserved/closed → connect fails before any head.
+        let proxy = ProxyServer(
+            configuration: .init(
+                listenHost: "127.0.0.1",
+                listenPort: 0,
+                allowedHosts: ["localhost"],
+                upstreamPort: 1
+            ),
+            secretStore: InMemorySecretStore(),
+            caManager: proxyCA
+        )
+        let addr = try await proxy.start()
+        guard let proxyPort = addr.port else {
+            try? await proxy.stop()
+            return XCTFail("proxy did not bind")
+        }
+        let proxyCANIO = try NIOSSLCertificate(bytes: Array(proxyCACert.derBytes), format: .der)
+
+        let resp = try await TestProxyClient().send(
+            proxyHost: "127.0.0.1",
+            proxyPort: proxyPort,
+            targetHost: "localhost",
+            targetPort: 443,
+            method: .GET,
+            path: "/x",
+            headers: [("host", "localhost")],
+            body: nil,
+            trustingCAs: [proxyCANIO]
+        )
+        try? await proxy.stop()
+        XCTAssertEqual(resp.status, .badGateway)
+    }
+}
+
 /// Drains an `AsyncStream<Data>` to completion, throwing `timedOut` if it does
 /// not finish in time. Unlike `EventLoopFuture.get()`, `AsyncStream` iteration
 /// honors task cancellation, so the timeout actually unblocks (no hang on a
