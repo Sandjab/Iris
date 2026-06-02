@@ -87,4 +87,60 @@ final class PlaceholderFuzzTests: XCTestCase {
             _ = try await runPipeline(input, store: store, host: "api.anthropic.com")
         }
     }
+
+    // MARK: I2 — no secret value in observation artifacts
+
+    /// Builds the Event exactly as MITMHandler would: `path` is the ORIGINAL
+    /// (pre-substitution) URI, `substitutedSecrets` holds names, `alert` carries
+    /// the placeholder snippet. The sentinel value must never appear in the
+    /// encoded event (this is the source of truth for the SSE `data:` line).
+    private func observationEvent(
+        for input: FuzzInput,
+        decision: ExfilDecision,
+        payload: ResolvedRequestPayload?
+    ) -> Event {
+        switch decision {
+        case .block(let alert, _):
+            return Event(
+                timestamp: Date(),
+                kind: .exfilBlocked,
+                host: "api.anthropic.com",
+                method: "POST",
+                path: input.uri,
+                substitutedSecrets: [],
+                alert: alert
+            )
+        case .allow:
+            let substituted = payload?.substituted ?? []
+            return Event(
+                timestamp: Date(),
+                kind: substituted.isEmpty ? .noMatch : .substituted,
+                host: "api.anthropic.com",
+                method: "POST",
+                path: input.uri,
+                substitutedSecrets: substituted,
+                alert: nil
+            )
+        }
+    }
+
+    func testSentinelNeverLeaksIntoEncodedEvent() async throws {
+        let store = try await makeStore()
+        let encoder = JSONRPCCoder.makeEncoder()
+        let sentinel = AdversarialInputGenerator.sentinel
+        for input in allInputs() {
+            let (decision, payload) = try await runPipeline(
+                input,
+                store: store,
+                host: "api.anthropic.com"
+            )
+            let event = observationEvent(for: input, decision: decision, payload: payload)
+            let json = try encoder.encode(event)
+            let text = String(data: json, encoding: .utf8) ?? ""
+            XCTAssertFalse(
+                text.contains(sentinel),
+                "sentinel leaked into event for input \(input.label)"
+            )
+        }
+    }
 }
