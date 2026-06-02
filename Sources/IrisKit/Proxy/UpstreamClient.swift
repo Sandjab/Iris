@@ -79,6 +79,15 @@ final class UpstreamClient: @unchecked Sendable {
                 case .failure(let error):
                     completion.fail(error)
                 case .success(let upstream):
+                    // The client may have disconnected while the upstream was
+                    // still connecting: `clientSide.channelInactive` then fired
+                    // with an empty `upstreamBox`, so nothing would ever close
+                    // this upstream. Drop it immediately rather than leak it.
+                    guard clientChannel.isActive else {
+                        upstream.close(promise: nil)
+                        completion.fail(ChannelError.alreadyClosed)
+                        return
+                    }
                     upstreamBox.channel = upstream
                     upstream.write(HTTPClientRequestPart.head(head), promise: nil)
                     if let body = body, body.readableBytes > 0 {

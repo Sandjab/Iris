@@ -61,21 +61,33 @@ final class UpstreamResponseRelay: ChannelDuplexHandler, @unchecked Sendable {
             headWritten.value = true
             // Route via `clientChannel` (typed Channel.write overload, preferred
             // per ConnectHandler): the response traverses the client pipeline's
-            // HTTPResponseEncoder.
+            // HTTPResponseEncoder. Written unflushed; `channelReadComplete`
+            // coalesces the flush (one flush per upstream read cycle — still one
+            // flush per SSE event, far fewer syscalls than per-part).
             let outHead = HTTPResponseHead(
                 version: head.version,
                 status: head.status,
                 headers: head.headers
             )
-            clientChannel.writeAndFlush(HTTPServerResponsePart.head(outHead), promise: nil)
+            clientChannel.write(HTTPServerResponsePart.head(outHead), promise: nil)
         case .body(let buffer):
-            clientChannel.writeAndFlush(HTTPServerResponsePart.body(.byteBuffer(buffer)), promise: nil)
+            clientChannel.write(HTTPServerResponsePart.body(.byteBuffer(buffer)), promise: nil)
         case .end(let trailers):
-            clientChannel.writeAndFlush(HTTPServerResponsePart.end(trailers)).whenComplete { [weak self] _ in
+            // Flush the terminator and resolve on its real result: a failed
+            // write to a gone client must not be reported as a successful stream.
+            clientChannel.writeAndFlush(HTTPServerResponsePart.end(trailers)).whenComplete { [weak self] result in
                 guard let self = self else { return }
-                self.finish(.success(StreamOutcome(statusCode: self.status)))
+                switch result {
+                case .success: self.finish(.success(StreamOutcome(statusCode: self.status)))
+                case .failure(let error): self.finish(.failure(error))
+                }
             }
         }
+    }
+
+    func channelReadComplete(context: ChannelHandlerContext) {
+        clientChannel.flush()
+        context.fireChannelReadComplete()
     }
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
