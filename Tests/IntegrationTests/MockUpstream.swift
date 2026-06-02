@@ -12,6 +12,16 @@ final class MockUpstream: @unchecked Sendable {
         let body: Data?
     }
 
+    /// Plan d'une réponse streamée pilotée par le test.
+    /// Le mock envoie `head` (chunked, sans Content-Length) puis `firstChunk`,
+    /// puis attend que `releaseRest` se résolve, puis envoie `remainingChunks`
+    /// et termine. Permet de prouver l'arrivée incrémentale côté client.
+    struct StreamingResponsePlan: Sendable {
+        let firstChunk: Data
+        let remainingChunks: [Data]
+        let releaseRest: EventLoopFuture<Void>
+    }
+
     let port: Int
 
     private let group: EventLoopGroup
@@ -63,6 +73,62 @@ final class MockUpstream: @unchecked Sendable {
                     channel.pipeline.configureHTTPServerPipeline(withErrorHandling: true)
                 }.flatMap {
                     channel.pipeline.addHandler(MockHandler(resolver: resolver, recorder: recorder))
+                }
+            }
+
+        let channel = try await bootstrap.bind(host: "127.0.0.1", port: 0).get()
+        guard let port = channel.localAddress?.port else {
+            throw IntegrationTestError.bindFailed
+        }
+        return MockUpstream(
+            port: port,
+            group: group,
+            channel: channel,
+            promise: receivedPromise,
+            resolver: resolver,
+            recorder: recorder
+        )
+    }
+
+    /// Parallel to `start(host:caManager:)` but installs a `StreamingMockHandler`
+    /// that drives a chunked response per `plan`, instead of the buffered
+    /// `MockHandler`. The `plan` factory receives the child channel's EventLoop
+    /// so a test can build a `releaseRest` barrier on the right loop.
+    static func startStreaming(
+        host: String,
+        caManager: CAManager,
+        plan: @escaping @Sendable (EventLoop) -> StreamingResponsePlan
+    ) async throws -> MockUpstream {
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        let leafCache = LeafCertCache(caManager: caManager)
+        let leaf = try await leafCache.leaf(forHost: host)
+
+        var tlsConfig = TLSConfiguration.makeServerConfiguration(
+            certificateChain: [.certificate(leaf.nioCertificate)],
+            privateKey: .privateKey(leaf.nioPrivateKey)
+        )
+        tlsConfig.applicationProtocols = ["http/1.1"]
+        let sslContext = try NIOSSLContext(configuration: tlsConfig)
+
+        let receivedPromise = group.next().makePromise(of: ReceivedRequest.self)
+        let resolver = PromiseResolver(promise: receivedPromise)
+        let recorder = RequestRecorder()
+
+        let bootstrap = ServerBootstrap(group: group)
+            .serverChannelOption(ChannelOptions.backlog, value: 4)
+            .childChannelInitializer { channel in
+                let sslHandler = NIOSSLServerHandler(context: sslContext)
+                let planForChannel = plan(channel.eventLoop)
+                return channel.pipeline.addHandler(sslHandler).flatMap {
+                    channel.pipeline.configureHTTPServerPipeline(withErrorHandling: true)
+                }.flatMap {
+                    channel.pipeline.addHandler(
+                        StreamingMockHandler(
+                            resolver: resolver,
+                            recorder: recorder,
+                            plan: planForChannel
+                        )
+                    )
                 }
             }
 
@@ -206,6 +272,80 @@ private final class MockHandler: ChannelInboundHandler, @unchecked Sendable {
         context.write(self.wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
         context.writeAndFlush(self.wrapOutboundOut(.end(nil))).whenComplete { _ in
             context.close(promise: nil)
+        }
+    }
+}
+
+/// Streaming counterpart to `MockHandler`. Sends `head` (chunked, no
+/// Content-Length) + `firstChunk` immediately, then waits on the test-driven
+/// `releaseRest` barrier before flushing `remainingChunks` + `.end`. This lets
+/// a test prove the client received chunk1 BEFORE chunk2 was sent upstream.
+private final class StreamingMockHandler: ChannelInboundHandler, @unchecked Sendable {
+    typealias InboundIn = HTTPServerRequestPart
+    typealias OutboundOut = HTTPServerResponsePart
+
+    private let resolver: PromiseResolver<MockUpstream.ReceivedRequest>
+    private let recorder: RequestRecorder
+    private let plan: MockUpstream.StreamingResponsePlan
+    private var head: HTTPRequestHead?
+    private var body: ByteBuffer?
+
+    init(
+        resolver: PromiseResolver<MockUpstream.ReceivedRequest>,
+        recorder: RequestRecorder,
+        plan: MockUpstream.StreamingResponsePlan
+    ) {
+        self.resolver = resolver
+        self.recorder = recorder
+        self.plan = plan
+    }
+
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        switch unwrapInboundIn(data) {
+        case .head(let h):
+            self.head = h
+        case .body(var chunk):
+            if body == nil { body = chunk } else { body?.writeBuffer(&chunk) }
+        case .end:
+            guard let head = head else { return }
+            let bodyData = body.map { Data($0.readableBytesView) }
+            let request = MockUpstream.ReceivedRequest(head: head, body: bodyData)
+            recorder.record(request)
+            resolver.succeed(request)
+            startStreamingResponse(context: context)
+        }
+    }
+
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        resolver.fail(error)
+        context.close(promise: nil)
+    }
+
+    private func startStreamingResponse(context: ChannelHandlerContext) {
+        // Chunked framing: no Content-Length → the response encoder emits
+        // Transfer-Encoding: chunked, so each body part is flushed as a chunk.
+        var headers = HTTPHeaders()
+        headers.add(name: "content-type", value: "text/event-stream")
+        let responseHead = HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)
+        context.write(self.wrapOutboundOut(.head(responseHead)), promise: nil)
+
+        var first = context.channel.allocator.buffer(capacity: plan.firstChunk.count)
+        first.writeBytes(plan.firstChunk)
+        context.writeAndFlush(self.wrapOutboundOut(.body(.byteBuffer(first))), promise: nil)
+
+        // Wait for the test to release the rest, then flush remaining + end.
+        // Deferred writes go via `channel` (typed overload, no wrapOutboundOut)
+        // so the @Sendable whenComplete closure captures only Sendable values.
+        let channel = context.channel
+        plan.releaseRest.hop(to: context.eventLoop).whenComplete { _ in
+            for chunk in self.plan.remainingChunks {
+                var buf = channel.allocator.buffer(capacity: chunk.count)
+                buf.writeBytes(chunk)
+                channel.write(HTTPServerResponsePart.body(.byteBuffer(buf)), promise: nil)
+            }
+            channel.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { _ in
+                channel.close(promise: nil)
+            }
         }
     }
 }
