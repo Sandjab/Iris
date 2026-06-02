@@ -7,11 +7,11 @@ import NIOHTTP1
 /// headers + body, forwards the modified request to upstream via
 /// `UpstreamClient`, and streams the response back to the client.
 ///
-/// Phase 2 limitations:
-/// - Request body buffered entirely (no size cap, no streaming)
-/// - Response is collected then re-emitted (acceptable for non-streaming
-///   responses; SSE handling streams in Phase 2.x)
-/// - One request per connection (close after response)
+/// Phase 2.x scope:
+/// - Request body buffered entirely (size cap 4 MiB), scanned, substituted
+/// - Response relayed part-by-part at the wire as it arrives from upstream,
+///   never scanned or modified (SPECS §7.2/§7.3 — Phase 2.x streaming)
+/// - One request per connection (close after the response ends)
 final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
@@ -126,8 +126,12 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         // SQLite — violating CLAUDE.md §6.1.
         let originalURI = head.uri
         let originalMethod = head.method.rawValue
+        // Tracks whether the response head has been relayed yet, so a stream
+        // failure can choose between a 502 (nothing sent) and a truncated close
+        // (head already on the wire). EL-confined to the client/upstream loop.
+        let headWritten = NIOLoopBoundBox(false, eventLoop: eventLoop)
 
-        eventLoop.makeFutureWithTask { () async throws -> (ProcessedRequest, UpstreamResponse) in
+        eventLoop.makeFutureWithTask { () async throws -> ProcessedRequest in
             let processed = try await Self.processRequest(
                 head: head,
                 body: body,
@@ -137,83 +141,74 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 host: host,
                 bypass: bypass
             )
-            switch processed.outcome {
-            case .substituted(let names):
-                server.logger.info(
-                    "Substituted secrets",
-                    metadata: [
-                        "host": "\(host)",
-                        "secrets": "\(names)",
-                        "path": "\(originalURI)",
-                    ]
-                )
-            case .blocked(let alert):
-                server.logger.warning(
-                    "Exfiltration attempt blocked",
-                    metadata: [
-                        "host": "\(host)",
-                        "rule": "\(alert.rule.rawValue)",
-                        "secret": "\(alert.secretName)",
-                        "severity": "\(alert.severity.rawValue)",
-                    ]
-                )
-                switch server.currentOnExfilAttempt {
-                case .blockOnly:
-                    break
-                case .blockAndNotify:
-                    server.logger.warning(
-                        "exfil notify intent (UI deferred to Phase 6)",
-                        metadata: ["host": "\(host)"]
-                    )
-                case .blockNotifyPause:
-                    server.logger.warning(
-                        "auto-pausing daemon after exfil attempt",
-                        metadata: ["host": "\(host)"]
-                    )
-                    server.setPaused(true)
-                }
-            case .bypassed, .noMatch:
-                break
-            }
-            let upstream = try await server.upstreamClient.send(
+            Self.logOutcome(processed.outcome, server: server, host: host, originalURI: originalURI)
+            return processed
+        }.flatMap { processed -> EventLoopFuture<(ProcessedRequest, StreamOutcome)> in
+            // Stream the response part-by-part to the client at the wire, no
+            // buffering (SPECS §7.3 / §10.12). Resolves at `.end` with the
+            // status captured at the head.
+            server.upstreamClient.stream(
                 head: processed.head,
                 body: processed.body,
                 host: host,
-                port: server.configuration.upstreamPort
-            )
-            return (processed, upstream)
-        }.flatMap { (processed, upstream) -> EventLoopFuture<Void> in
-            let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
-            let event = Self.makeEvent(
-                startTime: startTime,
-                host: host,
-                originalURI: originalURI,
-                originalMethod: originalMethod,
-                upstream: upstream,
-                duration: duration,
-                outcome: processed.outcome
-            )
-            let ring = server.eventRing
-            Task { await ring.append(event) }
-            return Self.writeResponse(upstream, to: channel)
+                port: server.configuration.upstreamPort,
+                to: channel,
+                on: eventLoop,
+                headWritten: headWritten
+            ).map { (processed, $0) }
         }.whenComplete { result in
-            if case .failure(let error) = result {
-                let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
+            let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
+            switch result {
+            case .success(let (processed, outcome)):
+                let event = Self.makeEvent(
+                    startTime: startTime,
+                    host: host,
+                    originalURI: originalURI,
+                    originalMethod: originalMethod,
+                    statusCode: outcome.statusCode,
+                    duration: duration,
+                    outcome: processed.outcome
+                )
+                let ring = server.eventRing
+                Task { await ring.append(event) }
+            case .failure(let error):
                 let event = Event(
                     timestamp: startTime,
                     kind: .error,
                     host: host,
-                    method: head.method.rawValue,
-                    path: head.uri,
+                    method: originalMethod,
+                    path: originalURI,
                     durationMs: duration
                 )
                 let ring = server.eventRing
                 Task { await ring.append(event) }
                 server.logger.warning(
-                    "Upstream forwarding failed",
+                    "Upstream stream failed",
                     metadata: ["host": "\(host)", "error": "\(error)"]
                 )
+                if !headWritten.value {
+                    // Nothing relayed yet (e.g. upstream unreachable) → surface a
+                    // 502 before closing, matching the passthrough path (§5 case 1).
+                    Self.writeBadGateway(to: channel)
+                    return
+                }
+            // Head already on the wire → cannot change status; truncate by
+            // closing (§5 case 2).
             }
+            channel.close(promise: nil)
+        }
+    }
+
+    /// Writes `502 Bad Gateway` (empty body) to the client and closes. Routes
+    /// via `Channel.write` (thread-safe), never `context` — this runs in a
+    /// future callback that is not guaranteed to be a handler context (the
+    /// CONNECT-502 lesson).
+    private static func writeBadGateway(to channel: Channel) {
+        var headers = HTTPHeaders()
+        headers.add(name: "Content-Length", value: "0")
+        let head = HTTPResponseHead(version: .http1_1, status: .badGateway, headers: headers)
+        channel.write(HTTPServerResponsePart.head(head), promise: nil)
+        channel.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { _ in
             channel.close(promise: nil)
         }
     }
@@ -422,16 +417,65 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         return (String(uri[..<q]), String(uri[uri.index(after: q)...]))
     }
 
+    /// Logs the request outcome and applies the exfil-attempt policy (pause).
+    /// Runs before the response stream is wired; emits no `Event` (that happens
+    /// at `.end`). Secret values never appear — only names (CLAUDE.md §6.1).
+    private static func logOutcome(
+        _ outcome: ProcessedRequest.Outcome,
+        server: ProxyServer,
+        host: String,
+        originalURI: String
+    ) {
+        switch outcome {
+        case .substituted(let names):
+            server.logger.info(
+                "Substituted secrets",
+                metadata: [
+                    "host": "\(host)",
+                    "secrets": "\(names)",
+                    "path": "\(originalURI)",
+                ]
+            )
+        case .blocked(let alert):
+            server.logger.warning(
+                "Exfiltration attempt blocked",
+                metadata: [
+                    "host": "\(host)",
+                    "rule": "\(alert.rule.rawValue)",
+                    "secret": "\(alert.secretName)",
+                    "severity": "\(alert.severity.rawValue)",
+                ]
+            )
+            switch server.currentOnExfilAttempt {
+            case .blockOnly:
+                break
+            case .blockAndNotify:
+                server.logger.warning(
+                    "exfil notify intent (UI deferred to Phase 6)",
+                    metadata: ["host": "\(host)"]
+                )
+            case .blockNotifyPause:
+                server.logger.warning(
+                    "auto-pausing daemon after exfil attempt",
+                    metadata: ["host": "\(host)"]
+                )
+                server.setPaused(true)
+            }
+        case .bypassed, .noMatch:
+            break
+        }
+    }
+
     private static func makeEvent(
         startTime: Date,
         host: String,
         originalURI: String,
         originalMethod: String,
-        upstream: UpstreamResponse,
+        statusCode: Int,
         duration: UInt32,
         outcome: ProcessedRequest.Outcome
     ) -> Event {
-        let status = Int(upstream.head.status.code)
+        let status = statusCode
         switch outcome {
         case .bypassed:
             return Event(
@@ -481,25 +525,4 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         }
     }
 
-    private static func writeResponse(
-        _ response: UpstreamResponse,
-        to channel: Channel
-    ) -> EventLoopFuture<Void> {
-        let headPart = HTTPServerResponsePart.head(
-            HTTPResponseHead(
-                version: response.head.version,
-                status: response.head.status,
-                headers: response.head.headers
-            )
-        )
-        // Fire-and-forget intermediate writes; only await the final flush.
-        // Chaining flatMap over `channel.write` futures deadlocks because
-        // those futures only complete after a subsequent flush, and we are
-        // gating the flush on them.
-        channel.write(headPart, promise: nil)
-        if let body = response.body, body.readableBytes > 0 {
-            channel.write(HTTPServerResponsePart.body(.byteBuffer(body)), promise: nil)
-        }
-        return channel.writeAndFlush(HTTPServerResponsePart.end(nil))
-    }
 }
