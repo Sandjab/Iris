@@ -7,11 +7,11 @@ import NIOHTTP1
 /// headers + body, forwards the modified request to upstream via
 /// `UpstreamClient`, and streams the response back to the client.
 ///
-/// Phase 2 limitations:
-/// - Request body buffered entirely (no size cap, no streaming)
-/// - Response is collected then re-emitted (acceptable for non-streaming
-///   responses; SSE handling streams in Phase 2.x)
-/// - One request per connection (close after response)
+/// Phase 2.x scope:
+/// - Request body buffered entirely (size cap 4 MiB), scanned, substituted
+/// - Response relayed part-by-part at the wire as it arrives from upstream,
+///   never scanned or modified (SPECS §7.2/§7.3 — Phase 2.x streaming)
+/// - One request per connection (close after the response ends)
 final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
@@ -127,7 +127,7 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         let originalURI = head.uri
         let originalMethod = head.method.rawValue
 
-        eventLoop.makeFutureWithTask { () async throws -> (ProcessedRequest, UpstreamResponse) in
+        eventLoop.makeFutureWithTask { () async throws -> ProcessedRequest in
             let processed = try await Self.processRequest(
                 head: head,
                 body: body,
@@ -175,42 +175,47 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
             case .bypassed, .noMatch:
                 break
             }
-            let upstream = try await server.upstreamClient.send(
+            return processed
+        }.flatMap { processed -> EventLoopFuture<(ProcessedRequest, StreamOutcome)> in
+            // Stream the response part-by-part to the client at the wire, no
+            // buffering (SPECS §7.3 / §10.12). Resolves at `.end` with the
+            // status captured at the head.
+            server.upstreamClient.stream(
                 head: processed.head,
                 body: processed.body,
                 host: host,
-                port: server.configuration.upstreamPort
-            )
-            return (processed, upstream)
-        }.flatMap { (processed, upstream) -> EventLoopFuture<Void> in
-            let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
-            let event = Self.makeEvent(
-                startTime: startTime,
-                host: host,
-                originalURI: originalURI,
-                originalMethod: originalMethod,
-                upstream: upstream,
-                duration: duration,
-                outcome: processed.outcome
-            )
-            let ring = server.eventRing
-            Task { await ring.append(event) }
-            return Self.writeResponse(upstream, to: channel)
+                port: server.configuration.upstreamPort,
+                to: channel,
+                on: eventLoop
+            ).map { (processed, $0) }
         }.whenComplete { result in
-            if case .failure(let error) = result {
-                let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
+            let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
+            switch result {
+            case .success(let (processed, outcome)):
+                let event = Self.makeEvent(
+                    startTime: startTime,
+                    host: host,
+                    originalURI: originalURI,
+                    originalMethod: originalMethod,
+                    statusCode: outcome.statusCode,
+                    duration: duration,
+                    outcome: processed.outcome
+                )
+                let ring = server.eventRing
+                Task { await ring.append(event) }
+            case .failure(let error):
                 let event = Event(
                     timestamp: startTime,
                     kind: .error,
                     host: host,
-                    method: head.method.rawValue,
-                    path: head.uri,
+                    method: originalMethod,
+                    path: originalURI,
                     durationMs: duration
                 )
                 let ring = server.eventRing
                 Task { await ring.append(event) }
                 server.logger.warning(
-                    "Upstream forwarding failed",
+                    "Upstream stream failed",
                     metadata: ["host": "\(host)", "error": "\(error)"]
                 )
             }
@@ -427,11 +432,11 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         host: String,
         originalURI: String,
         originalMethod: String,
-        upstream: UpstreamResponse,
+        statusCode: Int,
         duration: UInt32,
         outcome: ProcessedRequest.Outcome
     ) -> Event {
-        let status = Int(upstream.head.status.code)
+        let status = statusCode
         switch outcome {
         case .bypassed:
             return Event(
@@ -481,25 +486,4 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         }
     }
 
-    private static func writeResponse(
-        _ response: UpstreamResponse,
-        to channel: Channel
-    ) -> EventLoopFuture<Void> {
-        let headPart = HTTPServerResponsePart.head(
-            HTTPResponseHead(
-                version: response.head.version,
-                status: response.head.status,
-                headers: response.head.headers
-            )
-        )
-        // Fire-and-forget intermediate writes; only await the final flush.
-        // Chaining flatMap over `channel.write` futures deadlocks because
-        // those futures only complete after a subsequent flush, and we are
-        // gating the flush on them.
-        channel.write(headPart, promise: nil)
-        if let body = response.body, body.readableBytes > 0 {
-            channel.write(HTTPServerResponsePart.body(.byteBuffer(body)), promise: nil)
-        }
-        return channel.writeAndFlush(HTTPServerResponsePart.end(nil))
-    }
 }
