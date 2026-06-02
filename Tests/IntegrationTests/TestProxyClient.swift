@@ -128,7 +128,8 @@ final class TestProxyClient: @unchecked Sendable {
         path: String,
         headers: [(String, String)],
         body: Data?,
-        trustingCAs: [NIOSSLCertificate]
+        trustingCAs: [NIOSSLCertificate],
+        streamTimeout: TimeAmount = .seconds(5)
     ) async throws -> StreamingResponse {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let connectPromise = group.next().makePromise(of: HTTPResponseStatus.self)
@@ -180,11 +181,24 @@ final class TestProxyClient: @unchecked Sendable {
 
         let headPromise = group.next().makePromise(of: (HTTPResponseStatus, HTTPHeaders).self)
         let firstChunkPromise = group.next().makePromise(of: Void.self)
+        // A non-streaming proxy withholds the response head until the whole body
+        // is buffered. Awaiting `headPromise`/`firstChunk` would then hang
+        // forever: swift-nio's `EventLoopFuture.get()` ignores task cancellation,
+        // so a Task-based timeout cannot interrupt it. Instead we arm an
+        // EL-scheduled deadline that *fails the promises*, so `get()` returns a
+        // clean `timedOut` error. `PromiseResolver` guards the resolver against
+        // the handler's normal completion racing the deadline.
+        let headResolver = PromiseResolver(promise: headPromise)
+        let firstResolver = PromiseResolver(promise: firstChunkPromise)
+        group.next().scheduleTask(in: streamTimeout) {
+            headResolver.fail(IntegrationTestError.timedOut)
+            firstResolver.fail(IntegrationTestError.timedOut)
+        }
         var continuation: AsyncStream<Data>.Continuation!
         let stream = AsyncStream<Data> { continuation = $0 }
         let collector = StreamingCollectorHandler(
-            headPromise: headPromise,
-            firstChunk: firstChunkPromise,
+            headResolver: headResolver,
+            firstResolver: firstResolver,
             continuation: continuation,
             group: group,
             channel: channel
@@ -212,7 +226,17 @@ final class TestProxyClient: @unchecked Sendable {
         }
         try await channel.writeAndFlush(HTTPClientRequestPart.end(nil)).get()
 
-        let (st, hdrs) = try await headPromise.futureResult.get()
+        let st: HTTPResponseStatus
+        let hdrs: HTTPHeaders
+        do {
+            (st, hdrs) = try await headPromise.futureResult.get()
+        } catch {
+            // Head never arrived within `streamTimeout` (e.g. a buffering proxy):
+            // tear down so we do not leak the channel/group, then surface the error.
+            try? await channel.close().get()
+            try? await group.shutdownGracefully()
+            throw error
+        }
         return StreamingResponse(
             status: st,
             headers: hdrs,
@@ -346,29 +370,29 @@ private final class ResponseCollectorHandler: ChannelInboundHandler, @unchecked 
 }
 
 /// Streaming counterpart to `ResponseCollectorHandler`: surfaces the head via a
-/// promise, signals `firstChunk` on the first body part, and yields every body
-/// chunk into an `AsyncStream` as it arrives. Tears down the group at `.end` /
-/// error / inactive so the caller does not have to.
+/// resolver, signals `firstResolver` on the first body part, and yields every
+/// body chunk into an `AsyncStream` as it arrives. Tears down the group at
+/// `.end` / error / inactive so the caller does not have to. The resolvers are
+/// `PromiseResolver`-guarded, so racing the EL deadline (see `sendStreaming`)
+/// is safe — first completion wins.
 private final class StreamingCollectorHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = HTTPClientResponsePart
 
-    private let headPromise: EventLoopPromise<(HTTPResponseStatus, HTTPHeaders)>
-    private let firstChunk: EventLoopPromise<Void>
+    private let headResolver: PromiseResolver<(HTTPResponseStatus, HTTPHeaders)>
+    private let firstResolver: PromiseResolver<Void>
     private let continuation: AsyncStream<Data>.Continuation
     private let group: EventLoopGroup
     private let channel: Channel
-    private var sawFirst = false
-    private var headDone = false
 
     init(
-        headPromise: EventLoopPromise<(HTTPResponseStatus, HTTPHeaders)>,
-        firstChunk: EventLoopPromise<Void>,
+        headResolver: PromiseResolver<(HTTPResponseStatus, HTTPHeaders)>,
+        firstResolver: PromiseResolver<Void>,
         continuation: AsyncStream<Data>.Continuation,
         group: EventLoopGroup,
         channel: Channel
     ) {
-        self.headPromise = headPromise
-        self.firstChunk = firstChunk
+        self.headResolver = headResolver
+        self.firstResolver = firstResolver
         self.continuation = continuation
         self.group = group
         self.channel = channel
@@ -377,15 +401,9 @@ private final class StreamingCollectorHandler: ChannelInboundHandler, @unchecked
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         switch unwrapInboundIn(data) {
         case .head(let h):
-            if !headDone {
-                headDone = true
-                headPromise.succeed((h.status, h.headers))
-            }
+            headResolver.succeed((h.status, h.headers))
         case .body(let buf):
-            if !sawFirst {
-                sawFirst = true
-                firstChunk.succeed(())
-            }
+            firstResolver.succeed(())
             continuation.yield(Data(buf.readableBytesView))
         case .end:
             continuation.finish()
@@ -395,28 +413,16 @@ private final class StreamingCollectorHandler: ChannelInboundHandler, @unchecked
     }
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
-        if !headDone {
-            headDone = true
-            headPromise.fail(error)
-        }
-        if !sawFirst {
-            sawFirst = true
-            firstChunk.fail(error)
-        }
+        headResolver.fail(error)
+        firstResolver.fail(error)
         continuation.finish()
         context.close(promise: nil)
         group.shutdownGracefully { _ in }
     }
 
     func channelInactive(context: ChannelHandlerContext) {
-        if !headDone {
-            headDone = true
-            headPromise.fail(ChannelError.alreadyClosed)
-        }
-        if !sawFirst {
-            sawFirst = true
-            firstChunk.fail(ChannelError.alreadyClosed)
-        }
+        headResolver.fail(ChannelError.alreadyClosed)
+        firstResolver.fail(ChannelError.alreadyClosed)
         continuation.finish()
         group.shutdownGracefully { _ in }
     }
