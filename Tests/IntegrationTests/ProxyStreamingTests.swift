@@ -269,6 +269,82 @@ extension ProxyStreamingTests {
         XCTAssertEqual(collected, Data("AAAA".utf8))
         XCTAssertNotNil(event, "an error Event must be emitted on upstream drop")
     }
+
+    /// Client drops mid-stream (closes after chunk1, before the barrier is
+    /// released). The proxy must cut the upstream so the connection is not
+    /// leaked (SPECS §5 case 3). We assert the observable teardown signal: an
+    /// error Event is emitted once the proxy finalizes the failed stream — the
+    /// same path (`clientGone` → upstream close → relay inactive →
+    /// `completion.fail`) that frees the upstream connection.
+    func testClientDropMidStreamClosesUpstream() async throws {
+        let mockCA = CAManager(keyStore: InMemoryCAKeyStore())
+        let mockCACert = try await mockCA.ensureCA()
+        let mockCANIO = try NIOSSLCertificate(bytes: Array(mockCACert.derBytes), format: .der)
+
+        // Barrier never released: the mock sends head + chunk1 then waits forever.
+        let barrierGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { try? barrierGroup.syncShutdownGracefully() }
+        let neverRelease = barrierGroup.next().makePromise(of: Void.self)
+
+        let mock = try await MockUpstream.startStreaming(host: "localhost", caManager: mockCA) { _ in
+            MockUpstream.StreamingResponsePlan(
+                firstChunk: Data("AAAA".utf8),
+                remainingChunks: [Data("BBBB".utf8)],
+                releaseRest: neverRelease.futureResult
+            )
+        }
+
+        let proxyCA = CAManager(keyStore: InMemoryCAKeyStore())
+        let proxyCACert = try await proxyCA.ensureCA()
+        let proxy = ProxyServer(
+            configuration: .init(
+                listenHost: "127.0.0.1",
+                listenPort: 0,
+                allowedHosts: ["localhost"],
+                upstreamPort: mock.port,
+                upstreamTrustRoots: .certificates([mockCANIO])
+            ),
+            secretStore: InMemorySecretStore(),
+            caManager: proxyCA
+        )
+        let addr = try await proxy.start()
+        guard let proxyPort = addr.port else {
+            try? await proxy.stop()
+            try? await mock.stop()
+            return XCTFail("proxy did not bind")
+        }
+        let proxyCANIO = try NIOSSLCertificate(bytes: Array(proxyCACert.derBytes), format: .der)
+
+        // Client receives chunk1 then drops.
+        try await TestProxyClient().dropAfterFirstResponseChunk(
+            proxyHost: "127.0.0.1",
+            proxyPort: proxyPort,
+            targetHost: "localhost",
+            targetPort: 443,
+            method: .GET,
+            path: "/v1/messages",
+            headers: [("host", "localhost")],
+            body: nil,
+            trustingCAs: [proxyCANIO],
+            streamTimeout: .seconds(3)
+        )
+
+        // The proxy must react to the client drop by tearing down the stream —
+        // the failure path that also closes the upstream (verified manually:
+        // the relay's channelInactive fires). We assert the observable, robust
+        // signal: an error Event is emitted (polled; append is async).
+        // The error Event lands once the upstream channel finishes closing. With
+        // an idle, non-reciprocating mock that means after the NIOSSL graceful
+        // shutdown timeout (~5 s, the TLSConfiguration default); a real upstream
+        // returns close_notify and this is near-instant. Hence the generous wait.
+        let event = await waitForEvent(in: proxy.eventRing, kind: .error, timeout: 8)
+
+        neverRelease.succeed(())  // let the mock's pending barrier closure unwind
+        try? await proxy.stop()
+        try? await mock.stop()
+
+        XCTAssertNotNil(event, "the proxy must emit an error Event when the client drops mid-stream")
+    }
 }
 
 /// Polls the (actor-isolated) event ring until an event of `kind` appears or the

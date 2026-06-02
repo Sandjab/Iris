@@ -1,4 +1,3 @@
-import Foundation
 import Logging
 import NIO
 import NIOHTTP1
@@ -37,24 +36,22 @@ final class UpstreamClient: @unchecked Sendable {
             tlsConfig.applicationProtocols = ["http/1.1"]
             let sslContext = try NIOSSLContext(configuration: tlsConfig)
 
-            // Backpressure pairing: the relay lives on the upstream pipeline and
-            // gates its reads on the client's writability; the client-side
-            // handler (tail of the client pipeline, same EL) resumes the relay
-            // when the client drains and closes the upstream if the client drops.
+            // Backpressure pairing: the client-side handler (tail of the client
+            // pipeline, same EL) resumes upstream reads when the client drains
+            // and closes the upstream if the client drops. It drives the WINNING
+            // upstream channel (recorded in `upstreamBox` on connect success),
+            // not a relay instance — `ClientBootstrap.connect(host:)` may create
+            // several channels (happy eyeballs), each with its own fresh relay.
             // `stream` runs on the client EL (forwardRequest flatMap), so
             // syncOperations on the client pipeline is valid here.
-            let relay = UpstreamResponseRelay(
-                clientChannel: clientChannel,
-                completion: completion,
-                headWritten: headWritten
-            )
-            let clientSide = ClientWritabilityHandler(relay: relay)
+            let upstreamBox = UpstreamChannelBox()
+            let clientSide = ClientWritabilityHandler(upstream: upstreamBox)
             try clientChannel.pipeline.syncOperations.addHandler(clientSide)
-            let boundRelay = NIOLoopBound(relay, eventLoop: eventLoop)
 
             // Same EventLoop as the client channel: the relay writes across
             // channels without hopping, which is the safety invariant of the
-            // inter-channel relay (mirrors `performPassthrough`).
+            // inter-channel relay (mirrors `performPassthrough`). A FRESH relay
+            // per channel — never share a handler instance across pipelines.
             let bootstrap = ClientBootstrap(group: eventLoop)
                 .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
                 .channelInitializer { channel in
@@ -67,7 +64,13 @@ final class UpstreamClient: @unchecked Sendable {
                             let sync = channel.pipeline.syncOperations
                             try sync.addHandler(sslHandler)
                             try sync.addHTTPClientHandlers()
-                            try sync.addHandler(boundRelay.value)
+                            try sync.addHandler(
+                                UpstreamResponseRelay(
+                                    clientChannel: clientChannel,
+                                    completion: completion,
+                                    headWritten: headWritten
+                                )
+                            )
                         })
                 }
 
@@ -76,6 +79,7 @@ final class UpstreamClient: @unchecked Sendable {
                 case .failure(let error):
                     completion.fail(error)
                 case .success(let upstream):
+                    upstreamBox.channel = upstream
                     upstream.write(HTTPClientRequestPart.head(head), promise: nil)
                     if let body = body, body.readableBytes > 0 {
                         upstream.write(HTTPClientRequestPart.body(.byteBuffer(body)), promise: nil)
