@@ -137,44 +137,7 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 host: host,
                 bypass: bypass
             )
-            switch processed.outcome {
-            case .substituted(let names):
-                server.logger.info(
-                    "Substituted secrets",
-                    metadata: [
-                        "host": "\(host)",
-                        "secrets": "\(names)",
-                        "path": "\(originalURI)",
-                    ]
-                )
-            case .blocked(let alert):
-                server.logger.warning(
-                    "Exfiltration attempt blocked",
-                    metadata: [
-                        "host": "\(host)",
-                        "rule": "\(alert.rule.rawValue)",
-                        "secret": "\(alert.secretName)",
-                        "severity": "\(alert.severity.rawValue)",
-                    ]
-                )
-                switch server.currentOnExfilAttempt {
-                case .blockOnly:
-                    break
-                case .blockAndNotify:
-                    server.logger.warning(
-                        "exfil notify intent (UI deferred to Phase 6)",
-                        metadata: ["host": "\(host)"]
-                    )
-                case .blockNotifyPause:
-                    server.logger.warning(
-                        "auto-pausing daemon after exfil attempt",
-                        metadata: ["host": "\(host)"]
-                    )
-                    server.setPaused(true)
-                }
-            case .bypassed, .noMatch:
-                break
-            }
+            Self.logOutcome(processed.outcome, server: server, host: host, originalURI: originalURI)
             return processed
         }.flatMap { processed -> EventLoopFuture<(ProcessedRequest, StreamOutcome)> in
             // Stream the response part-by-part to the client at the wire, no
@@ -425,6 +388,55 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
     private static func splitURI(_ uri: String) -> (path: String, query: String?) {
         guard let q = uri.firstIndex(of: "?") else { return (uri, nil) }
         return (String(uri[..<q]), String(uri[uri.index(after: q)...]))
+    }
+
+    /// Logs the request outcome and applies the exfil-attempt policy (pause).
+    /// Runs before the response stream is wired; emits no `Event` (that happens
+    /// at `.end`). Secret values never appear — only names (CLAUDE.md §6.1).
+    private static func logOutcome(
+        _ outcome: ProcessedRequest.Outcome,
+        server: ProxyServer,
+        host: String,
+        originalURI: String
+    ) {
+        switch outcome {
+        case .substituted(let names):
+            server.logger.info(
+                "Substituted secrets",
+                metadata: [
+                    "host": "\(host)",
+                    "secrets": "\(names)",
+                    "path": "\(originalURI)",
+                ]
+            )
+        case .blocked(let alert):
+            server.logger.warning(
+                "Exfiltration attempt blocked",
+                metadata: [
+                    "host": "\(host)",
+                    "rule": "\(alert.rule.rawValue)",
+                    "secret": "\(alert.secretName)",
+                    "severity": "\(alert.severity.rawValue)",
+                ]
+            )
+            switch server.currentOnExfilAttempt {
+            case .blockOnly:
+                break
+            case .blockAndNotify:
+                server.logger.warning(
+                    "exfil notify intent (UI deferred to Phase 6)",
+                    metadata: ["host": "\(host)"]
+                )
+            case .blockNotifyPause:
+                server.logger.warning(
+                    "auto-pausing daemon after exfil attempt",
+                    metadata: ["host": "\(host)"]
+                )
+                server.setPaused(true)
+            }
+        case .bypassed, .noMatch:
+            break
+        }
     }
 
     private static func makeEvent(
