@@ -145,9 +145,8 @@ public final class FileWatcher: @unchecked Sendable {
         let debounceCopy = self.debounce
         debounceTask = Task { [weak self] in
             try? await Task.sleep(for: debounceCopy)
-            guard !Task.isCancelled else { return }
-            self?.queue.async {
-                guard let self else { return }
+            guard !Task.isCancelled, let self else { return }
+            self.queue.async {
                 guard !self.stopped else { return }
                 self.continuation?.yield()
             }
