@@ -90,38 +90,91 @@ final class RedactionTests: XCTestCase {
         XCTAssertTrue(alert.snippet.contains("{{kc:\(secretName)}}"))
     }
 
-    func testEncodedSubstitutedEventNeverContainsSecretValue() throws {
+    func testEncodedSubstitutedEventNeverContainsSecretValue() async throws {
         // CLAUDE.md §6.1: the SSE-encoded event must not carry secret values.
-        // For a .substituted event, path is the ORIGINAL URI (placeholders),
-        // substitutedSecrets holds names only.
+        // Non-vacuous: the value is genuinely resolved by the real substitution
+        // engine (it lands in the forwarded request — the authorized channel),
+        // and we then prove the event built for the stream carries only the
+        // ORIGINAL URI and the substituted NAMES, never that resolved value.
         let secretValue = "sk-supersecret-DO-NOT-LEAK-SSE"
+        let secretName = "foo"
+        let store = InMemorySecretStore()
+        _ = try await store.add(
+            Data(secretValue.utf8),
+            named: secretName,
+            allowedHosts: ["api.anthropic.com"],
+            createdAt: Date()
+        )
+        let originalURI = "/v1/messages"
+        let hit = PlaceholderHit(
+            name: secretName,
+            location: .header(name: "x-api-key"),
+            snippet: "x-api-key: {{kc:\(secretName)}}"
+        )
+        let engine = PlaceholderEngine(secretStore: store)
+        let payload = try await engine.substituteResolvable(
+            headers: [("x-api-key", "{{kc:\(secretName)}}")],
+            uri: originalURI,
+            body: nil,
+            resolvableHits: [hit]
+        )
+        // Sanity: the value really was resolved into the forwarded request.
+        XCTAssertEqual(payload.substituted, [secretName])
+        XCTAssertTrue(payload.headers.contains { $0.value.contains(secretValue) })
+
+        // MITMHandler builds the event from the ORIGINAL URI + substituted names.
         let event = Event(
             timestamp: Date(),
             kind: .substituted,
             host: "api.anthropic.com",
             method: "POST",
-            path: "/v1/messages?t={{kc:foo}}",
+            path: originalURI,
             statusCode: 200,
             durationMs: 12,
-            substitutedSecrets: ["foo"],
+            substitutedSecrets: payload.substituted,
             alert: nil
         )
         let json = try JSONRPCCoder.makeEncoder().encode(event)
         let text = try XCTUnwrap(String(data: json, encoding: .utf8))
-        XCTAssertFalse(text.contains(secretValue))
-        XCTAssertTrue(text.contains("{{kc:foo}}"))
+        XCTAssertFalse(text.contains(secretValue), "resolved secret value must not reach the event")
+        XCTAssertTrue(text.contains(secretName), "substituted secret NAME is retained for observability")
     }
 
-    func testEncodedExfilBlockedEventNeverContainsSecretValue() throws {
-        // For a .exfilBlocked event, the alert snippet is the placeholder literal.
+    func testEncodedExfilBlockedEventNeverContainsSecretValue() async throws {
+        // Non-vacuous: the alert is produced by the REAL exfil engine from a
+        // request carrying a live secret value (in the store). We prove the
+        // encoded event carries the placeholder snippet, never that value.
         let secretValue = "sk-supersecret-DO-NOT-LEAK-SSE"
-        let alert = Alert(
-            severity: .high,
-            rule: .hostMismatch,
-            secretName: "foo",
-            detectedAt: .header,
-            snippet: "x-api-key: {{kc:foo}}"
+        let secretName = "foo"
+        let store = InMemorySecretStore()
+        _ = try await store.add(
+            Data(secretValue.utf8),
+            named: secretName,
+            allowedHosts: ["api.anthropic.com"],
+            createdAt: Date()
         )
+        let evaluator = ExfilRuleEngine(
+            secretStore: store,
+            maxSubstitutionsPerMinuteProvider: { 60 }
+        )
+        let hit = PlaceholderHit(
+            name: secretName,
+            location: .header(name: "x-api-key"),
+            snippet: "x-api-key: {{kc:\(secretName)}}"
+        )
+        // Out-of-scope host → R1 host-mismatch block → production builds the alert.
+        let decision = try await evaluator.evaluate(
+            hits: [hit],
+            context: RequestContext(
+                host: "evil.example.com",
+                method: "POST",
+                path: "/v1/messages",
+                contentType: "application/json"
+            )
+        )
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("expected R1 host-mismatch block")
+        }
         let event = Event(
             timestamp: Date(),
             kind: .exfilBlocked,
@@ -133,7 +186,10 @@ final class RedactionTests: XCTestCase {
         )
         let json = try JSONRPCCoder.makeEncoder().encode(event)
         let text = try XCTUnwrap(String(data: json, encoding: .utf8))
-        XCTAssertFalse(text.contains(secretValue))
-        XCTAssertTrue(text.contains("{{kc:foo}}"))
+        XCTAssertFalse(text.contains(secretValue), "blocked-event alert must not carry the secret value")
+        XCTAssertTrue(
+            text.contains("{{kc:\(secretName)}}"),
+            "alert snippet retains the placeholder literal"
+        )
     }
 }
