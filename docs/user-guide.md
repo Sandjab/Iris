@@ -522,7 +522,7 @@ R : Oui. Ces fichiers ne contiennent aucun secret. C'est même un des bénéfice
 R : Vos placeholders deviennent inertes (les requêtes sortantes contiendront `{{kc:...}}` littéral → 401). **L'uninstall ne supprime PAS vos secrets du trousseau** — confirmation explicite demandée. Pour tout retirer, lancez `iris uninstall --remove-secrets` (avec une confirmation supplémentaire).
 
 **Q : IRIS supporte-t-il HTTP/2 ?**
-R : Le proxy MITM supporte HTTP/1.1 et HTTP/2 (à partir de la Phase 10, après hardening). Le passthrough TCP fonctionne avec n'importe quelle version de protocole car il ne déchiffre rien.
+R : **Pas pour les hosts déchiffrés.** Le proxy MITM fonctionne en **HTTP/1.1 uniquement** : pour les hosts de la whitelist, IRIS annonce `http/1.1` en ALPN, donc le client négocie HTTP/1.1 (downgrade transparent). Le support HTTP/2 côté MITM reste en roadmap. En revanche, le **passthrough TCP** (hosts non whitelistés) fonctionne avec n'importe quelle version de protocole — HTTP/2, HTTP/3 — car IRIS ne déchiffre rien.
 
 **Q : Que faire si Claude Code définit un `apiKeyHelper` ?**
 R : `apiKeyHelper` est incompatible avec IRIS (il court-circuite l'env var). `iris doctor` vous alerte si configuré. Supprimez-le de `~/.claude/settings.json` et utilisez l'env var classique avec placeholder.
