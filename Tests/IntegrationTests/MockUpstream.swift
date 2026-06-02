@@ -20,6 +20,21 @@ final class MockUpstream: @unchecked Sendable {
         let firstChunk: Data
         let remainingChunks: [Data]
         let releaseRest: EventLoopFuture<Void>
+        /// If true, the mock flushes `firstChunk` then closes WITHOUT sending
+        /// `.end` — simulates the upstream dropping mid-stream (SPECS §5 case 2).
+        let dropAfterFirstChunk: Bool
+
+        init(
+            firstChunk: Data,
+            remainingChunks: [Data],
+            releaseRest: EventLoopFuture<Void>,
+            dropAfterFirstChunk: Bool = false
+        ) {
+            self.firstChunk = firstChunk
+            self.remainingChunks = remainingChunks
+            self.releaseRest = releaseRest
+            self.dropAfterFirstChunk = dropAfterFirstChunk
+        }
     }
 
     let port: Int
@@ -331,12 +346,20 @@ private final class StreamingMockHandler: ChannelInboundHandler, @unchecked Send
 
         var first = context.channel.allocator.buffer(capacity: plan.firstChunk.count)
         first.writeBytes(plan.firstChunk)
+
+        let channel = context.channel
+        if plan.dropAfterFirstChunk {
+            // Flush chunk1 then close WITHOUT `.end` → truncated upstream.
+            context.writeAndFlush(self.wrapOutboundOut(.body(.byteBuffer(first)))).whenComplete { _ in
+                channel.close(promise: nil)
+            }
+            return
+        }
         context.writeAndFlush(self.wrapOutboundOut(.body(.byteBuffer(first))), promise: nil)
 
         // Wait for the test to release the rest, then flush remaining + end.
         // Deferred writes go via `channel` (typed overload, no wrapOutboundOut)
         // so the @Sendable whenComplete closure captures only Sendable values.
-        let channel = context.channel
         plan.releaseRest.hop(to: context.eventLoop).whenComplete { _ in
             for chunk in self.plan.remainingChunks {
                 var buf = channel.allocator.buffer(capacity: chunk.count)

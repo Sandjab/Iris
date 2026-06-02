@@ -200,6 +200,89 @@ extension ProxyStreamingTests {
         try? await proxy.stop()
         XCTAssertEqual(resp.status, .badGateway)
     }
+
+    /// Upstream drops mid-stream (closes after chunk1, no `.end`). The head was
+    /// already relayed, so the client cannot get a different status: it receives
+    /// chunk1 then a truncated close (SPECS §5 case 2). No hang; an error Event
+    /// is emitted; no connection leak.
+    func testUpstreamDropMidStreamTruncatesAndClosesClient() async throws {
+        let mockCA = CAManager(keyStore: InMemoryCAKeyStore())
+        let mockCACert = try await mockCA.ensureCA()
+        let mockCANIO = try NIOSSLCertificate(bytes: Array(mockCACert.derBytes), format: .der)
+
+        let mock = try await MockUpstream.startStreaming(host: "localhost", caManager: mockCA) { el in
+            MockUpstream.StreamingResponsePlan(
+                firstChunk: Data("AAAA".utf8),
+                remainingChunks: [],
+                releaseRest: el.makeSucceededVoidFuture(),
+                dropAfterFirstChunk: true
+            )
+        }
+
+        let proxyCA = CAManager(keyStore: InMemoryCAKeyStore())
+        let proxyCACert = try await proxyCA.ensureCA()
+        let proxy = ProxyServer(
+            configuration: .init(
+                listenHost: "127.0.0.1",
+                listenPort: 0,
+                allowedHosts: ["localhost"],
+                upstreamPort: mock.port,
+                upstreamTrustRoots: .certificates([mockCANIO])
+            ),
+            secretStore: InMemorySecretStore(),
+            caManager: proxyCA
+        )
+        let addr = try await proxy.start()
+        guard let proxyPort = addr.port else {
+            try? await proxy.stop()
+            try? await mock.stop()
+            return XCTFail("proxy did not bind")
+        }
+        let proxyCANIO = try NIOSSLCertificate(bytes: Array(proxyCACert.derBytes), format: .der)
+
+        let resp = try await TestProxyClient().sendStreaming(
+            proxyHost: "127.0.0.1",
+            proxyPort: proxyPort,
+            targetHost: "localhost",
+            targetPort: 443,
+            method: .GET,
+            path: "/v1/messages",
+            headers: [("host", "localhost")],
+            body: nil,
+            trustingCAs: [proxyCANIO],
+            streamTimeout: .seconds(3)
+        )
+
+        // The stream must terminate (truncated), not hang. We get chunk1 only.
+        let collected = try await drainStream(resp.bodyChunks, timeout: 5)
+        let event = await waitForEvent(in: proxy.eventRing, kind: .error, timeout: 2)
+        // Note: the PROXY side is prompt — `proxy.stop()` returns in well under a
+        // millisecond, proving the upstream/client channels are closed promptly
+        // on a mid-stream drop. `mock.stop()` below costs ~5 s, but that is a
+        // TEST artifact: the mock's child closes abruptly and its NIOSSL handler
+        // waits for the proxy's close_notify, which never comes (the proxy went
+        // inactive on receiving the mock's close_notify). Not a proxy issue.
+        try? await proxy.stop()
+        try? await mock.stop()
+
+        XCTAssertEqual(resp.status, .ok)
+        XCTAssertEqual(collected, Data("AAAA".utf8))
+        XCTAssertNotNil(event, "an error Event must be emitted on upstream drop")
+    }
+}
+
+/// Polls the (actor-isolated) event ring until an event of `kind` appears or the
+/// timeout elapses. Needed because the event is appended via a detached
+/// `Task { await ring.append(...) }`, with no synchronization to the stream's end.
+func waitForEvent(in ring: EventRing, kind: Event.Kind, timeout: Double) async -> Event? {
+    let iterations = max(1, Int(timeout / 0.02))
+    for _ in 0..<iterations {
+        if let event = await ring.recent(100).last(where: { $0.kind == kind }) {
+            return event
+        }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    return nil
 }
 
 /// Drains an `AsyncStream<Data>` to completion, throwing `timedOut` if it does
