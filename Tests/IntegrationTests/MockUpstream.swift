@@ -18,19 +18,25 @@ final class MockUpstream: @unchecked Sendable {
     private let channel: Channel
     private let receivedPromise: EventLoopPromise<ReceivedRequest>
     private let resolver: PromiseResolver<ReceivedRequest>
+    /// Mirror of the recorded request that can be read WITHOUT awaiting the
+    /// promise. Lets a test ask "did any complete request arrive?" without
+    /// blocking when none does. Additive — `receivedRequest()` is unchanged.
+    private let recorder: RequestRecorder
 
     private init(
         port: Int,
         group: EventLoopGroup,
         channel: Channel,
         promise: EventLoopPromise<ReceivedRequest>,
-        resolver: PromiseResolver<ReceivedRequest>
+        resolver: PromiseResolver<ReceivedRequest>,
+        recorder: RequestRecorder
     ) {
         self.port = port
         self.group = group
         self.channel = channel
         self.receivedPromise = promise
         self.resolver = resolver
+        self.recorder = recorder
     }
 
     static func start(host: String, caManager: CAManager) async throws -> MockUpstream {
@@ -47,6 +53,7 @@ final class MockUpstream: @unchecked Sendable {
 
         let receivedPromise = group.next().makePromise(of: ReceivedRequest.self)
         let resolver = PromiseResolver(promise: receivedPromise)
+        let recorder = RequestRecorder()
 
         let bootstrap = ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.backlog, value: 4)
@@ -55,7 +62,7 @@ final class MockUpstream: @unchecked Sendable {
                 return channel.pipeline.addHandler(sslHandler).flatMap {
                     channel.pipeline.configureHTTPServerPipeline(withErrorHandling: true)
                 }.flatMap {
-                    channel.pipeline.addHandler(MockHandler(resolver: resolver))
+                    channel.pipeline.addHandler(MockHandler(resolver: resolver, recorder: recorder))
                 }
             }
 
@@ -68,7 +75,8 @@ final class MockUpstream: @unchecked Sendable {
             group: group,
             channel: channel,
             promise: receivedPromise,
-            resolver: resolver
+            resolver: resolver,
+            recorder: recorder
         )
     }
 
@@ -78,6 +86,13 @@ final class MockUpstream: @unchecked Sendable {
         }
         defer { timeoutTask.cancel() }
         return try await receivedPromise.futureResult.get()
+    }
+
+    /// Non-blocking snapshot of the already-recorded request, or `nil` if no
+    /// complete HTTP request has been received yet. Unlike `receivedRequest()`,
+    /// this never awaits — safe to call on a path where no request may arrive.
+    func receivedRequestIfAny() -> ReceivedRequest? {
+        recorder.snapshot()
     }
 
     func stop() async throws {
@@ -116,16 +131,38 @@ final class PromiseResolver<Value: Sendable>: @unchecked Sendable {
     }
 }
 
+/// Thread-safe holder for the most recently received request, readable without
+/// awaiting. Mirrors what the one-shot promise records so a test can poll
+/// "did anything arrive?" without blocking when nothing does.
+final class RequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: MockUpstream.ReceivedRequest?
+
+    func record(_ request: MockUpstream.ReceivedRequest) {
+        lock.lock()
+        if stored == nil { stored = request }
+        lock.unlock()
+    }
+
+    func snapshot() -> MockUpstream.ReceivedRequest? {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+}
+
 private final class MockHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
 
     private let resolver: PromiseResolver<MockUpstream.ReceivedRequest>
+    private let recorder: RequestRecorder
     private var head: HTTPRequestHead?
     private var body: ByteBuffer?
 
-    init(resolver: PromiseResolver<MockUpstream.ReceivedRequest>) {
+    init(resolver: PromiseResolver<MockUpstream.ReceivedRequest>, recorder: RequestRecorder) {
         self.resolver = resolver
+        self.recorder = recorder
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -142,7 +179,9 @@ private final class MockHandler: ChannelInboundHandler, @unchecked Sendable {
         case .end:
             guard let head = head else { return }
             let bodyData = body.map { Data($0.readableBytesView) }
-            resolver.succeed(MockUpstream.ReceivedRequest(head: head, body: bodyData))
+            let request = MockUpstream.ReceivedRequest(head: head, body: bodyData)
+            recorder.record(request)
+            resolver.succeed(request)
             replyOK(context: context)
         }
     }
