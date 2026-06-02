@@ -2,7 +2,7 @@
 
 > Ce guide décrit l'usage **cible** d'IRIS une fois toutes les phases livrées.
 > Au moment où vous le lisez, certaines commandes peuvent ne pas encore
-> être implémentées (voir [§ État d'implémentation](#état-dimplémentation-mai-2026)
+> être implémentées (voir [§ État d'implémentation](#état-dimplémentation-juin-2026)
 > en tête de document).
 
 ---
@@ -23,24 +23,25 @@
 
 ---
 
-## État d'implémentation (mai 2026)
+## État d'implémentation (juin 2026)
 
 | Composant | Phase | Statut |
 |---|---|---|
 | Daemon `irisd` + proxy MITM | Phase 2 ✅ | Disponible |
-| Substitution placeholders | Phase 2 ✅ | Disponible (sans scoping `allowed_hosts`) |
+| Substitution placeholders | Phase 2 ✅ | Disponible |
+| Streaming de la réponse (SSE upstream→client, sans bufferisation) | Phase 2.x ✅ | Disponible |
 | CONNECT-tunnel passthrough non-whitelist | Phase 2.1 ✅ | Disponible |
 | Mode debug `--in-memory-secrets` | Phase 2 ✅ | Disponible |
-| IPC admin Unix socket | Phase 3 ⏳ | À venir |
-| Scoping `allowed_hosts` + exfil rules | Phase 4 ⏳ | À venir |
-| CLI `iris secret …` | Phase 5 ⏳ | À venir |
-| Menu bar app `Iris.app` | Phase 6 ⏳ | À venir |
-| LaunchAgent + `SMAppService` | Phase 7 ⏳ | À venir |
+| IPC admin Unix socket + flux SSE d'events | Phase 3 ✅ | Disponible |
+| Scoping `allowed_hosts` + exfil rules (R1-R5) | Phase 4 ✅ | Disponible |
+| CLI `iris` (secret / status / logs / doctor / mcp) | Phase 5 ✅ | Disponible |
+| Menu bar app `Iris.app` | Phase 6 ✅ | Disponible (Overview / Logs / Security + CRUD secrets & rules ; onglet Settings et « Install CA » = Phase 6.3, à venir) |
+| LaunchAgent + `SMAppService` (auto-start) | Phase 7 ⏳ | À venir |
 | ACL Keychain signed-binary | Phase 8 ⏳ | À venir |
-| `.pkg` signé + notarisé | Phase 9 ⏳ | À venir |
-| Hardening + fuzz tests | Phase 10 ⏳ | À venir |
+| `.pkg` signé + notarisé | Phase 9 ✅ | Disponible |
+| Hardening + fuzz tests | Phase 10 ✅ | Disponible |
 
-**Aujourd'hui** : seul le mode `--in-memory-secrets` (secrets passés via variables d'environnement `IRIS_SECRET_<NAME>`) est utilisable. Le reste de ce guide décrit l'expérience finale.
+**Aujourd'hui** : le broker est utilisable de bout en bout — secrets en Keychain via la CLI `iris` ou l'app menu bar, proxy MITM avec substitution scopée par `allowed_hosts`, détection d'exfiltration, streaming des réponses, et `.pkg` signé + notarisé. Restent à venir : le démarrage automatique (LaunchAgent/`SMAppService`, Phase 7), le durcissement de l'ACL Keychain liée au binaire signé (Phase 8), et l'onglet Settings / « Install CA » de l'app (Phase 6.3). Le mode `--in-memory-secrets` (secrets via `IRIS_SECRET_<NAME>`) reste disponible pour le debug.
 
 ---
 
