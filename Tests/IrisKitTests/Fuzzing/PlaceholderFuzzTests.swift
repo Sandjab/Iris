@@ -143,4 +143,81 @@ final class PlaceholderFuzzTests: XCTestCase {
             )
         }
     }
+
+    // MARK: I3 — no substitution without explicit scope match
+
+    /// Out-of-scope cases: a well-formed placeholder pointing at the known
+    /// secret, where the request destination is NOT in the secret's
+    /// `allowed_hosts` (R1) or sits in a non-canonical location (R2).
+    private let outOfScopeCorpus: [(input: FuzzInput, host: String)] = [
+        (
+            FuzzInput(
+                headers: [("x-api-key", "{{kc:leaky}}")],
+                uri: "/v1/messages",
+                body: nil,
+                label: "r1-host-mismatch"
+            ),
+            "evil.example.com"
+        ),
+        (
+            FuzzInput(
+                headers: [("x-evil-header", "{{kc:leaky}}")],
+                uri: "/v1/messages",
+                body: nil,
+                label: "r2-non-canonical-header"
+            ),
+            "api.anthropic.com"
+        ),
+        (
+            FuzzInput(
+                headers: [],
+                uri: "/v1/{{kc:leaky}}/messages",
+                body: nil,
+                label: "r2-url-path"
+            ),
+            "api.anthropic.com"
+        ),
+        (
+            FuzzInput(
+                headers: [],
+                uri: "/v1/messages?token={{kc:leaky}}",
+                body: nil,
+                label: "r2-query-string"
+            ),
+            "api.anthropic.com"
+        ),
+    ]
+
+    func testOutOfScopePlaceholdersAreNeverSubstituted() async throws {
+        let store = try await makeStore(allowedHosts: ["api.anthropic.com"])
+        for (input, host) in outOfScopeCorpus {
+            let (decision, payload) = try await runPipeline(input, store: store, host: host)
+            guard case .block = decision else {
+                return XCTFail("expected block for out-of-scope case \(input.label)")
+            }
+            XCTAssertNil(
+                payload,
+                "blocked request must not produce a substituted payload (\(input.label))"
+            )
+        }
+    }
+
+    func testInScopeCanonicalPlaceholderIsSubstituted() async throws {
+        let store = try await makeStore(allowedHosts: ["api.anthropic.com"])
+        let input = FuzzInput(
+            headers: [("x-api-key", "{{kc:leaky}}")],
+            uri: "/v1/messages",
+            body: nil,
+            label: "in-scope-canonical"
+        )
+        let (decision, payload) = try await runPipeline(
+            input,
+            store: store,
+            host: "api.anthropic.com"
+        )
+        guard case .allow = decision else {
+            return XCTFail("expected allow for in-scope canonical case")
+        }
+        XCTAssertEqual(payload?.substituted, [AdversarialInputGenerator.knownSecretName])
+    }
 }
