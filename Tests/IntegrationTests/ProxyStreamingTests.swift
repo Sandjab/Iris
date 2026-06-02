@@ -85,4 +85,98 @@ final class ProxyStreamingTests: XCTestCase {
         XCTAssertEqual(resp.status, .ok)
         XCTAssertEqual(collected, Data("AAAABBBB".utf8))
     }
+
+    /// Drives a large multi-chunk response through the backpressure-gated relay
+    /// and asserts byte-for-byte integrity + termination.
+    ///
+    /// Backpressure note: the relay gates upstream reads on the client's
+    /// writability (canonical swift-nio `GlueHandler` model — `read(context:)`
+    /// defers when `clientChannel.isWritable` is false; `ClientWritabilityHandler`
+    /// resumes it). A *precise* "reads paused exactly at the watermark" assertion
+    /// is intentionally omitted: `EmbeddedChannel` does not flip `isWritable` for
+    /// flushed writes, and a real-socket assertion of the pause moment is
+    /// timing-fragile (TCP buffer sizes). Instead this test floods ~1 MiB across
+    /// 256 chunks: if the pause/resume cycle were broken (e.g. a deferred read
+    /// never resumed), the transfer would deadlock and `drain` would time out
+    /// rather than hang. The real-world backpressure check is the manual SSE
+    /// smoke (Task 11).
+    func testLargeStreamedResponseSurvivesGatedPath() async throws {
+        let mockCA = CAManager(keyStore: InMemoryCAKeyStore())
+        let mockCACert = try await mockCA.ensureCA()
+        let mockCANIO = try NIOSSLCertificate(bytes: Array(mockCACert.derBytes), format: .der)
+
+        let chunks = (0..<256).map { Data(repeating: UInt8($0 & 0xFF), count: 4096) }
+        let expected = chunks.reduce(into: Data()) { $0.append($1) }
+
+        let mock = try await MockUpstream.startStreaming(host: "localhost", caManager: mockCA) { el in
+            MockUpstream.StreamingResponsePlan(
+                firstChunk: chunks[0],
+                remainingChunks: Array(chunks[1...]),
+                releaseRest: el.makeSucceededVoidFuture()
+            )
+        }
+
+        let proxyCA = CAManager(keyStore: InMemoryCAKeyStore())
+        let proxyCACert = try await proxyCA.ensureCA()
+        let proxy = ProxyServer(
+            configuration: .init(
+                listenHost: "127.0.0.1",
+                listenPort: 0,
+                allowedHosts: ["localhost"],
+                upstreamPort: mock.port,
+                upstreamTrustRoots: .certificates([mockCANIO])
+            ),
+            secretStore: InMemorySecretStore(),
+            caManager: proxyCA
+        )
+        let addr = try await proxy.start()
+        guard let proxyPort = addr.port else {
+            try? await proxy.stop()
+            try? await mock.stop()
+            return XCTFail("proxy did not bind")
+        }
+        let proxyCANIO = try NIOSSLCertificate(bytes: Array(proxyCACert.derBytes), format: .der)
+
+        let resp = try await TestProxyClient().sendStreaming(
+            proxyHost: "127.0.0.1",
+            proxyPort: proxyPort,
+            targetHost: "localhost",
+            targetPort: 443,
+            method: .GET,
+            path: "/v1/messages",
+            headers: [("host", "localhost")],
+            body: nil,
+            trustingCAs: [proxyCANIO],
+            streamTimeout: .seconds(5)
+        )
+
+        let collected = try await drainStream(resp.bodyChunks, timeout: 15)
+        try? await proxy.stop()
+        try? await mock.stop()
+
+        XCTAssertEqual(resp.status, .ok)
+        XCTAssertEqual(collected.count, expected.count)
+        XCTAssertEqual(collected, expected)
+    }
+}
+
+/// Drains an `AsyncStream<Data>` to completion, throwing `timedOut` if it does
+/// not finish in time. Unlike `EventLoopFuture.get()`, `AsyncStream` iteration
+/// honors task cancellation, so the timeout actually unblocks (no hang on a
+/// gating deadlock).
+func drainStream(_ stream: AsyncStream<Data>, timeout: Double) async throws -> Data {
+    try await withThrowingTaskGroup(of: Data.self) { group in
+        group.addTask {
+            var data = Data()
+            for await chunk in stream { data.append(chunk) }
+            return data
+        }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            throw IntegrationTestError.timedOut
+        }
+        let result = try await group.next()!
+        group.cancelAll()
+        return result
+    }
 }

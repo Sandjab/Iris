@@ -36,6 +36,17 @@ final class UpstreamClient: @unchecked Sendable {
             tlsConfig.applicationProtocols = ["http/1.1"]
             let sslContext = try NIOSSLContext(configuration: tlsConfig)
 
+            // Backpressure pairing: the relay lives on the upstream pipeline and
+            // gates its reads on the client's writability; the client-side
+            // handler (tail of the client pipeline, same EL) resumes the relay
+            // when the client drains and closes the upstream if the client drops.
+            // `stream` runs on the client EL (forwardRequest flatMap), so
+            // syncOperations on the client pipeline is valid here.
+            let relay = UpstreamResponseRelay(clientChannel: clientChannel, completion: completion)
+            let clientSide = ClientWritabilityHandler(relay: relay)
+            try clientChannel.pipeline.syncOperations.addHandler(clientSide)
+            let boundRelay = NIOLoopBound(relay, eventLoop: eventLoop)
+
             // Same EventLoop as the client channel: the relay writes across
             // channels without hopping, which is the safety invariant of the
             // inter-channel relay (mirrors `performPassthrough`).
@@ -51,12 +62,7 @@ final class UpstreamClient: @unchecked Sendable {
                             let sync = channel.pipeline.syncOperations
                             try sync.addHandler(sslHandler)
                             try sync.addHTTPClientHandlers()
-                            try sync.addHandler(
-                                UpstreamResponseRelay(
-                                    clientChannel: clientChannel,
-                                    completion: completion
-                                )
-                            )
+                            try sync.addHandler(boundRelay.value)
                         })
                 }
 
