@@ -158,6 +158,72 @@ final class ProxyStreamingTests: XCTestCase {
         XCTAssertEqual(collected.count, expected.count)
         XCTAssertEqual(collected, expected)
     }
+
+    /// §7.2: the response is forwarded byte-for-byte, never modified. A multi-chunk
+    /// body with multibyte UTF-8 at arbitrary boundaries must reconstitute exactly,
+    /// and the head's content-type must survive the relay round-trip.
+    func testResponseBodyIsForwardedByteForByte() async throws {
+        let mockCA = CAManager(keyStore: InMemoryCAKeyStore())
+        let mockCACert = try await mockCA.ensureCA()
+        let mockCANIO = try NIOSSLCertificate(bytes: Array(mockCACert.derBytes), format: .der)
+
+        let chunks = [
+            Data("événement-α ".utf8),
+            Data("données…📡 ".utf8),
+            Data("fin\n".utf8),
+        ]
+        let expected = chunks.reduce(into: Data()) { $0.append($1) }
+
+        let mock = try await MockUpstream.startStreaming(host: "localhost", caManager: mockCA) { el in
+            MockUpstream.StreamingResponsePlan(
+                firstChunk: chunks[0],
+                remainingChunks: Array(chunks[1...]),
+                releaseRest: el.makeSucceededVoidFuture()
+            )
+        }
+
+        let proxyCA = CAManager(keyStore: InMemoryCAKeyStore())
+        let proxyCACert = try await proxyCA.ensureCA()
+        let proxy = ProxyServer(
+            configuration: .init(
+                listenHost: "127.0.0.1",
+                listenPort: 0,
+                allowedHosts: ["localhost"],
+                upstreamPort: mock.port,
+                upstreamTrustRoots: .certificates([mockCANIO])
+            ),
+            secretStore: InMemorySecretStore(),
+            caManager: proxyCA
+        )
+        let addr = try await proxy.start()
+        guard let proxyPort = addr.port else {
+            try? await proxy.stop()
+            try? await mock.stop()
+            return XCTFail("proxy did not bind")
+        }
+        let proxyCANIO = try NIOSSLCertificate(bytes: Array(proxyCACert.derBytes), format: .der)
+
+        let resp = try await TestProxyClient().sendStreaming(
+            proxyHost: "127.0.0.1",
+            proxyPort: proxyPort,
+            targetHost: "localhost",
+            targetPort: 443,
+            method: .GET,
+            path: "/v1/messages",
+            headers: [("host", "localhost")],
+            body: nil,
+            trustingCAs: [proxyCANIO],
+            streamTimeout: .seconds(5)
+        )
+
+        let collected = try await drainStream(resp.bodyChunks, timeout: 5)
+        try? await proxy.stop()
+        try? await mock.stop()
+
+        XCTAssertEqual(resp.status, .ok)
+        XCTAssertEqual(collected, expected)
+        XCTAssertEqual(resp.headers.first(name: "content-type"), "text/event-stream")
+    }
 }
 
 extension ProxyStreamingTests {
