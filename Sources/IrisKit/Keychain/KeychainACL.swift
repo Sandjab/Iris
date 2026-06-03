@@ -6,14 +6,11 @@ import Security
 /// SPECS §12.3). Design: `docs/superpowers/specs/2026-06-03-phase-8b-keychain-acl-design.md`.
 public enum KeychainACL {
     /// Item name shown in the system consent dialog when a non-trusted process
-    /// tries to read the secret. Mirrors the Keychain service/account naming.
-    public static func accessDescription(forSecret name: String) -> String {
-        "io.iris.secret.\(name)"
-    }
-
-    /// Item name shown in the consent dialog for the CA private key.
-    public static func caPrivateKeyDescription() -> String {
-        "io.iris.ca.privatekey"
+    /// tries to read the item. Mirrors the Keychain service/account naming, so it
+    /// stays correct even if a store is configured with a non-default service or
+    /// account.
+    public static func accessDescription(service: String, account: String) -> String {
+        "\(service).\(account)"
     }
 
     /// Builds a `SecAccess` whose restricted operations (decrypt/read) are silent

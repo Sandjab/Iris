@@ -86,12 +86,13 @@ Apple-signé persistait correctement. Corollaire pour 8b :
 Enum-namespace (convention `CATrustStore` de 8a), séparation pure / effectful
 pour la testabilité :
 
-- `static func accessDescription(forSecret name: String) -> String` →
-  `"io.iris.secret.<name>"` et `static func caPrivateKeyDescription() -> String`
-  → `"io.iris.ca.privatekey"` — **pures, CI-testables**. Ce descripteur est le
-  texte affiché dans le panneau de consentement système quand un process **non**
-  trusté tente de lire l'item. On verrouille la chaîne par test (analogue au
-  verrou du vecteur d'args de 8a).
+- `static func accessDescription(service: String, account: String) -> String` →
+  `"<service>.<account>"` — **pure, CI-testable**. Ce descripteur est le texte
+  affiché dans le panneau de consentement système quand un process **non** trusté
+  tente de lire l'item ; il prend le `service`/`account` **réels** du store (et
+  non des constantes codées en dur) pour rester correct même avec une config
+  non-défaut. On verrouille la chaîne par test (analogue au verrou du vecteur
+  d'args de 8a).
 - `static func selfOnlyAccess(description: String) throws -> SecAccess` —
   **effectful**, smoke-only. **Un seul** appel déprécié :
   `SecAccessCreate(description as CFString, nil, &access)`. Le `trustedlist == nil`
@@ -106,7 +107,7 @@ Mapping d'erreur : `KeychainACLError` (voir §4.4).
 ### 4.2 `Sources/IrisKit/SecretStore/KeychainSecretStore.swift` (modifié)
 
 - `add(_:named:allowedHosts:createdAt:)` — construit
-  `let access = try KeychainACL.selfOnlyAccess(description: KeychainACL.accessDescription(forSecret: name))`
+  `let access = try KeychainACL.selfOnlyAccess(description: KeychainACL.accessDescription(service: service, account: name))`
   puis met `kSecAttrAccess: access` dans le dict d'attributs du `SecItemAdd`. **Et
   retire `kSecAttrAccessible`** : `kSecAttrAccess` (file-based keychain) et
   `kSecAttrAccessible` (data-protection keychain) sont **mutuellement exclusifs** ;
@@ -120,14 +121,14 @@ Mapping d'erreur : `KeychainACLError` (voir §4.4).
 ### 4.3 `Sources/IrisKit/CA/KeychainCAKeyStore.swift` (modifié)
 
 - `storeKey(_:)` — sur le chemin de **création** (`SecItemAdd`), construit
-  `try KeychainACL.selfOnlyAccess(description: KeychainACL.caPrivateKeyDescription())`,
+  `try KeychainACL.selfOnlyAccess(description: KeychainACL.accessDescription(service: service, account: account))`,
   met `kSecAttrAccess: access` et **retire `kSecAttrAccessible`** (même exclusivité
   qu'en §4.2). Le chemin `SecItemUpdate` (rotation de valeur) reste inchangé
   (préserve l'ACL).
 
 ### 4.4 Erreurs
 
-`makeAccess` étant partagé par les deux stores, il lève son **propre** type —
+`selfOnlyAccess` étant partagé par les deux stores, il lève son **propre** type —
 nouvel `enum KeychainACLError: Error, LocalizedError { case creationFailed(OSStatus) }`
 dans `KeychainACL.swift` (message non vide). Il **se propage** par le `throws`
 déjà présent sur `add` / `storeKey` ; pas de cas dupliqué dans `SecretStoreError`
@@ -186,9 +187,10 @@ voire `SecKeychainItemSetAccess` post-insertion).
 
 ### 7.2 Unit (CI, headless)
 
-- `KeychainACL.accessDescription(forSecret:)` → `"io.iris.secret.<name>"` et
-  `KeychainACL.caPrivateKeyDescription()` → `"io.iris.ca.privatekey"` (verrouille
-  les descripteurs du panneau de consentement).
+- `KeychainACL.accessDescription(service:account:)` →
+  `(io.iris.secret, anthropic_api_key) → "io.iris.secret.anthropic_api_key"` et
+  `(io.iris.ca, privatekey) → "io.iris.ca.privatekey"` (verrouille les
+  descripteurs du panneau de consentement et le calque sur le nommage réel).
 - `KeychainACLError.creationFailed` est `LocalizedError` (message non vide).
 
 > Les appels `SecAccess`/`SecItemAdd` réels **ne sont pas** testés en CI : ils

@@ -9,13 +9,16 @@ final class KeychainACLTests: XCTestCase {
     // change pas silencieusement ce que voit l'utilisateur ni le contrat de nommage.
     func testSecretAccessDescription() {
         XCTAssertEqual(
-            KeychainACL.accessDescription(forSecret: "anthropic_api_key"),
+            KeychainACL.accessDescription(service: "io.iris.secret", account: "anthropic_api_key"),
             "io.iris.secret.anthropic_api_key"
         )
     }
 
     func testCAPrivateKeyDescription() {
-        XCTAssertEqual(KeychainACL.caPrivateKeyDescription(), "io.iris.ca.privatekey")
+        XCTAssertEqual(
+            KeychainACL.accessDescription(service: "io.iris.ca", account: "privatekey"),
+            "io.iris.ca.privatekey"
+        )
     }
 
     func testACLErrorHasNonEmptyDescription() {

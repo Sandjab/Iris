@@ -68,7 +68,9 @@ public actor KeychainCAKeyStore: CAKeyStore {
             throw CAError.keychainStatus(updateStatus)
         }
 
-        let access = try KeychainACL.selfOnlyAccess(description: KeychainACL.caPrivateKeyDescription())
+        let access = try KeychainACL.selfOnlyAccess(
+            description: KeychainACL.accessDescription(service: service, account: account)
+        )
         let addAttrs: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

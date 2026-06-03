@@ -35,7 +35,7 @@ public actor KeychainSecretStore: SecretStore {
         )
         let metadataBlob = try encode(metadata)
         let access = try KeychainACL.selfOnlyAccess(
-            description: KeychainACL.accessDescription(forSecret: name)
+            description: KeychainACL.accessDescription(service: service, account: name)
         )
 
         let attributes: [String: Any] = [
