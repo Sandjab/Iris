@@ -1,6 +1,7 @@
 import Crypto
 import Foundation
 import Security
+import SwiftASN1
 
 /// Reads the macOS user trust store to determine whether the IRIS CA is
 /// trusted by the current user. Pure read, so no signed-binary entitlement
@@ -35,5 +36,44 @@ public enum CATrustStore {
             if hex == target { return true }
         }
         return false
+    }
+
+    /// Parses a PEM-encoded certificate into a `SecCertificate`. Pure — no
+    /// keychain or trust-store side effects, so it is the CI-testable seam of
+    /// the install path. Throws `CAError.dataCorruption` on malformed input.
+    public static func makeCertificate(fromPEM pem: String) throws -> SecCertificate {
+        let der: Data
+        do {
+            der = try Data(PEMDocument(pemString: pem).derBytes)
+        } catch {
+            throw CAError.dataCorruption("invalid CA PEM: \(error)")
+        }
+        guard let cert = SecCertificateCreateWithData(nil, der as CFData) else {
+            throw CAError.dataCorruption("SecCertificateCreateWithData returned nil")
+        }
+        return cert
+    }
+
+    /// Adds `cert` to the current user's trust settings as an always-trusted
+    /// root (`SecTrustSettingsSetTrustSettings(.user, nil)`; passing `nil`
+    /// means "always trust this root regardless of use", valid for a
+    /// self-signed root). The system presents a login-password auth panel and
+    /// may block — GUI session required, so this is exercised by manual smoke,
+    /// not CI.
+    public static func install(_ cert: SecCertificate) throws {
+        let status = SecTrustSettingsSetTrustSettings(cert, .user, nil)
+        guard status == errSecSuccess else {
+            throw CAError.trustSettingsFailed(status)
+        }
+    }
+
+    /// Removes `cert`'s trust settings from the current user's domain
+    /// (`SecTrustSettingsRemoveTrustSettings(.user)`). Same GUI-auth caveat as
+    /// `install`.
+    public static func uninstall(_ cert: SecCertificate) throws {
+        let status = SecTrustSettingsRemoveTrustSettings(cert, .user)
+        guard status == errSecSuccess else {
+            throw CAError.trustSettingsFailed(status)
+        }
     }
 }

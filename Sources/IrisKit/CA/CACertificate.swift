@@ -33,6 +33,7 @@ public enum CAError: Error, LocalizedError, Equatable {
     case directoryCreationFailed(path: String)
     case keychainStatus(OSStatus)
     case dataCorruption(String)
+    case trustSettingsFailed(OSStatus)
 
     public var errorDescription: String? {
         switch self {
@@ -49,6 +50,9 @@ public enum CAError: Error, LocalizedError, Equatable {
             return "Keychain error: \(message ?? "OSStatus \(status)")"
         case .dataCorruption(let reason):
             return "CA data corruption: \(reason)"
+        case .trustSettingsFailed(let status):
+            let message = SecCopyErrorMessageString(status, nil) as String?
+            return "Trust settings error: \(message ?? "OSStatus \(status)")"
         }
     }
 }
