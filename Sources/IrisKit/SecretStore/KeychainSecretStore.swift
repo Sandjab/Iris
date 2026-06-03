@@ -5,10 +5,11 @@ import Security
 /// with `service = io.iris.secret` and `account = <name>`, value = secret bytes,
 /// generic attribute = JSON-encoded metadata (allowed_hosts, timestamps, usage).
 ///
-/// Phase 1 uses `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` without
-/// per-application ACL. Per-binary ACL via `SecAccessCreateWithOwnerAndACL` is
-/// scheduled for Phase 8 (codesign required to bind the ACL to the signed
-/// `irisd` identity).
+/// Phase 8b: each item is added with a per-binary `SecAccess` (`KeychainACL`)
+/// granting silent read access only to the signed `irisd` binary, so other
+/// processes are prompted/denied (CLAUDE.md §6.2). `kSecAttrAccess` (file-based
+/// keychain) replaces `kSecAttrAccessible` — the two attributes are mutually
+/// exclusive.
 public actor KeychainSecretStore: SecretStore {
     private let service: String
 
@@ -33,6 +34,9 @@ public actor KeychainSecretStore: SecretStore {
             quarantined: false
         )
         let metadataBlob = try encode(metadata)
+        let access = try KeychainACL.selfOnlyAccess(
+            description: KeychainACL.accessDescription(forSecret: name)
+        )
 
         let attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -40,7 +44,7 @@ public actor KeychainSecretStore: SecretStore {
             kSecAttrAccount as String: name,
             kSecAttrGeneric as String: metadataBlob,
             kSecValueData as String: value,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecAttrAccess as String: access,
         ]
 
         let status = SecItemAdd(attributes as CFDictionary, nil)
