@@ -6,7 +6,7 @@ struct CACommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "ca",
         abstract: "Manage the IRIS root CA.",
-        subcommands: [Export.self, Fingerprint.self, IsTrusted.self]
+        subcommands: [Export.self, Fingerprint.self, IsTrusted.self, Install.self, Uninstall.self]
     )
 
     struct Export: AsyncParsableCommand {
@@ -87,6 +87,69 @@ struct CACommand: AsyncParsableCommand {
             if !result.trusted {
                 throw ExitCode(IrisExitCode.logicError)
             }
+        }
+    }
+
+    struct Install: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "install",
+            abstract: "Install the IRIS CA into the current user's trust store."
+        )
+
+        @OptionGroup var connection: ConnectionOptions
+        @Flag(name: .customLong("json")) var json: Bool = false
+
+        mutating func run() async throws {
+            // Idempotent: skip if already trusted, avoiding a needless auth prompt.
+            let trusted = try await withAdminClient(connection) { client in
+                try await client.call(.caIsTrusted, returning: CAIsTrustedResult.self)
+            }
+            if trusted.trusted {
+                try Output.ack(message: "already trusted", json: json)
+                return
+            }
+
+            let pathResult = try await withAdminClient(connection) { client in
+                try await client.call(.caExportPath, returning: CAExportPathResult.self)
+            }
+            do {
+                try CATrustStore.install(pemPath: pathResult.path)
+            } catch {
+                try? FileHandle.standardError.write(contentsOf: Data("install failed: \(error)\n".utf8))
+                throw ExitCode(IrisExitCode.ioError)
+            }
+            try Output.ack(message: "CA installed in user trust store", json: json)
+        }
+    }
+
+    struct Uninstall: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "uninstall",
+            abstract: "Remove the IRIS CA from the current user's trust store."
+        )
+
+        @OptionGroup var connection: ConnectionOptions
+        @Flag(name: .customLong("json")) var json: Bool = false
+
+        mutating func run() async throws {
+            let trusted = try await withAdminClient(connection) { client in
+                try await client.call(.caIsTrusted, returning: CAIsTrustedResult.self)
+            }
+            if !trusted.trusted {
+                try Output.ack(message: "not installed", json: json)
+                return
+            }
+
+            let pathResult = try await withAdminClient(connection) { client in
+                try await client.call(.caExportPath, returning: CAExportPathResult.self)
+            }
+            do {
+                try CATrustStore.uninstall(pemPath: pathResult.path)
+            } catch {
+                try? FileHandle.standardError.write(contentsOf: Data("uninstall failed: \(error)\n".utf8))
+                throw ExitCode(IrisExitCode.ioError)
+            }
+            try Output.ack(message: "CA removed from user trust store", json: json)
         }
     }
 }
