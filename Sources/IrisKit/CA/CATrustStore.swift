@@ -1,7 +1,6 @@
 import Crypto
 import Foundation
 import Security
-import SwiftASN1
 
 /// Reads the macOS user trust store to determine whether the IRIS CA is
 /// trusted by the current user. Pure read, so no signed-binary entitlement
@@ -38,42 +37,69 @@ public enum CATrustStore {
         return false
     }
 
-    /// Parses a PEM-encoded certificate into a `SecCertificate`. Pure — no
-    /// keychain or trust-store side effects, so it is the CI-testable seam of
-    /// the install path. Throws `CAError.dataCorruption` on malformed input.
-    public static func makeCertificate(fromPEM pem: String) throws -> SecCertificate {
-        let der: Data
+    /// Builds the `/usr/bin/security` argument vector that installs `pemPath`
+    /// as an always-trusted root in the user's login keychain. Pure — the
+    /// CI-testable seam. The flags are load-bearing: `-r trustRoot` marks the
+    /// cert a trusted root, and `-k <login keychain>` is required for the trust
+    /// setting to persist (an invocation without it was observed to no-op on
+    /// macOS 26).
+    public static func addTrustedCertArguments(pemPath: String, loginKeychainPath: String) -> [String] {
+        ["add-trusted-cert", "-r", "trustRoot", "-k", loginKeychainPath, pemPath]
+    }
+
+    /// Builds the `/usr/bin/security` argument vector that removes `pemPath`'s
+    /// user trust settings.
+    public static func removeTrustedCertArguments(pemPath: String) -> [String] {
+        ["remove-trusted-cert", pemPath]
+    }
+
+    /// Installs the CA at `pemPath` into the current user's trust store by
+    /// shelling out to the Apple-signed `/usr/bin/security` tool. The native
+    /// `SecTrustSettingsSetTrustSettings` API returns `errSecInternalComponent`
+    /// (-2070) from a non-Developer-ID-signed binary, so we delegate to
+    /// `security` (the macOS convention, cf. mkcert). The system presents a
+    /// login-password auth panel and blocks until the user responds — GUI
+    /// session required, so this is exercised by manual smoke, not CI.
+    public static func install(pemPath: String) throws {
+        try runSecurity(addTrustedCertArguments(pemPath: pemPath, loginKeychainPath: loginKeychainPath()))
+    }
+
+    /// Removes the CA at `pemPath` from the current user's trust store via
+    /// `/usr/bin/security remove-trusted-cert`. Same GUI-auth caveat as `install`.
+    public static func uninstall(pemPath: String) throws {
+        try runSecurity(removeTrustedCertArguments(pemPath: pemPath))
+    }
+
+    // MARK: - Internals
+
+    private static func loginKeychainPath() -> String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Keychains/login.keychain-db")
+            .path
+    }
+
+    private static func runSecurity(_ arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = arguments
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
         do {
-            der = try Data(PEMDocument(pemString: pem).derBytes)
+            try process.run()
         } catch {
-            throw CAError.dataCorruption("invalid CA PEM: \(error)")
+            throw CAError.trustCommandFailed(status: -1, message: "could not launch /usr/bin/security: \(error)")
         }
-        guard let cert = SecCertificateCreateWithData(nil, der as CFData) else {
-            throw CAError.dataCorruption("SecCertificateCreateWithData returned nil")
-        }
-        return cert
-    }
-
-    /// Adds `cert` to the current user's trust settings as an always-trusted
-    /// root (`SecTrustSettingsSetTrustSettings(.user, nil)`; passing `nil`
-    /// means "always trust this root regardless of use", valid for a
-    /// self-signed root). The system presents a login-password auth panel and
-    /// may block — GUI session required, so this is exercised by manual smoke,
-    /// not CI.
-    public static func install(_ cert: SecCertificate) throws {
-        let status = SecTrustSettingsSetTrustSettings(cert, .user, nil)
-        guard status == errSecSuccess else {
-            throw CAError.trustSettingsFailed(status)
-        }
-    }
-
-    /// Removes `cert`'s trust settings from the current user's domain
-    /// (`SecTrustSettingsRemoveTrustSettings(.user)`). Same GUI-auth caveat as
-    /// `install`.
-    public static func uninstall(_ cert: SecCertificate) throws {
-        let status = SecTrustSettingsRemoveTrustSettings(cert, .user)
-        guard status == errSecSuccess else {
-            throw CAError.trustSettingsFailed(status)
+        // Drain stderr to EOF (i.e. until `security` exits) BEFORE waiting, so a
+        // chatty error can't fill the pipe buffer and deadlock. This also blocks
+        // cleanly while `security` shows its auth panel.
+        let stderrData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let message = String(data: stderrData, encoding: .utf8) ?? ""
+            throw CAError.trustCommandFailed(
+                status: process.terminationStatus,
+                message: message.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
         }
     }
 }

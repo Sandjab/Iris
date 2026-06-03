@@ -112,16 +112,8 @@ struct CACommand: AsyncParsableCommand {
             let pathResult = try await withAdminClient(connection) { client in
                 try await client.call(.caExportPath, returning: CAExportPathResult.self)
             }
-            let pem: String
             do {
-                pem = try String(contentsOfFile: pathResult.path, encoding: .utf8)
-            } catch {
-                FileHandle.standardError.write(Data("read CA failed: \(error)\n".utf8))
-                throw ExitCode(IrisExitCode.ioError)
-            }
-            do {
-                let cert = try CATrustStore.makeCertificate(fromPEM: pem)
-                try CATrustStore.install(cert)
+                try CATrustStore.install(pemPath: pathResult.path)
             } catch {
                 FileHandle.standardError.write(Data("install failed: \(error)\n".utf8))
                 throw ExitCode(IrisExitCode.ioError)
@@ -151,16 +143,8 @@ struct CACommand: AsyncParsableCommand {
             let pathResult = try await withAdminClient(connection) { client in
                 try await client.call(.caExportPath, returning: CAExportPathResult.self)
             }
-            let pem: String
             do {
-                pem = try String(contentsOfFile: pathResult.path, encoding: .utf8)
-            } catch {
-                FileHandle.standardError.write(Data("read CA failed: \(error)\n".utf8))
-                throw ExitCode(IrisExitCode.ioError)
-            }
-            do {
-                let cert = try CATrustStore.makeCertificate(fromPEM: pem)
-                try CATrustStore.uninstall(cert)
+                try CATrustStore.uninstall(pemPath: pathResult.path)
             } catch {
                 FileHandle.standardError.write(Data("uninstall failed: \(error)\n".utf8))
                 throw ExitCode(IrisExitCode.ioError)

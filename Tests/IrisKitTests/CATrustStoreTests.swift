@@ -1,28 +1,26 @@
-import Foundation
-import Security
 import XCTest
 
 @testable import IrisKit
 
 final class CATrustStoreTests: XCTestCase {
-    /// The SecCertificate we'd hand to the trust store must be byte-identical
-    /// to the CA we generated — otherwise `install` would trust the wrong cert
-    /// (or none), silently breaking MITM verification.
-    func testMakeCertificateFromValidPEMRoundTripsDER() async throws {
-        let manager = CAManager(keyStore: InMemoryCAKeyStore())
-        let ca = try await manager.ensureCA()
-
-        let cert = try CATrustStore.makeCertificate(fromPEM: ca.pem)
-
-        let der = SecCertificateCopyData(cert) as Data
-        XCTAssertEqual(der, ca.derBytes)
+    /// The `/usr/bin/security` flags are load-bearing: live testing on macOS 26
+    /// showed that an `add-trusted-cert` invocation WITHOUT `-k <login keychain>`
+    /// returns success but silently fails to persist the trust setting, and that
+    /// `-r trustRoot` is what marks the cert an always-trusted root. Lock the
+    /// exact vector so a refactor can't drop a flag and break the install.
+    func testAddTrustedCertArgumentsAreLoadBearing() {
+        let args = CATrustStore.addTrustedCertArguments(
+            pemPath: "/tmp/ca.pem",
+            loginKeychainPath: "/keys/login.keychain-db"
+        )
+        XCTAssertEqual(
+            args,
+            ["add-trusted-cert", "-r", "trustRoot", "-k", "/keys/login.keychain-db", "/tmp/ca.pem"]
+        )
     }
 
-    func testMakeCertificateFromGarbageThrows() {
-        XCTAssertThrowsError(try CATrustStore.makeCertificate(fromPEM: "not a pem"))
-    }
-
-    func testMakeCertificateFromEmptyThrows() {
-        XCTAssertThrowsError(try CATrustStore.makeCertificate(fromPEM: ""))
+    func testRemoveTrustedCertArguments() {
+        let args = CATrustStore.removeTrustedCertArguments(pemPath: "/tmp/ca.pem")
+        XCTAssertEqual(args, ["remove-trusted-cert", "/tmp/ca.pem"])
     }
 }
