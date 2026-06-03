@@ -115,7 +115,7 @@ struct CACommand: AsyncParsableCommand {
             do {
                 try CATrustStore.install(pemPath: pathResult.path)
             } catch {
-                FileHandle.standardError.write(Data("install failed: \(error)\n".utf8))
+                try? FileHandle.standardError.write(contentsOf: Data("install failed: \(error)\n".utf8))
                 throw ExitCode(IrisExitCode.ioError)
             }
             try Output.ack(message: "CA installed in user trust store", json: json)
@@ -146,7 +146,7 @@ struct CACommand: AsyncParsableCommand {
             do {
                 try CATrustStore.uninstall(pemPath: pathResult.path)
             } catch {
-                FileHandle.standardError.write(Data("uninstall failed: \(error)\n".utf8))
+                try? FileHandle.standardError.write(contentsOf: Data("uninstall failed: \(error)\n".utf8))
                 throw ExitCode(IrisExitCode.ioError)
             }
             try Output.ack(message: "CA removed from user trust store", json: json)

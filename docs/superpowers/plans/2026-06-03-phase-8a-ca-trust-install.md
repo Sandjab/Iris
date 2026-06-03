@@ -2,13 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `iris ca install` / `iris ca uninstall` that add/remove the IRIS root CA to/from the current user's trust settings (`.user` domain) via the native `SecTrustSettings*` API.
+> **⚠️ Plan révisé après pivot d'implémentation (2026-06-03).** L'approche native `SecTrustSettings*` (Goal d'origine + blocs de code des Tasks 1-2 ci-dessous) a été **abandonnée en cours d'exécution** : elle rend `errSecInternalComponent` (-2070) depuis le binaire CLI non Developer-ID-signé. L'implémentation finale shell-out vers `/usr/bin/security add-trusted-cert` — cf. design §3 révisé et la source (`CATrustStore.addTrustedCertArguments`/`install(pemPath:)`). Les Tasks 1-2 sont conservées comme plan pré-pivot ; se référer au design et au code pour la version réelle.
 
-**Architecture:** Extend the existing read-only `CATrustStore` enum with a pure `makeCertificate(fromPEM:)` seam (CI-testable) plus two effectful `install`/`uninstall` calls (GUI-auth, smoke-only). Add two ArgumentParser subcommands that reuse the existing `ca.is_trusted` + `ca.export_path` RPCs — no protocol change. The daemon never installs; only the CLI (and later the app) triggers the GUI auth in the user session.
+**Goal:** Add `iris ca install` / `iris ca uninstall` that add/remove the IRIS root CA to/from the current user's trust settings (`.user` domain) by shelling out to `/usr/bin/security` (révisé ; l'API native `SecTrustSettings*` initialement prévue rend -2070 depuis un binaire adhoc).
 
-**Tech Stack:** Swift 5.9+, Security.framework (`SecTrustSettingsSetTrustSettings`/`SecTrustSettingsRemoveTrustSettings`/`SecCertificateCreateWithData`), SwiftASN1 (`PEMDocument`), swift-argument-parser, XCTest.
+**Architecture:** Extend the existing read-only `CATrustStore` enum with pure `addTrustedCertArguments`/`removeTrustedCertArguments` seams (CI-testable) plus two effectful `install(pemPath:)`/`uninstall(pemPath:)` calls that spawn `/usr/bin/security` (GUI-auth, smoke-only). Add two ArgumentParser subcommands that reuse the existing `ca.is_trusted` + `ca.export_path` RPCs — no protocol change. The daemon never installs; only the CLI (and later the app) triggers the GUI auth in the user session.
 
-**Design ref:** `docs/superpowers/specs/2026-06-03-phase-8a-ca-trust-install-design.md`
+**Tech Stack:** Swift 5.9+, Foundation (`Process` → `/usr/bin/security add-trusted-cert`/`remove-trusted-cert`), Security.framework (`SecTrustSettingsCopyCertificates` pour le read path), swift-argument-parser, XCTest.
+
+**Design ref:** `docs/superpowers/specs/2026-06-03-phase-8a-ca-trust-install-design.md` (§3 documente le pivot)
 
 ---
 

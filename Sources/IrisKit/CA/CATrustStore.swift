@@ -92,7 +92,7 @@ public enum CATrustStore {
         // Drain stderr to EOF (i.e. until `security` exits) BEFORE waiting, so a
         // chatty error can't fill the pipe buffer and deadlock. This also blocks
         // cleanly while `security` shows its auth panel.
-        let stderrData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = (try? errorPipe.fileHandleForReading.readToEnd()) ?? Data()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             let message = String(data: stderrData, encoding: .utf8) ?? ""
