@@ -392,19 +392,26 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
 
             // Best-effort usage bookkeeping: bump `usageCount` / `lastUsedAt` for
             // each substituted secret so `iris secret list` reflects real activity
-            // (stale vs unexpectedly-hot secrets). A telemetry write must NEVER
-            // fail the request — substitution already happened — so errors are
-            // logged (name only, never the value, CLAUDE.md §6.1) and swallowed.
-            // Under concurrency the read-modify-write may drop an increment; an
-            // approximate counter is acceptable for this signal.
-            for name in payload.substituted {
-                do {
-                    _ = try await secretStore.recordUsage(of: name, at: Date())
-                } catch {
-                    logger.warning(
-                        "Failed to record secret usage",
-                        metadata: ["secret": "\(name)", "error": "\(error)"]
-                    )
+            // (stale vs unexpectedly-hot secrets). Detached so a slow Keychain
+            // write never delays the upstream forward (CLAUDE.md §10: no blocking
+            // I/O in the proxy). A telemetry write must NEVER fail the request, so
+            // errors are logged (name only, never the value, CLAUDE.md §6.1) and
+            // swallowed. Under concurrency the read-modify-write may drop an
+            // increment; an approximate counter is acceptable for this signal.
+            if !payload.substituted.isEmpty {
+                let substitutedNames = payload.substituted
+                Task {
+                    let now = Date()
+                    for name in substitutedNames {
+                        do {
+                            _ = try await secretStore.recordUsage(of: name, at: now)
+                        } catch {
+                            logger.warning(
+                                "Failed to record secret usage",
+                                metadata: ["secret": "\(name)", "error": "\(error)"]
+                            )
+                        }
+                    }
                 }
             }
 

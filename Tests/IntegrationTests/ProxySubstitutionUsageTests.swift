@@ -106,7 +106,14 @@ final class ProxySubstitutionUsageTests: XCTestCase {
         )
 
         // The behavior under test: usage recorded after a successful substitution.
-        let after = try await secretStore.secret(named: secretName)
+        // recordUsage runs in a detached Task so it never blocks the upstream
+        // forward, so poll (bounded) until it lands instead of asserting eagerly.
+        var after = try await secretStore.secret(named: secretName)
+        let deadline = Date().addingTimeInterval(2.0)
+        while after.usageCount == 0 && Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)  // 10 ms
+            after = try await secretStore.secret(named: secretName)
+        }
         XCTAssertEqual(after.usageCount, 1, "usageCount must increment on a successful substitution")
         XCTAssertNotNil(after.lastUsedAt, "lastUsedAt must be set on a successful substitution")
     }
