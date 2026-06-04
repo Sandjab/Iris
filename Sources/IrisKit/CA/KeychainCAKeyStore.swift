@@ -5,9 +5,12 @@ import Security
 /// Persists the CA private key in the Keychain as a `kSecClassGenericPassword`
 /// containing the raw 32-byte P256 private key representation.
 ///
-/// Phase 1 uses generic-password storage without ACL — Phase 8 migrates to
-/// `kSecClassKey` with `SecAccessCreateWithOwnerAndACL` bound to the signed
-/// `irisd` binary (CLAUDE.md §6 invariant).
+/// Phase 8b: the create path attaches a per-binary `SecAccess` (`KeychainACL`)
+/// granting silent access only to the signed `irisd` binary (CLAUDE.md §6.2).
+/// `kSecAttrAccess` replaces `kSecAttrAccessible` (mutually exclusive). NOTE: the
+/// key is still loaded as raw bytes to sign leaf certs — SPECS §11.2 ("never
+/// exported to memory", i.e. a non-extractable `SecKey`) is a separate hardening
+/// card, out of scope for 8b.
 public actor KeychainCAKeyStore: CAKeyStore {
     private let service: String
     private let account: String
@@ -65,12 +68,15 @@ public actor KeychainCAKeyStore: CAKeyStore {
             throw CAError.keychainStatus(updateStatus)
         }
 
+        let access = try KeychainACL.selfOnlyAccess(
+            description: KeychainACL.accessDescription(service: service, account: account)
+        )
         let addAttrs: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecValueData as String: raw,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecAttrAccess as String: access,
         ]
         let addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
         guard addStatus == errSecSuccess else {
