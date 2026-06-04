@@ -56,6 +56,7 @@ public final class ProxyServer: @unchecked Sendable {
     public let configuration: Configuration
     public let logger: Logger
     public let eventRing: EventRing
+    let secretStore: any SecretStore
     let placeholderEngine: PlaceholderEngine
     let exfilRuleEngine: ExfilRuleEngine
     let leafCertCache: LeafCertCache
@@ -78,6 +79,7 @@ public final class ProxyServer: @unchecked Sendable {
         self.configuration = configuration
         self.logger = logger
         self.eventRing = EventRing()
+        self.secretStore = secretStore
         self.placeholderEngine = PlaceholderEngine(secretStore: secretStore)
         let policyBox = NIOLockedValueBox<SecurityPolicySnapshot>(
             SecurityPolicySnapshot(
