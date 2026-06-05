@@ -97,6 +97,25 @@ public struct AdminDispatcher: Sendable {
                     error: JSONRPCError(code: JSONRPCError.internalError.code, message: msg)
                 )
             }
+        } catch let error as ConfigError {
+            // A candidate that parses but fails Config.validate() (e.g. config.set
+            // security.max_substitutions_per_minute 0) → invalid params, not internal.
+            if case .invalidValue(let field, let value) = error {
+                return .failure(
+                    id: request.id,
+                    error: JSONRPCError(
+                        code: JSONRPCError.invalidParams.code,
+                        message: "invalid value '\(value)' for '\(field)'"
+                    )
+                )
+            }
+            return .failure(
+                id: request.id,
+                error: JSONRPCError(
+                    code: JSONRPCError.internalError.code,
+                    message: error.errorDescription ?? "\(error)"
+                )
+            )
         } catch {
             logger.error(
                 "admin call unexpected error",
@@ -195,6 +214,13 @@ public struct AdminDispatcher: Sendable {
 
         case .configGet:
             return try JSONValue.encoding(await configStore.current)
+
+        case .configSet:
+            let payload = try Self.decode(ConfigSetParams.self, from: params)
+            let result = try await configStore.applyUpdates(payload.updates)
+            // Re-apply hot security fields to the proxy if any landed.
+            if !result.applied.isEmpty { await onSecurityChanged() }
+            return try JSONValue.encoding(result)
 
         case .ruleAdd:
             let payload = try Self.decode(RuleHostParams.self, from: params)

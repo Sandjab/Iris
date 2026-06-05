@@ -76,6 +76,144 @@ public actor ConfigStore {
         return true
     }
 
+    // MARK: - Scalar updates (back `config.set`)
+
+    /// Hot fields take effect at runtime; structural fields persist but require a
+    /// restart. Hosts are NOT settable here (use addHost/deleteHost).
+    private static let hotKeys: Set<String> = [
+        "security.on_exfil_attempt", "security.max_substitutions_per_minute", "backups.max_count",
+    ]
+    private static let structuralKeys: Set<String> = [
+        "broker.listen", "broker.events_listen", "broker.admin_socket",
+        "broker.event_retention_days", "broker.event_ring_size", "broker.log_level",
+    ]
+
+    /// Applies a batch of scalar updates. Builds a candidate `Config`, validates and
+    /// persists it as a whole (atomic: an invalid update mutates nothing). Returns the
+    /// keys applied hot vs those needing a restart. Unknown/invalid keys throw before
+    /// any write.
+    public func applyUpdates(_ updates: [ConfigSetParams.Update]) throws -> ConfigSetResult {
+        var broker = config.broker
+        var security = config.security
+        var backups = config.backups
+        var applied: [String] = []
+        var requiresRestart: [String] = []
+
+        for u in updates {
+            switch u.key {
+            case "security.on_exfil_attempt":
+                guard let p = ExfilAttemptPolicy(rawValue: u.value) else {
+                    throw Error.invalidValue(field: u.key, value: u.value)
+                }
+                security = SecurityConfig(
+                    onExfilAttempt: p,
+                    maxSubstitutionsPerMinute: security.maxSubstitutionsPerMinute
+                )
+            case "security.max_substitutions_per_minute":
+                guard let n = Int(u.value) else { throw Error.invalidValue(field: u.key, value: u.value) }
+                security = SecurityConfig(
+                    onExfilAttempt: security.onExfilAttempt,
+                    maxSubstitutionsPerMinute: n
+                )
+            case "backups.max_count":
+                guard let n = Int(u.value) else { throw Error.invalidValue(field: u.key, value: u.value) }
+                backups = BackupsConfig(maxCount: n)
+            case "broker.log_level":
+                guard let l = LogLevel(rawValue: u.value) else {
+                    throw Error.invalidValue(field: u.key, value: u.value)
+                }
+                broker = Self.broker(broker, settingLogLevel: l)
+            case "broker.listen":
+                broker = Self.broker(broker, settingListen: u.value)
+            case "broker.events_listen":
+                broker = Self.broker(broker, settingEventsListen: u.value)
+            case "broker.admin_socket":
+                broker = Self.broker(broker, settingAdminSocket: u.value)
+            case "broker.event_retention_days":
+                guard let n = Int(u.value) else { throw Error.invalidValue(field: u.key, value: u.value) }
+                broker = Self.broker(broker, settingRetentionDays: n)
+            case "broker.event_ring_size":
+                guard let n = Int(u.value) else { throw Error.invalidValue(field: u.key, value: u.value) }
+                broker = Self.broker(broker, settingRingSize: n)
+            default:
+                throw Error.unknownKey(u.key)
+            }
+            if Self.hotKeys.contains(u.key) { applied.append(u.key) } else { requiresRestart.append(u.key) }
+        }
+
+        let candidate = Config(
+            version: config.version,
+            broker: broker,
+            security: security,
+            backups: backups,
+            hosts: config.hosts
+        )
+        try persist(candidate)  // validates, backs up, writes atomically
+        return ConfigSetResult(applied: applied, requiresRestart: requiresRestart)
+    }
+
+    // BrokerConfig has immutable lets; these helpers rebuild it field-by-field.
+    private static func broker(_ b: BrokerConfig, settingLogLevel v: LogLevel) -> BrokerConfig {
+        BrokerConfig(
+            listen: b.listen,
+            eventsListen: b.eventsListen,
+            adminSocket: b.adminSocket,
+            logLevel: v,
+            eventRetentionDays: b.eventRetentionDays,
+            eventRingSize: b.eventRingSize
+        )
+    }
+    private static func broker(_ b: BrokerConfig, settingListen v: String) -> BrokerConfig {
+        BrokerConfig(
+            listen: v,
+            eventsListen: b.eventsListen,
+            adminSocket: b.adminSocket,
+            logLevel: b.logLevel,
+            eventRetentionDays: b.eventRetentionDays,
+            eventRingSize: b.eventRingSize
+        )
+    }
+    private static func broker(_ b: BrokerConfig, settingEventsListen v: String) -> BrokerConfig {
+        BrokerConfig(
+            listen: b.listen,
+            eventsListen: v,
+            adminSocket: b.adminSocket,
+            logLevel: b.logLevel,
+            eventRetentionDays: b.eventRetentionDays,
+            eventRingSize: b.eventRingSize
+        )
+    }
+    private static func broker(_ b: BrokerConfig, settingAdminSocket v: String) -> BrokerConfig {
+        BrokerConfig(
+            listen: b.listen,
+            eventsListen: b.eventsListen,
+            adminSocket: v,
+            logLevel: b.logLevel,
+            eventRetentionDays: b.eventRetentionDays,
+            eventRingSize: b.eventRingSize
+        )
+    }
+    private static func broker(_ b: BrokerConfig, settingRetentionDays v: Int) -> BrokerConfig {
+        BrokerConfig(
+            listen: b.listen,
+            eventsListen: b.eventsListen,
+            adminSocket: b.adminSocket,
+            logLevel: b.logLevel,
+            eventRetentionDays: v,
+            eventRingSize: b.eventRingSize
+        )
+    }
+    private static func broker(_ b: BrokerConfig, settingRingSize v: Int) -> BrokerConfig {
+        BrokerConfig(
+            listen: b.listen,
+            eventsListen: b.eventsListen,
+            adminSocket: b.adminSocket,
+            logLevel: b.logLevel,
+            eventRetentionDays: b.eventRetentionDays,
+            eventRingSize: v
+        )
+    }
+
     // MARK: - Reload (manual file edit)
 
     /// Re-read the file from disk and adopt it. Returns the new config. A parse

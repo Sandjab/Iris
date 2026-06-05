@@ -148,4 +148,48 @@ final class ConfigStoreTests: XCTestCase {
         let files = (try? FileManager.default.contentsOfDirectory(atPath: backupsDir.path)) ?? []
         XCTAssertTrue(files.contains { $0.hasPrefix("config-corrupted-") })
     }
+
+    // MARK: - applyUpdates (config.set)
+
+    func testApplyUpdatesHotFieldPersistsAndReportsApplied() async throws {
+        let store = try ConfigStore(path: path, logger: logger)
+        let result = try await store.applyUpdates([
+            .init(key: "security.on_exfil_attempt", value: "block_only"),
+            .init(key: "security.max_substitutions_per_minute", value: "30"),
+        ])
+        XCTAssertEqual(
+            Set(result.applied),
+            ["security.on_exfil_attempt", "security.max_substitutions_per_minute"]
+        )
+        XCTAssertEqual(result.requiresRestart, [])
+        let cfg = await store.current
+        XCTAssertEqual(cfg.security.onExfilAttempt, .blockOnly)
+        XCTAssertEqual(cfg.security.maxSubstitutionsPerMinute, 30)
+    }
+
+    func testApplyUpdatesStructuralFieldReportsRequiresRestart() async throws {
+        let store = try ConfigStore(path: path, logger: logger)
+        let result = try await store.applyUpdates([
+            .init(key: "broker.listen", value: "127.0.0.1:9999")
+        ])
+        XCTAssertEqual(result.requiresRestart, ["broker.listen"])
+        XCTAssertEqual(result.applied, [])
+        let cfg = await store.current
+        XCTAssertEqual(cfg.broker.listen, "127.0.0.1:9999")  // persisted regardless
+    }
+
+    func testApplyUpdatesUnknownKeyThrows() async throws {
+        let store = try ConfigStore(path: path, logger: logger)
+        await assertThrowsAsync(try await store.applyUpdates([.init(key: "broker.nope", value: "x")]))
+    }
+
+    func testApplyUpdatesInvalidValueThrowsAndLeavesStateIntact() async throws {
+        let store = try ConfigStore(path: path, logger: logger)
+        let before = await store.current.security.maxSubstitutionsPerMinute
+        await assertThrowsAsync(
+            try await store.applyUpdates([.init(key: "security.max_substitutions_per_minute", value: "0")])
+        )
+        let after = await store.current.security.maxSubstitutionsPerMinute
+        XCTAssertEqual(before, after, "rejected update must not mutate state")
+    }
 }
