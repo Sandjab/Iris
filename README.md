@@ -1,4 +1,13 @@
-# IRIS
+<p align="center">
+  <img src="assets/banner.png" alt="IRIS — Secrets Are Safe." width="720">
+</p>
+
+<p align="center">
+  <a href="https://github.com/Sandjab/Iris/actions/workflows/ci.yml"><img src="https://github.com/Sandjab/Iris/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%2013%2B-0E2A47" alt="macOS 13+">
+  <img src="https://img.shields.io/badge/Swift-5.9%2B-F05138" alt="Swift 5.9+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
+</p>
 
 > **Interception · Resolution · Injection · Substitution**
 > *Secrets Are Safe.*
