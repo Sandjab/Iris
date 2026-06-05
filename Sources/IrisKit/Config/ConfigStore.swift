@@ -312,7 +312,10 @@ public actor ConfigStore {
         do {
             try FileManager.default.createDirectory(at: backupsDir, withIntermediateDirectories: true)
             let stamp = Self.timestampFormatter.string(from: Date())
-            let dest = backupsDir.appendingPathComponent("config-\(stamp).json")
+            // A short suffix guarantees uniqueness if two saves land in the same
+            // millisecond; the timestamp prefix still drives chronological sort.
+            let suffix = UUID().uuidString.prefix(8)
+            let dest = backupsDir.appendingPathComponent("config-\(stamp)-\(suffix).json")
             let data = try Data(contentsOf: path)
             try data.write(to: dest, options: [.atomic])
             try FileManager.default.setAttributes(
@@ -355,7 +358,15 @@ public actor ConfigStore {
                 [.posixPermissions: NSNumber(value: 0o600)],
                 ofItemAtPath: tmp.path
             )
-            _ = try FileManager.default.replaceItemAt(path, withItemAt: tmp)
+            // `replaceItemAt` requires an existing destination on some macOS
+            // versions (fails NSFileReadNoSuchFileError otherwise) — the seed
+            // path has none yet, so move into place when the file is absent.
+            // Both paths preserve the 0600 already set on `tmp`.
+            if FileManager.default.fileExists(atPath: path.path) {
+                _ = try FileManager.default.replaceItemAt(path, withItemAt: tmp)
+            } else {
+                try FileManager.default.moveItem(at: tmp, to: path)
+            }
         } catch {
             try? FileManager.default.removeItem(at: tmp)
             throw Error.ioError("write failed: \(error)")
