@@ -21,6 +21,7 @@ public enum AdminMethod: String, Codable, Sendable, CaseIterable {
     case caIsTrusted = "ca.is_trusted"
     case configGet = "config.get"
     case configSet = "config.set"
+    case configPath = "config.path"
     case ruleAdd = "rule.add"
     case ruleList = "rule.list"
     case ruleDelete = "rule.delete"
@@ -229,6 +230,11 @@ public struct ConfigSetResult: Codable, Sendable, Equatable {
         self.applied = applied
         self.requiresRestart = requiresRestart
     }
+}
+
+public struct ConfigPathResult: Codable, Sendable, Equatable {
+    public let path: String
+    public init(path: String) { self.path = path }
 }
 
 public struct EventsClearResult: Codable, Sendable, Equatable {

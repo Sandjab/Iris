@@ -215,6 +215,9 @@ public struct AdminDispatcher: Sendable {
         case .configGet:
             return try JSONValue.encoding(await configStore.current)
 
+        case .configPath:
+            return try JSONValue.encoding(ConfigPathResult(path: await configStore.filePath))
+
         case .configSet:
             let payload = try Self.decode(ConfigSetParams.self, from: params)
             let result = try await configStore.applyUpdates(payload.updates)
