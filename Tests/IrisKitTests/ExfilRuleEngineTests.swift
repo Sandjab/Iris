@@ -120,6 +120,20 @@ final class ExfilRuleEngineTests: XCTestCase {
         }
     }
 
+    func testR2CanonicalHeaderMatchIsCaseInsensitive() async throws {
+        // HTTP header names are case-insensitive (RFC 7230). A known secret in a
+        // mixed-case canonical auth header must be allowed, not blocked by R2.
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [
+            PlaceholderHit(name: "foo", location: .header(name: "X-API-Key"), snippet: "{{kc:foo}}")
+        ]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .allow(let resolvable) = decision else {
+            return XCTFail("mixed-case canonical header must be allowed")
+        }
+        XCTAssertEqual(resolvable.map(\.name), ["foo"])
+    }
+
     func testR2HitInURLPathBlocks() async throws {
         let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
         let hits = [PlaceholderHit(name: "foo", location: .urlPath, snippet: "/{{kc:foo}}")]
@@ -152,13 +166,16 @@ final class ExfilRuleEngineTests: XCTestCase {
         XCTAssertEqual(alert.rule, .nonCanonicalLocation)
     }
 
-    func testR2BodyOnPOSTAllowed() async throws {
+    func testR2BodyOnPOSTBlocks() async throws {
+        // Headers-only : un secret connu n'importe ou dans un body est un signal
+        // d'exfil (forwarde litteral + alerte), jamais substitue.
         let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
         let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
         let decision = try await ev.evaluate(hits: hits, context: ctx(method: "POST"))
-        guard case .allow = decision else {
-            return XCTFail("R2 should not fire on POST body")
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("known secret in POST body must block (body non-canonical)")
         }
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
     }
 
     // MARK: R3
@@ -195,37 +212,20 @@ final class ExfilRuleEngineTests: XCTestCase {
         }
     }
 
-    func testR3CountsUnknownNames() async throws {
-        // 1 known + 1 unknown = 2 distinct names → R3 fires.
+    func testR3IgnoresUnknownNames() async throws {
+        // R3 ne compte que les secrets CONNUS (un env-dump de vrais credentials).
+        // Un nom inconnu ne resout jamais -> ne peut fuiter -> ne doit pas bloquer.
+        // C'est le fix du faux positif de la doc {{kc:NAME}}.
         let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
         let hits = [
             PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}"),
             PlaceholderHit(name: "ghost", location: .header(name: "x-api-key"), snippet: "{{kc:ghost}}"),
         ]
         let decision = try await ev.evaluate(hits: hits, context: ctx())
-        guard case .block(let alert, _) = decision else {
-            return XCTFail("expected block")
+        guard case .allow(let resolvable) = decision else {
+            return XCTFail("1 known + 1 unknown -> R3 must not fire (known-only)")
         }
-        XCTAssertEqual(alert.rule, .multipleSecrets)
-        XCTAssertEqual(alert.secretName, "foo")  // alphabetical winner over { foo, ghost }
-        XCTAssertEqual(alert.detectedAt, .header)
-    }
-
-    func testR3TiebreakWinnerCanBeUnknownName() async throws {
-        // Known "zeta" and unknown "alpha" — alphabetical winner is the unknown.
-        // Asserts the triggering hit lookup uses original `hits`, not `knownHits`.
-        let ev = try await makeEvaluator(secrets: [("zeta", ["api.anthropic.com"])])
-        let hits = [
-            PlaceholderHit(name: "zeta", location: .header(name: "authorization"), snippet: "{{kc:zeta}}"),
-            PlaceholderHit(name: "alpha", location: .queryString, snippet: "?x={{kc:alpha}}"),
-        ]
-        let decision = try await ev.evaluate(hits: hits, context: ctx())
-        guard case .block(let alert, _) = decision else {
-            return XCTFail("expected block")
-        }
-        XCTAssertEqual(alert.rule, .multipleSecrets)
-        XCTAssertEqual(alert.secretName, "alpha")
-        XCTAssertEqual(alert.detectedAt, .queryString)
+        XCTAssertEqual(resolvable.map(\.name), ["foo"])
     }
 
     // MARK: R4
@@ -245,8 +245,8 @@ final class ExfilRuleEngineTests: XCTestCase {
         guard case .block(let alert, let allHits) = decision else {
             return XCTFail("expected block")
         }
-        XCTAssertEqual(alert.rule, .suspiciousContentType)
-        XCTAssertEqual(alert.severity, .medium)
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
+        XCTAssertEqual(alert.severity, .high)
         XCTAssertEqual(alert.secretName, "foo")
         XCTAssertEqual(alert.detectedAt, .body)
         XCTAssertEqual(allHits.count, 1)
@@ -267,7 +267,7 @@ final class ExfilRuleEngineTests: XCTestCase {
         guard case .block(let alert, _) = decision else {
             return XCTFail("expected block")
         }
-        XCTAssertEqual(alert.rule, .suspiciousContentType)
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
     }
 
     func testR4MultipartToBlobBlocks() async throws {
@@ -285,10 +285,13 @@ final class ExfilRuleEngineTests: XCTestCase {
         guard case .block(let alert, _) = decision else {
             return XCTFail("expected block")
         }
-        XCTAssertEqual(alert.rule, .suspiciousContentType)
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
     }
 
-    func testR4JSONAPIPathAllowed() async throws {
+    func testKnownSecretInJSONBodyBlocks() async throws {
+        // A2 : un secret connu dans un body JSON vers son propre host autorise
+        // (ex. un PAT faufile dans un commentaire GitHub) etait silencieusement
+        // substitue. R2 (body non-canonique) le bloque desormais.
         let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
         let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
         let decision = try await ev.evaluate(
@@ -300,9 +303,10 @@ final class ExfilRuleEngineTests: XCTestCase {
                 contentType: "application/json"
             )
         )
-        guard case .allow = decision else {
-            return XCTFail("JSON API should not fire R4")
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("known secret in JSON body must block")
         }
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
     }
 
     func testR4ContentTypeWithCharsetParameter() async throws {
@@ -320,7 +324,7 @@ final class ExfilRuleEngineTests: XCTestCase {
         guard case .block(let alert, _) = decision else {
             return XCTFail("expected block")
         }
-        XCTAssertEqual(alert.rule, .suspiciousContentType)
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
     }
 
     func testR4DoesNotFireWithoutBodyHit() async throws {
@@ -342,24 +346,22 @@ final class ExfilRuleEngineTests: XCTestCase {
         }
     }
 
-    func testR4NoContentTypeDoesNotFire() async throws {
+    func testKnownSecretInBodyNoContentTypeBlocks() async throws {
         let ev = try await makeEvaluator(secrets: [("foo", ["api.github.com"])])
         let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
         let decision = try await ev.evaluate(
             hits: hits,
-            context: ctx(
-                host: "api.github.com",
-                method: "POST",
-                path: "/issues",
-                contentType: nil
-            )
+            context: ctx(host: "api.github.com", method: "POST", path: "/issues", contentType: nil)
         )
-        guard case .allow = decision else {
-            return XCTFail("missing content-type → R4 should not fire")
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("known secret in body must block regardless of content-type")
         }
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
     }
 
-    func testR4SuspiciousCTNonSuspiciousPathAllowed() async throws {
+    func testR4SuspiciousCTNonSuspiciousPathBlocksViaR2() async throws {
+        // Post-Task1 : le body est desormais non-canonique pour tout secret connu.
+        // R2 preempte R4 : meme si le CT seul n'est pas suffisant pour R4, R2 bloque.
         let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
         let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
         let decision = try await ev.evaluate(
@@ -371,12 +373,15 @@ final class ExfilRuleEngineTests: XCTestCase {
                 contentType: "text/plain"
             )
         )
-        guard case .allow = decision else {
-            return XCTFail("suspicious CT alone shouldn't fire R4")
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("known secret in body must block via R2 (body non-canonical)")
         }
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
     }
 
-    func testR4NonSuspiciousCTSuspiciousPathAllowed() async throws {
+    func testR4NonSuspiciousCTSuspiciousPathBlocksViaR2() async throws {
+        // Post-Task1 : le body est desormais non-canonique pour tout secret connu.
+        // R2 preempte R4 : meme si le path seul n'est pas suffisant pour R4, R2 bloque.
         let ev = try await makeEvaluator(secrets: [("foo", ["api.github.com"])])
         let hits = [PlaceholderHit(name: "foo", location: .body, snippet: "{{kc:foo}}")]
         let decision = try await ev.evaluate(
@@ -388,8 +393,24 @@ final class ExfilRuleEngineTests: XCTestCase {
                 contentType: "application/json"
             )
         )
+        guard case .block(let alert, _) = decision else {
+            return XCTFail("known secret in body must block via R2 (body non-canonical)")
+        }
+        XCTAssertEqual(alert.rule, .nonCanonicalLocation)
+    }
+
+    func testR4IgnoresUnknownBodyName() async throws {
+        // R4 cle sur les secrets connus uniquement. Un placeholder inconnu dans
+        // un body suspect ne doit pas bloquer (il ne resout jamais). R2 ne le
+        // bloque pas non plus (R2 cle sur les connus) -> requete autorisee.
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.github.com"])])
+        let hits = [PlaceholderHit(name: "ghost", location: .body, snippet: "{{kc:ghost}}")]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(host: "api.github.com", method: "POST", path: "/issues", contentType: "text/plain")
+        )
         guard case .allow = decision else {
-            return XCTFail("suspicious path alone shouldn't fire R4")
+            return XCTFail("unknown body name must not fire R4 (known-only)")
         }
     }
 

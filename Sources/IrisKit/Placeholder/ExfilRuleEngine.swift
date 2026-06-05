@@ -1,4 +1,5 @@
 import Foundation
+import Logging
 
 public struct RequestContext: Sendable {
     public let host: String
@@ -42,16 +43,25 @@ struct SlidingMinuteCounter: Sendable {
 public actor ExfilRuleEngine {
     private let secretStore: any SecretStore
     private let maxSubstitutionsPerMinuteProvider: @Sendable () -> Int
+    private let logger: Logger
     private var volumeCounters: [String: SlidingMinuteCounter] = [:]
 
     /// Initialise with a provider closure so the threshold can be hot-reloaded
     /// without recreating the engine. The closure is called on every volume check.
+    ///
+    /// `logger` defaults to a no-op logger (it inherits the global
+    /// `LoggingSystem` bootstrap, which defaults to `.info`; at `.info` the
+    /// `debug` inventory line is silent), so test sites that do not care about
+    /// diagnostics are unaffected. The proxy passes its own logger so the
+    /// per-request hit inventory (a `debug` line) surfaces under `--log-level debug`.
     public init(
         secretStore: any SecretStore,
-        maxSubstitutionsPerMinuteProvider: @Sendable @escaping () -> Int
+        maxSubstitutionsPerMinuteProvider: @Sendable @escaping () -> Int,
+        logger: Logger = Logger(label: "io.iris.exfil")
     ) {
         self.secretStore = secretStore
         self.maxSubstitutionsPerMinuteProvider = maxSubstitutionsPerMinuteProvider
+        self.logger = logger
     }
 
     public func recordSubstitution(secretNames: [String]) {
@@ -105,14 +115,38 @@ public actor ExfilRuleEngine {
         // Phase 6.2.x — quarantined secrets are inert: removed from the working
         // hit set entirely so they are neither substituted nor scored by any
         // exfil rule. No value is ever substituted for a quarantined secret, so
-        // nothing can leak. Unknown names (no metadata) stay so R3 typo
-        // detection is preserved.
+        // nothing can leak. Unknown names (no metadata) remain in effectiveHits
+        // so they surface in the diagnostic inventory; no rule acts on them —
+        // R1–R5 all key on knownHits.
         let effectiveHits = hits.filter { metadataByName[$0.name]?.quarantined != true }
 
         var knownHits: [PlaceholderHit] = []
         for hit in effectiveHits where metadataByName[hit.name] != nil {
             knownHits.append(hit)
         }
+
+        // Diagnostic inventory (debug-gated, §6.1: names/locations/counts only,
+        // never the substituted value nor the snippet). Lets an operator running
+        // `--log-level debug` see exactly which placeholders a tool emits and
+        // whether each is known/unknown — the data needed to reason about R3
+        // over-blocking without exposing any secret.
+        let inventory =
+            effectiveHits
+            .map {
+                "\($0.name)@\(Self.locationDescription($0.location)):\(metadataByName[$0.name] != nil ? "known" : "unknown")"
+            }
+            .joined(separator: ", ")
+        logger.debug(
+            "Exfil hit inventory",
+            metadata: [
+                "host": "\(normalizedHost)",
+                "method": "\(context.method)",
+                "path": "\(context.path)",
+                "distinctNames": "\(Set(effectiveHits.map(\.name)).count)",
+                "distinctKnownNames": "\(Set(knownHits.map(\.name)).count)",
+                "hits": "\(inventory)",
+            ]
+        )
 
         // R1 — host mismatch (high). Block whole request if any known hit's
         // host scope rejects this destination.
@@ -133,7 +167,7 @@ public actor ExfilRuleEngine {
 
         // R2 — non-canonical location (high)
         for hit in knownHits {
-            if Self.isNonCanonicalLocation(hit: hit, method: context.method) {
+            if Self.isNonCanonicalLocation(hit: hit) {
                 let alert = Alert(
                     severity: .high,
                     rule: .nonCanonicalLocation,
@@ -145,15 +179,16 @@ public actor ExfilRuleEngine {
             }
         }
 
-        // R3 — multiple distinct secrets (medium). Counts all hits, including
-        // unknown names (design §7.1): mixed known + typo is exactly the pattern
-        // we want to flag.
-        let distinctNames = Set(effectiveHits.map(\.name))
+        // R3 — multiple distinct KNOWN secrets (medium). Les noms inconnus ne
+        // resolvent jamais (ne fuient pas) et la grammaire {{kc:...}} apparait
+        // dans du texte ordinaire (la doc d'IRIS elle-meme) -> on ne les compte
+        // pas. Aligne sur R1/R2/R5 qui cles deja sur knownHits.
+        let distinctNames = Set(knownHits.map(\.name))
         if distinctNames.count >= 2 {
             guard let triggeringName = distinctNames.sorted().first else {
                 return .allow(resolvable: knownHits)
             }
-            let triggeringHit = effectiveHits.first { $0.name == triggeringName } ?? effectiveHits[0]
+            let triggeringHit = knownHits.first { $0.name == triggeringName } ?? knownHits[0]
             let alert = Alert(
                 severity: .medium,
                 rule: .multipleSecrets,
@@ -164,8 +199,14 @@ public actor ExfilRuleEngine {
             return .block(alert: alert, allHits: effectiveHits)
         }
 
-        // R4 — suspicious content type (medium)
-        if let triggeringHit = Self.suspiciousContentTypeFires(hits: effectiveHits, context: context) {
+        // R4 — suspicious content type (medium). Hits connus uniquement : un nom
+        // inconnu ne resout jamais. NOTE : actuellement INATTEIGNABLE — R2 (body
+        // non-canonique) bloque tout hit body connu avant d'arriver ici, et
+        // suspiciousContentTypeFires ne fire que sur un hit body. R4 est conservee
+        // telle quelle pour qu'un futur allowlist body-credential (qui retirerait
+        // le cas .body de isNonCanonicalLocation) herite automatiquement de R4
+        // comme second filtre, sans changement separe.
+        if let triggeringHit = Self.suspiciousContentTypeFires(hits: knownHits, context: context) {
             let alert = Alert(
                 severity: .medium,
                 rule: .suspiciousContentType,
@@ -203,21 +244,33 @@ public actor ExfilRuleEngine {
         }
     }
 
+    /// Value-free location label for the diagnostic inventory. The header name
+    /// is request metadata (e.g. `x-api-key`), never a secret value.
+    private static func locationDescription(_ location: PlaceholderHit.Location) -> String {
+        switch location {
+        case .header(let name): return "header(\(name))"
+        case .urlPath: return "path"
+        case .queryString: return "query"
+        case .body: return "body"
+        }
+    }
+
     private static let canonicalAuthHeaders: Set<String> = [
         "authorization", "x-api-key", "api-key", "x-auth-token",
     ]
 
-    private static func isNonCanonicalLocation(
-        hit: PlaceholderHit,
-        method: String
-    ) -> Bool {
+    private static func isNonCanonicalLocation(hit: PlaceholderHit) -> Bool {
         switch hit.location {
         case .header(let name):
-            return !canonicalAuthHeaders.contains(name)
-        case .urlPath, .queryString:
+            // HTTP header names are case-insensitive (RFC 7230 §3.2). The scanner
+            // already lowercases them; lowercasing here too guards against a
+            // manually-constructed PlaceholderHit (tests / future callers).
+            return !canonicalAuthHeaders.contains(name.lowercased())
+        case .urlPath, .queryString, .body:
+            // Substitution reservee aux headers d'auth canoniques : query, path
+            // et body sont tous non-canoniques. Un secret connu qui y apparait
+            // est un signal d'exfil (bloque, forwarde litteral, alerte).
             return true
-        case .body:
-            return method.uppercased() == "GET"
         }
     }
 

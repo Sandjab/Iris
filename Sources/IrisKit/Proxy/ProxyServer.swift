@@ -91,7 +91,8 @@ public final class ProxyServer: @unchecked Sendable {
         self.allowedHostsBox = NIOLockedValueBox(configuration.allowedHosts)
         self.exfilRuleEngine = ExfilRuleEngine(
             secretStore: secretStore,
-            maxSubstitutionsPerMinuteProvider: { policyBox.withLockedValue { $0.maxSubstitutionsPerMinute } }
+            maxSubstitutionsPerMinuteProvider: { policyBox.withLockedValue { $0.maxSubstitutionsPerMinute } },
+            logger: logger
         )
         self.leafCertCache = LeafCertCache(caManager: caManager)
         if let group = group {

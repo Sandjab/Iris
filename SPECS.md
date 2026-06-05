@@ -41,7 +41,7 @@
 ### Goals
 
 - **G1.** Run an HTTPS forward proxy on `127.0.0.1` that performs MITM on a whitelist of upstream hosts.
-- **G2.** Substitute placeholders `{{kc:NAME}}` found in HTTP headers, query strings, and request bodies with values fetched from the macOS Keychain.
+- **G2.** Substitute placeholders `{{kc:NAME}}` found in **canonical auth headers** with values fetched from the macOS Keychain. Placeholders of known secrets found in query strings, URL paths, or request bodies are treated as exfiltration signals: the request is forwarded with the placeholder literal (never substituted) and an alert is emitted.
 - **G3.** Enforce per-secret destination scoping: `{{kc:NAME}}` is only resolved when the request goes to a host in `secret.allowed_hosts`.
 - **G4.** Detect and log exfiltration attempts (placeholder appearing where it shouldn't); surface them as alerts in the menu bar app.
 - **G5.** Manage secrets, MITM rules, and configuration from a menu bar app and a CLI.
@@ -426,18 +426,20 @@ This is the central rule. See [§8](#8-allowed-hosts-scoping).
 
 Placeholder appears in:
 - The URL path or query string of a request to a host other than the one expecting the secret in that location (rare; most APIs use a header).
-- The body of a `GET` request.
+- The body of a request (any method) — secrets are substituted only in canonical auth headers.
 - A `User-Agent`, `Referer`, or non-auth-related header.
 
 Whitelisted "canonical" locations per host can be configured (e.g., `api.anthropic.com` expects secrets in header `x-api-key`). MVP default: any of `Authorization`, `x-api-key`, `api-key`, `x-auth-token` is canonical; everything else fires R2.
 
 ### R3 — Multiple distinct secrets in one request (medium)
 
-≥ 2 distinct placeholder names in a single request. Smells like an `env` dump.
+≥ 2 distinct **known** secret names in a single request. Smells like an `env` dump. Unknown placeholder names are not counted: they never resolve (cannot leak), and the `{{kc:…}}` grammar appears in ordinary text — including IRIS's own documentation — so counting them produced structural false positives.
 
 ### R4 — Suspicious content type (medium)
 
 Placeholder found in body where `Content-Type` is `text/plain`, `application/x-www-form-urlencoded`, or `multipart/form-data` AND target path is not a known API endpoint pattern (heuristic: contains `/comments`, `/issues`, `/notes`, `/messages`, `/blob`, or matches user-configured patterns).
+
+Keys off known secrets only. On the current path, R2 (body non-canonical) preempts R4 for any known body secret, so R4 no longer fires in practice; it is retained for defense-in-depth and for a future body-credential allowlist.
 
 ### R5 — Volume anomaly (low)
 

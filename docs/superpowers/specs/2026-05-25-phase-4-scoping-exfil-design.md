@@ -412,7 +412,7 @@ Trois modes, déjà parsés depuis `config.toml` (`SecurityConfig.onExfilAttempt
 
 ### 7.1 Hits mixtes : connus + inconnus dans la même requête
 
-R3 compte les noms distincts trouvés **indépendamment** de leur connaissance dans le store. 2 noms (1 connu, 1 inconnu) → R3 fire (medium) → bloque tout. Choix justifié par l'invariant "0 leak" : un agent qui mélange un placeholder valide et des typos bizarres est exactement le pattern à flagger.
+**Révisé (2026-06-05).** R3 ne compte que les noms **connus**. Un nom inconnu ne résout jamais (0 leak) et la grammaire `{{kc:…}}` apparaît dans du texte ordinaire — la doc d'IRIS auto-injectée par claude_code en est l'exemple : compter les inconnus produisait un faux positif structurel sans gain de sécurité. Voir `docs/superpowers/specs/2026-06-05-exfil-header-only-substitution-design.md`.
 
 ### 7.2 Hits mixtes R1 : un autorisé, un mismatch
 
