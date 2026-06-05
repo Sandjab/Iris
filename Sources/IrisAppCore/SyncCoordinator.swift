@@ -31,6 +31,8 @@ public final class SyncCoordinator {
             let recent = try await admin.queryEvents(since: nil, limit: 100)
             let secrets = try await admin.listSecrets()
             let rules = try await admin.listRules()
+            let config = try await admin.fetchConfig()
+            let caTrusted = try await admin.isCATrusted()
             model.daemonStatus = .up(
                 stats: status.stats,
                 uptime: TimeInterval(status.uptimeS),
@@ -39,6 +41,8 @@ public final class SyncCoordinator {
             model.ingestBatch(recent.reversed())  // oldest first → newest will end up at head
             model.secrets = secrets.sorted { $0.name < $1.name }
             model.rules = rules.sorted { $0.host < $1.host }
+            model.config = config
+            model.caTrusted = caTrusted
         } catch is AdminClientError {
             model.daemonStatus = .down(reason: .notRunning)
         } catch {

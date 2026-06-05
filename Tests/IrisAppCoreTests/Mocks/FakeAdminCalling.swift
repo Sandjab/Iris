@@ -16,6 +16,12 @@ final class FakeAdminCalling: AdminCalling, @unchecked Sendable {
     var shouldThrow: Error?
     var stubSecrets: [Secret] = []
     var stubRules: [MITMRule] = []
+    var stubConfig: Config = .default
+    var stubCATrusted: Bool = false
+    var stubConfigPath: String = "/tmp/iris/config.json"
+    var stubCAExportPath: String = "/tmp/iris/ca.pem"
+    var stubSetResult: ConfigSetResult = ConfigSetResult(applied: [], requiresRestart: [])
+    var stubReloadResult: ConfigReloadResult = ConfigReloadResult(reloaded: true, ignored: [])
     /// Captured value bytes from the last add/rotate, to assert the value never leaks into AppModel.
     var capturedValue: Data?
 
@@ -119,5 +125,41 @@ final class FakeAdminCalling: AdminCalling, @unchecked Sendable {
         calls.append("deleteRule(\(host))")
         if let e = shouldThrow { throw e }
         stubRules.removeAll { $0.host == host }
+    }
+
+    func fetchConfig() async throws -> Config {
+        calls.append("fetchConfig")
+        if let e = shouldThrow { throw e }
+        return stubConfig
+    }
+
+    func setConfig(updates: [ConfigSetParams.Update]) async throws -> ConfigSetResult {
+        calls.append("setConfig(\(updates.map { "\($0.key)=\($0.value)" }.joined(separator: ",")))")
+        if let e = shouldThrow { throw e }
+        return stubSetResult
+    }
+
+    func reloadConfig() async throws -> ConfigReloadResult {
+        calls.append("reloadConfig")
+        if let e = shouldThrow { throw e }
+        return stubReloadResult
+    }
+
+    func configPath() async throws -> String {
+        calls.append("configPath")
+        if let e = shouldThrow { throw e }
+        return stubConfigPath
+    }
+
+    func isCATrusted() async throws -> Bool {
+        calls.append("isCATrusted")
+        if let e = shouldThrow { throw e }
+        return stubCATrusted
+    }
+
+    func caExportPath() async throws -> String {
+        calls.append("caExportPath")
+        if let e = shouldThrow { throw e }
+        return stubCAExportPath
     }
 }

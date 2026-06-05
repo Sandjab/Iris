@@ -43,6 +43,9 @@ public actor ConfigStore {
 
     public var current: Config { config }
 
+    /// Resolved path of the config file on disk (for the app's "Reveal in Finder").
+    public var filePath: String { path.path }
+
     public func listHosts() -> [MITMRule] {
         config.hosts
             .sorted { $0.host < $1.host }

@@ -45,4 +45,22 @@ public protocol AdminCalling: Sendable {
 
     /// Delete a runtime MITM rule.
     func deleteRule(host: String) async throws
+
+    /// Fetch the full config snapshot (broker/security/backups/hosts).
+    func fetchConfig() async throws -> Config
+
+    /// Apply scalar config updates; returns applied vs restart-required keys.
+    func setConfig(updates: [ConfigSetParams.Update]) async throws -> ConfigSetResult
+
+    /// Re-read config.json from disk and re-apply.
+    func reloadConfig() async throws -> ConfigReloadResult
+
+    /// Resolved path of config.json on disk (for Reveal in Finder).
+    func configPath() async throws -> String
+
+    /// Whether the IRIS CA is in the user trust store.
+    func isCATrusted() async throws -> Bool
+
+    /// Path of the public CA PEM (for install/uninstall).
+    func caExportPath() async throws -> String
 }

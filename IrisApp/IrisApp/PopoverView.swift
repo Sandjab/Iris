@@ -24,6 +24,7 @@ struct PopoverView: View {
                 case .security: SecurityTab(admin: admin)
                 case .secrets: SecretsTab(admin: admin)
                 case .rules: RulesTab(admin: admin)
+                case .settings: SettingsTab(admin: admin)
                 }
             }
         }
@@ -150,6 +151,7 @@ private struct TabBar: View {
         Item(tab: .security, title: "Security", symbol: "exclamationmark.shield"),
         Item(tab: .secrets, title: "Secrets", symbol: "key"),
         Item(tab: .rules, title: "Rules", symbol: "network"),
+        Item(tab: .settings, title: "Settings", symbol: "gearshape"),
     ]
 
     var body: some View {

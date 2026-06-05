@@ -149,6 +149,14 @@ final class ConfigStoreTests: XCTestCase {
         XCTAssertTrue(files.contains { $0.hasPrefix("config-corrupted-") })
     }
 
+    // MARK: - filePath
+
+    func testFilePathReturnsResolvedPath() async throws {
+        let store = try ConfigStore(path: path, logger: logger)
+        let fp = await store.filePath
+        XCTAssertEqual(fp, path.path)
+    }
+
     // MARK: - applyUpdates (config.set)
 
     func testApplyUpdatesHotFieldPersistsAndReportsApplied() async throws {

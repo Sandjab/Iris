@@ -5,7 +5,7 @@ import IrisKit
 @MainActor
 public final class AppModel: ObservableObject {
     public enum Tab: String, Sendable, CaseIterable, Codable {
-        case overview, logs, security, secrets, rules
+        case overview, logs, security, secrets, rules, settings
     }
 
     @Published public var daemonStatus: DaemonStatus = .connecting
@@ -13,6 +13,8 @@ public final class AppModel: ObservableObject {
     @Published public var alerts: [Event] = []
     @Published public var secrets: [Secret] = []
     @Published public var rules: [MITMRule] = []
+    @Published public var config: Config?
+    @Published public var caTrusted: Bool?
     @Published public var unreadAlertCount: Int = 0
     @Published public var streamPaused: Bool = false
     /// Frozen copy of `events` captured when the Logs stream was paused. Lives on the
@@ -27,6 +29,7 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var lastAcknowledgedAt: Date?
 
     private let defaults: UserDefaults
+    private let caInstaller: CATrustInstalling
     private static let tabKey = "io.iris.app.selectedTab"
     private static let ackKey = "io.iris.app.lastAcknowledgedAt"
 
@@ -35,8 +38,12 @@ public final class AppModel: ObservableObject {
     /// Max in-memory alerts ring size.
     public static let alertsCap: Int = 200
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(
+        defaults: UserDefaults = .standard,
+        caInstaller: CATrustInstalling = SystemCATrustInstaller()
+    ) {
         self.defaults = defaults
+        self.caInstaller = caInstaller
         let storedTab = defaults.string(forKey: Self.tabKey).flatMap(Tab.init(rawValue:))
         self.selectedTab = storedTab ?? .overview
         if let ts = defaults.object(forKey: Self.ackKey) as? Date {
@@ -173,5 +180,50 @@ public final class AppModel: ObservableObject {
     public func deleteRule(host: String, via admin: AdminCalling) async throws {
         try await admin.deleteRule(host: host)
         try await refreshRules(via: admin)
+    }
+
+    // MARK: - Config / CA (Phase 6.3b)
+
+    public func loadConfig(via admin: AdminCalling) async throws {
+        config = try await admin.fetchConfig()
+    }
+
+    @discardableResult
+    public func setConfig(
+        _ updates: [ConfigSetParams.Update],
+        via admin: AdminCalling
+    ) async throws -> ConfigSetResult {
+        let result = try await admin.setConfig(updates: updates)
+        try await loadConfig(via: admin)
+        return result
+    }
+
+    public func refreshCATrust(via admin: AdminCalling) async throws {
+        caTrusted = try await admin.isCATrusted()
+    }
+
+    public func reloadConfig(via admin: AdminCalling) async throws {
+        _ = try await admin.reloadConfig()
+        try await loadConfig(via: admin)
+    }
+
+    public func configFilePath(via admin: AdminCalling) async throws -> String {
+        try await admin.configPath()
+    }
+
+    public func installCA(via admin: AdminCalling) async throws {
+        if caTrusted == true { return }  // idempotent: skip the auth prompt
+        let path = try await admin.caExportPath()
+        let installer = caInstaller
+        try await Task.detached { try installer.install(pemPath: path) }.value
+        try await refreshCATrust(via: admin)
+    }
+
+    public func uninstallCA(via admin: AdminCalling) async throws {
+        if caTrusted == false { return }
+        let path = try await admin.caExportPath()
+        let installer = caInstaller
+        try await Task.detached { try installer.uninstall(pemPath: path) }.value
+        try await refreshCATrust(via: admin)
     }
 }

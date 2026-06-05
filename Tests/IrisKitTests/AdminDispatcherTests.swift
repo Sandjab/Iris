@@ -388,6 +388,16 @@ final class AdminDispatcherTests: XCTestCase {
         XCTAssertEqual(returned, config)
     }
 
+    // MARK: - config.path
+
+    func testConfigPathReturnsConfigFilePath() async throws {
+        let (dispatcher, _, _) = try await makeDispatcher()
+        let resp = await dispatcher.dispatch(request(.configPath))
+        let result = try unwrapResult(resp).decode(as: ConfigPathResult.self)
+        XCTAssertFalse(result.path.isEmpty)
+        XCTAssertTrue(result.path.hasSuffix(".json"), "got \(result.path)")
+    }
+
     // MARK: - events.clear
 
     func testEventsClearReturnsDeletedCountAndPreservesTotals() async throws {

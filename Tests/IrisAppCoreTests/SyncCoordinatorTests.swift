@@ -42,8 +42,10 @@ final class SyncCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(
             admin.calls,
-            ["status", "queryEvents(since:-1.0,limit:100)", "listSecrets", "listRules"]
+            ["status", "queryEvents(since:-1.0,limit:100)", "listSecrets", "listRules", "fetchConfig", "isCATrusted"]
         )
+        XCTAssertEqual(model.config?.version, 1)
+        XCTAssertEqual(model.caTrusted, false)  // FakeAdminCalling.stubCATrusted default
         XCTAssertEqual(model.events.count, 1)
         if case .up(let stats, let uptime, let paused) = model.daemonStatus {
             XCTAssertEqual(stats.reqTotal, 5)
