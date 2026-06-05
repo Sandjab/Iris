@@ -10,16 +10,20 @@ cd "$(dirname "$0")"
 SRC="src/mercury-silhouette.png"
 OUT="resources"
 NAVY='#0E2A47'; GOLD='#C9912E'; BG='#F6F8FC'; GREY='#5B6B82'
-FONT="/System/Library/Fonts/SFNS.ttf"
+FONT="/System/Library/Fonts/SFNS.ttf"   # San Francisco (validé) ; chemin absolu car
+                                         # magick (sans fontconfig) ne résout pas le nom seul.
+TMP_DIR="$(mktemp -d -t iris-background)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+NAVY_PNG="$TMP_DIR/mercury-navy.png"
 
 # 1. Silhouette N&B -> masque alpha -> remplissage navy (forme navy sur transparent)
 magick "$SRC" \
   \( +clone -colorspace Gray -negate \) -alpha off -compose CopyOpacity -composite \
-  -channel RGB -fill "$NAVY" -colorize 100 +channel /tmp/mercury-navy.png
+  -channel RGB -fill "$NAVY" -colorize 100 +channel "$NAVY_PNG"
 
 # 2. Composition 1240x836 : emblème gauche, reste libre pour le contenu Installer
 magick -size 1240x836 "xc:$BG" \
-  \( /tmp/mercury-navy.png -resize 480x480 \) -gravity NorthWest -geometry +110+150 -composite \
+  \( "$NAVY_PNG" -resize 480x480 \) -gravity NorthWest -geometry +110+150 -composite \
   -font "$FONT" -gravity NorthWest \
   -fill "$NAVY" -pointsize 100 -annotate +130+620 'Iris' \
   -fill "$GOLD" -draw 'rectangle 132,772 292,784' \

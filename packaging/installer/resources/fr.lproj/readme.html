@@ -10,7 +10,7 @@
 <p>Iris n'intercepte que les <b>processus lancés depuis un shell</b> (terminaux, scripts). L'app configure pour vous deux variables d'environnement au premier lancement :</p>
 <ul>
 <li><code>HTTPS_PROXY=http://127.0.0.1:8888</code></li>
-<li><code>NODE_EXTRA_CA_CERTS=~/Library/Application Support/iris/ca.pem</code></li>
+<li><code>NODE_EXTRA_CA_CERTS="$HOME/Library/Application Support/iris/ca.pem"</code></li>
 </ul>
 <p>Les apps GUI lancées depuis le Finder, le Dock ou Spotlight (Safari, Mail, Slack…) ne sont <b>pas</b> interceptées — c'est volontaire : le cas d'usage cible est l'outillage CLI agentique. Le proxy n'écoute que sur <code>127.0.0.1</code>, rien n'est exposé au réseau.</p>
 </body></html>

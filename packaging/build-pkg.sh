@@ -76,8 +76,12 @@ pkgbuild --component "$APP" --install-location /Applications \
   --scripts packaging/scripts \
   --identifier io.iris.app --version "$VERSION" \
   "$COMPONENT_PKG"
-#   c. Produit guidé (écrans + fond via Distribution XML) signé
-productbuild --distribution "$DISTRIBUTION" \
+#   c. Produit guidé (écrans + fond via Distribution XML) signé.
+#      Version templatée depuis $VERSION → pas de drift avec le pkg-ref du Distribution.
+DISTRIBUTION_BUILD="$BUILD/Distribution.xml"
+mkdir -p "$BUILD"
+sed "s/version=\"0.1.0\"/version=\"$VERSION\"/g" "$DISTRIBUTION" > "$DISTRIBUTION_BUILD"
+productbuild --distribution "$DISTRIBUTION_BUILD" \
   --package-path "$COMPONENT_DIR" \
   --resources "$RESOURCES" \
   --sign "$INSTALLER_IDENTITY" --timestamp \
