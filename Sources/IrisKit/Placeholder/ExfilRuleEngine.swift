@@ -49,10 +49,11 @@ public actor ExfilRuleEngine {
     /// Initialise with a provider closure so the threshold can be hot-reloaded
     /// without recreating the engine. The closure is called on every volume check.
     ///
-    /// `logger` defaults to a silent (`info`-level) logger so test sites that do
-    /// not care about diagnostics are unaffected. The proxy passes its own logger
-    /// so the per-request hit inventory (a `debug` line) surfaces under
-    /// `--log-level debug`.
+    /// `logger` defaults to a no-op logger (it inherits the global
+    /// `LoggingSystem` bootstrap, which defaults to `.info`; at `.info` the
+    /// `debug` inventory line is silent), so test sites that do not care about
+    /// diagnostics are unaffected. The proxy passes its own logger so the
+    /// per-request hit inventory (a `debug` line) surfaces under `--log-level debug`.
     public init(
         secretStore: any SecretStore,
         maxSubstitutionsPerMinuteProvider: @Sendable @escaping () -> Int,
@@ -114,8 +115,9 @@ public actor ExfilRuleEngine {
         // Phase 6.2.x — quarantined secrets are inert: removed from the working
         // hit set entirely so they are neither substituted nor scored by any
         // exfil rule. No value is ever substituted for a quarantined secret, so
-        // nothing can leak. Unknown names (no metadata) stay so R3 typo
-        // detection is preserved.
+        // nothing can leak. Unknown names (no metadata) remain in effectiveHits
+        // so they surface in the diagnostic inventory; no rule acts on them —
+        // R1–R5 all key on knownHits.
         let effectiveHits = hits.filter { metadataByName[$0.name]?.quarantined != true }
 
         var knownHits: [PlaceholderHit] = []
