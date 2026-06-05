@@ -1,4 +1,5 @@
 import Foundation
+import Logging
 
 public struct RequestContext: Sendable {
     public let host: String
@@ -42,16 +43,24 @@ struct SlidingMinuteCounter: Sendable {
 public actor ExfilRuleEngine {
     private let secretStore: any SecretStore
     private let maxSubstitutionsPerMinuteProvider: @Sendable () -> Int
+    private let logger: Logger
     private var volumeCounters: [String: SlidingMinuteCounter] = [:]
 
     /// Initialise with a provider closure so the threshold can be hot-reloaded
     /// without recreating the engine. The closure is called on every volume check.
+    ///
+    /// `logger` defaults to a silent (`info`-level) logger so test sites that do
+    /// not care about diagnostics are unaffected. The proxy passes its own logger
+    /// so the per-request hit inventory (a `debug` line) surfaces under
+    /// `--log-level debug`.
     public init(
         secretStore: any SecretStore,
-        maxSubstitutionsPerMinuteProvider: @Sendable @escaping () -> Int
+        maxSubstitutionsPerMinuteProvider: @Sendable @escaping () -> Int,
+        logger: Logger = Logger(label: "io.iris.exfil")
     ) {
         self.secretStore = secretStore
         self.maxSubstitutionsPerMinuteProvider = maxSubstitutionsPerMinuteProvider
+        self.logger = logger
     }
 
     public func recordSubstitution(secretNames: [String]) {
@@ -113,6 +122,28 @@ public actor ExfilRuleEngine {
         for hit in effectiveHits where metadataByName[hit.name] != nil {
             knownHits.append(hit)
         }
+
+        // Diagnostic inventory (debug-gated, §6.1: names/locations/counts only,
+        // never the substituted value nor the snippet). Lets an operator running
+        // `--log-level debug` see exactly which placeholders a tool emits and
+        // whether each is known/unknown — the data needed to reason about R3
+        // over-blocking without exposing any secret.
+        let inventory =
+            effectiveHits
+            .map {
+                "\($0.name)@\(Self.locationDescription($0.location)):\(metadataByName[$0.name] != nil ? "known" : "unknown")"
+            }
+            .joined(separator: ", ")
+        logger.debug(
+            "Exfil hit inventory",
+            metadata: [
+                "host": "\(normalizedHost)",
+                "method": "\(context.method)",
+                "path": "\(context.path)",
+                "distinctNames": "\(Set(effectiveHits.map(\.name)).count)",
+                "hits": "\(inventory)",
+            ]
+        )
 
         // R1 — host mismatch (high). Block whole request if any known hit's
         // host scope rejects this destination.
@@ -200,6 +231,17 @@ public actor ExfilRuleEngine {
         case .urlPath: return .urlPath
         case .queryString: return .queryString
         case .body: return .body
+        }
+    }
+
+    /// Value-free location label for the diagnostic inventory. The header name
+    /// is request metadata (e.g. `x-api-key`), never a secret value.
+    private static func locationDescription(_ location: PlaceholderHit.Location) -> String {
+        switch location {
+        case .header(let name): return "header(\(name))"
+        case .urlPath: return "path"
+        case .queryString: return "query"
+        case .body: return "body"
         }
     }
 
