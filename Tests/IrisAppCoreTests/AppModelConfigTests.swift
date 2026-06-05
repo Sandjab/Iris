@@ -15,6 +15,19 @@ final class AppModelConfigTests: XCTestCase {
         XCTAssertEqual(model.config?.security.onExfilAttempt, .blockAndNotify)
     }
 
+    func testSetConfigCallsRPCThenReloads() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        admin.stubConfig = .default
+        admin.stubSetResult = ConfigSetResult(applied: ["security.on_exfil_attempt"], requiresRestart: [])
+        let result = try await model.setConfig(
+            [ConfigSetParams.Update(key: "security.on_exfil_attempt", value: "block_only")],
+            via: admin
+        )
+        XCTAssertEqual(result.applied, ["security.on_exfil_attempt"])
+        XCTAssertEqual(admin.calls, ["setConfig(security.on_exfil_attempt=block_only)", "fetchConfig"])
+    }
+
     func testFakeRecordsAndReturnsConfigStubs() async throws {
         let admin = FakeAdminCalling()
         admin.stubConfig = .default

@@ -182,4 +182,14 @@ public final class AppModel: ObservableObject {
     public func loadConfig(via admin: AdminCalling) async throws {
         config = try await admin.fetchConfig()
     }
+
+    @discardableResult
+    public func setConfig(
+        _ updates: [ConfigSetParams.Update],
+        via admin: AdminCalling
+    ) async throws -> ConfigSetResult {
+        let result = try await admin.setConfig(updates: updates)
+        try await loadConfig(via: admin)
+        return result
+    }
 }
