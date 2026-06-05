@@ -27,7 +27,7 @@ final class CLIDaemonHarness {
         self.tmpDir = base
         // admin.sock sits under the short base path — still under 104 bytes.
         self.adminSocket = base.appendingPathComponent("admin.sock").path
-        self.configPath = base.appendingPathComponent("iris.toml").path
+        self.configPath = base.appendingPathComponent("config.json").path
 
         // Derive two adjacent ports from the short ID to reduce collision
         // probability across parallel test runs. Range: 49152–65000.
@@ -37,23 +37,28 @@ final class CLIDaemonHarness {
         let eventsPort = basePort + 1
         self.brokerPort = proxyPort
 
-        let toml = """
-            [broker]
-            listen               = "127.0.0.1:\(proxyPort)"
-            events_listen        = "127.0.0.1:\(eventsPort)"
-            admin_socket         = "\(adminSocket)"
-            log_level            = "error"
-            event_retention_days = 1
-            event_ring_size      = 100
-
-            [security]
-            on_exfil_attempt             = "block_only"
-            max_substitutions_per_minute = 60
-
-            [[mitm_host]]
-            host = "api.anthropic.com"
+        let json = """
+            {
+              "version": 1,
+              "broker": {
+                "listen": "127.0.0.1:\(proxyPort)",
+                "events_listen": "127.0.0.1:\(eventsPort)",
+                "admin_socket": "\(adminSocket)",
+                "log_level": "error",
+                "event_retention_days": 1,
+                "event_ring_size": 100
+              },
+              "security": {
+                "on_exfil_attempt": "block_only",
+                "max_substitutions_per_minute": 60
+              },
+              "backups": { "max_count": 10 },
+              "hosts": [
+                { "host": "api.anthropic.com", "origin": "default", "created_at": "2020-01-01T00:00:00Z" }
+              ]
+            }
             """
-        try toml.write(toFile: configPath, atomically: true, encoding: .utf8)
+        try json.write(toFile: configPath, atomically: true, encoding: .utf8)
     }
 
     // MARK: - Lifecycle

@@ -23,6 +23,9 @@ final class AdminDispatcherTests: XCTestCase {
         func setPaused(_ paused: Bool) { self.paused = paused }
     }
 
+    /// Builds a dispatcher backed by a temp `ConfigStore`. When `config` is given,
+    /// it is written to the temp file first (so `config.get` returns it); otherwise
+    /// the store seeds defaults on first boot.
     private func makeDispatcher(
         secretStore: any SecretStore = InMemorySecretStore(),
         eventRing: EventRing = EventRing(capacity: 64),
@@ -31,15 +34,19 @@ final class AdminDispatcherTests: XCTestCase {
     ) async throws -> (AdminDispatcher, FakeDaemon, EventRing) {
         let caManager = CAManager(keyStore: InMemoryCAKeyStore())
         _ = try await caManager.ensureCA()
-        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
-        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
+        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-config-\(UUID().uuidString).json")
+        if let config {
+            let enc = JSONEncoder()
+            enc.dateEncodingStrategy = .iso8601
+            try enc.encode(config).write(to: tmpPath)
+        }
+        let configStore = try ConfigStore(path: tmpPath, logger: Logger(label: "test"))
         let dispatcher = AdminDispatcher(
             secretStore: secretStore,
             eventRing: eventRing,
             caManager: caManager,
             daemon: daemon,
-            config: config,
-            runtimeRulesStore: rulesStore,
+            configStore: configStore,
             logger: Logger(label: "test")
         )
         return (dispatcher, daemon, eventRing)
@@ -301,14 +308,14 @@ final class AdminDispatcherTests: XCTestCase {
         _ = try await caManager.ensureCA()
         defer { try? FileManager.default.removeItem(at: tmpURL) }
 
-        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
-        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
+        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-config-\(UUID().uuidString).json")
+        let configStore = try ConfigStore(path: tmpPath, logger: Logger(label: "test"))
         let dispatcher = AdminDispatcher(
             secretStore: InMemorySecretStore(),
             eventRing: EventRing(capacity: 16),
             caManager: caManager,
             daemon: FakeDaemon(),
-            runtimeRulesStore: rulesStore,
+            configStore: configStore,
             logger: Logger(label: "test")
         )
 
@@ -339,14 +346,20 @@ final class AdminDispatcherTests: XCTestCase {
 
     // MARK: - config.get
 
-    func testConfigGetReturnsErrorWhenConfigAbsent() async throws {
+    func testConfigGetReturnsSeededConfigOnFreshStore() async throws {
+        // A fresh store seeds defaults, so config.get always returns a config
+        // (never "absent"): version 1, the built-in api.anthropic.com host.
         let (dispatcher, _, _) = try await makeDispatcher()
         let resp = await dispatcher.dispatch(request(.configGet))
-        XCTAssertEqual(resp.error?.code, -32006)
+        let returned = try unwrapResult(resp).decode(as: Config.self)
+        XCTAssertEqual(returned.version, 1)
+        XCTAssertEqual(returned.hosts.map(\.host), ["api.anthropic.com"])
+        XCTAssertEqual(returned.hosts.first?.origin, .builtin)
     }
 
     func testConfigGetReturnsConfigWhenPresent() async throws {
         let config = Config(
+            version: 1,
             broker: BrokerConfig(
                 listen: "127.0.0.1:8888",
                 eventsListen: "127.0.0.1:8899",
@@ -359,7 +372,14 @@ final class AdminDispatcherTests: XCTestCase {
                 onExfilAttempt: .blockAndNotify,
                 maxSubstitutionsPerMinute: 60
             ),
-            mitmHosts: [MITMHostEntry(host: "api.example.com")]
+            backups: BackupsConfig(maxCount: 10),
+            hosts: [
+                HostEntry(
+                    host: "api.example.com",
+                    origin: .user,
+                    createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+                )
+            ]
         )
         let (dispatcher, _, _) = try await makeDispatcher(config: config)
 
@@ -400,8 +420,8 @@ final class AdminDispatcherTests: XCTestCase {
     // MARK: - rule.*
 
     func testRuleAddListDelete() async throws {
-        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
-        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
+        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-config-\(UUID().uuidString).json")
+        let configStore = try ConfigStore(path: tmpPath, logger: Logger(label: "test"))
         // Sendable shared state: same pattern as ProxyServer.pauseFlag (Phase 3)
         // and ProxyServer.allowedHostsBox / securityPolicyBox (Phase 4.x Task 6).
         let onChangedFlag = NIOLockedValueBox<Bool>(false)
@@ -412,93 +432,73 @@ final class AdminDispatcherTests: XCTestCase {
             eventRing: EventRing(capacity: 64),
             caManager: caManager,
             daemon: FakeDaemon(),
-            runtimeRulesStore: rulesStore,
-            onRulesChanged: { onChangedFlag.withLockedValue { $0 = true } },
-            tomlHostsProvider: { ["api.toml.example.com"] },
+            configStore: configStore,
+            onHostsChanged: { onChangedFlag.withLockedValue { $0 = true } },
             logger: Logger(label: "test")
         )
 
-        // rule.add
+        // rule.add — a user host
         let addResp = await dispatcher.dispatch(
-            request(.ruleAdd, params: try JSONValue.encoding(RuleHostParams(host: "api.runtime.example.com")))
+            request(.ruleAdd, params: try JSONValue.encoding(RuleHostParams(host: "api.user.example.com")))
         )
         let added = try unwrapResult(addResp).decode(as: MITMRule.self)
-        XCTAssertEqual(added.host, "api.runtime.example.com")
-        XCTAssertEqual(added.source, .runtime)
+        XCTAssertEqual(added.host, "api.user.example.com")
+        XCTAssertEqual(added.origin, .user)
         XCTAssertTrue(
             onChangedFlag.withLockedValue { $0 },
-            "onRulesChanged must be called after add"
+            "onHostsChanged must be called after add"
         )
 
-        // rule.list — must include both TOML and runtime
+        // rule.list — seeded built-in host + the new user host
         let listResp = await dispatcher.dispatch(request(.ruleList))
         let rules = try unwrapResult(listResp).decode(as: [MITMRule].self)
         let hosts = rules.map(\.host).sorted()
-        XCTAssertEqual(hosts, ["api.runtime.example.com", "api.toml.example.com"])
-        let tomlRule = rules.first { $0.host == "api.toml.example.com" }
-        XCTAssertEqual(tomlRule?.source, .toml, "TOML host must have source=.toml in listing")
+        XCTAssertEqual(hosts, ["api.anthropic.com", "api.user.example.com"])
+        let builtinRule = rules.first { $0.host == "api.anthropic.com" }
+        XCTAssertEqual(builtinRule?.origin, .builtin, "seeded host must have origin=.builtin in listing")
 
-        // rule.delete — TOML-sourced host is protected
-        let delTomlResp = await dispatcher.dispatch(
-            request(.ruleDelete, params: try JSONValue.encoding(RuleHostParams(host: "api.toml.example.com")))
+        // rule.delete — built-in host is protected
+        let delBuiltinResp = await dispatcher.dispatch(
+            request(.ruleDelete, params: try JSONValue.encoding(RuleHostParams(host: "api.anthropic.com")))
         )
-        XCTAssertEqual(delTomlResp.error?.code, JSONRPCError.ruleProtected.code)
+        XCTAssertEqual(delBuiltinResp.error?.code, JSONRPCError.ruleProtected.code)
 
-        // rule.delete — runtime host succeeds
+        // rule.delete — user host succeeds
         onChangedFlag.withLockedValue { $0 = false }
         let delResp = await dispatcher.dispatch(
-            request(.ruleDelete, params: try JSONValue.encoding(RuleHostParams(host: "api.runtime.example.com")))
+            request(.ruleDelete, params: try JSONValue.encoding(RuleHostParams(host: "api.user.example.com")))
         )
         let deleted = try unwrapResult(delResp).decode(as: RuleDeletedResult.self)
         XCTAssertTrue(deleted.deleted)
         XCTAssertTrue(
             onChangedFlag.withLockedValue { $0 },
-            "onRulesChanged must be called after delete"
+            "onHostsChanged must be called after delete"
         )
 
         // rule.delete — not found after deletion
         let delAgainResp = await dispatcher.dispatch(
-            request(.ruleDelete, params: try JSONValue.encoding(RuleHostParams(host: "api.runtime.example.com")))
+            request(.ruleDelete, params: try JSONValue.encoding(RuleHostParams(host: "api.user.example.com")))
         )
         XCTAssertEqual(delAgainResp.error?.code, JSONRPCError.ruleNotFound.code)
     }
 
-    func testRuleAddOnTomlHostReturnsSynthRuleWithoutRuntimeWrite() async throws {
-        // Spec §3.1: rule.add on a TOML-defined host must be an idempotent no-op
-        // that returns a synthesised MITMRule (createdAt=epoch 0, source=.toml)
-        // without writing to the runtime store.
-        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
-        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
-        let caManager = CAManager(keyStore: InMemoryCAKeyStore())
-        _ = try await caManager.ensureCA()
-        let dispatcher = AdminDispatcher(
-            secretStore: InMemorySecretStore(),
-            eventRing: EventRing(capacity: 64),
-            caManager: caManager,
-            daemon: FakeDaemon(),
-            runtimeRulesStore: rulesStore,
-            tomlHostsProvider: { ["api.toml.example.com"] },
-            logger: Logger(label: "test")
-        )
-
-        // rule.add on a TOML host
+    func testRuleAddOnBuiltinHostIsIdempotent() async throws {
+        // rule.add on the seeded built-in host returns its existing rule
+        // (origin .builtin) without creating a duplicate entry.
+        let (dispatcher, _, _) = try await makeDispatcher()
         let addResp = await dispatcher.dispatch(
-            request(.ruleAdd, params: try JSONValue.encoding(RuleHostParams(host: "api.toml.example.com")))
+            request(.ruleAdd, params: try JSONValue.encoding(RuleHostParams(host: "api.anthropic.com")))
         )
-        let synth = try unwrapResult(addResp).decode(as: MITMRule.self)
-        XCTAssertEqual(synth.host, "api.toml.example.com")
-        XCTAssertEqual(synth.source, .toml)
-        XCTAssertEqual(
-            synth.createdAt.timeIntervalSince1970,
-            0,
-            "synthesised rule must have createdAt = epoch 0"
-        )
+        let rule = try unwrapResult(addResp).decode(as: MITMRule.self)
+        XCTAssertEqual(rule.host, "api.anthropic.com")
+        XCTAssertEqual(rule.origin, .builtin)
 
-        // Verify runtime store was NOT written
-        let runtimeRules = await rulesStore.list()
-        XCTAssertTrue(
-            runtimeRules.isEmpty,
-            "rule.add on TOML host must not write to runtime store; got \(runtimeRules)"
+        let listResp = await dispatcher.dispatch(request(.ruleList))
+        let rules = try unwrapResult(listResp).decode(as: [MITMRule].self)
+        XCTAssertEqual(
+            rules.filter { $0.host == "api.anthropic.com" }.count,
+            1,
+            "must not duplicate the built-in host"
         )
     }
 
@@ -510,33 +510,13 @@ final class AdminDispatcherTests: XCTestCase {
         XCTAssertEqual(resp.error?.code, JSONRPCError.invalidParams.code)
     }
 
-    func testRuleListReturnsEmptyWhenNoRulesAndNoToml() async throws {
+    func testRuleListReturnsSeededBuiltinHost() async throws {
+        // A fresh store seeds api.anthropic.com (origin .builtin); rule.list reflects it.
         let (dispatcher, _, _) = try await makeDispatcher()
         let resp = await dispatcher.dispatch(request(.ruleList))
         let rules = try unwrapResult(resp).decode(as: [MITMRule].self)
-        XCTAssertTrue(rules.isEmpty)
-    }
-
-    func testRuleListTomlWinsOnHostCollision() async throws {
-        // Seed the runtime store with the same host that the tomlHostsProvider provides.
-        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
-        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
-        _ = try await rulesStore.add(host: "api.shared.example.com", now: Date())
-        let caManager = CAManager(keyStore: InMemoryCAKeyStore())
-        _ = try await caManager.ensureCA()
-        let dispatcher = AdminDispatcher(
-            secretStore: InMemorySecretStore(),
-            eventRing: EventRing(capacity: 64),
-            caManager: caManager,
-            daemon: FakeDaemon(),
-            runtimeRulesStore: rulesStore,
-            tomlHostsProvider: { ["api.shared.example.com"] },
-            logger: Logger(label: "test")
-        )
-        let resp = await dispatcher.dispatch(request(.ruleList))
-        let rules = try unwrapResult(resp).decode(as: [MITMRule].self)
-        XCTAssertEqual(rules.count, 1)
-        XCTAssertEqual(rules[0].source, .toml, "TOML wins on host collision")
+        XCTAssertEqual(rules.map(\.host), ["api.anthropic.com"])
+        XCTAssertEqual(rules.first?.origin, .builtin)
     }
 
     func testEventsClearOnEmptyRingReturnsZero() async throws {

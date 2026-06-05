@@ -237,7 +237,7 @@ final class SyncCoordinatorTests: XCTestCase {
             Secret(name: "z", allowedHosts: ["z.com"], createdAt: .distantPast),
             Secret(name: "a", allowedHosts: ["a.com"], createdAt: .distantPast),
         ]
-        admin.stubRules = [MITMRule(host: "api.anthropic.com", createdAt: .distantPast, source: .toml)]
+        admin.stubRules = [MITMRule(host: "api.anthropic.com", createdAt: .distantPast, origin: .builtin)]
         let coord = SyncCoordinator(model: model, admin: admin, events: FakeEventsSubscribing())
 
         try await coord.bootstrap()

@@ -57,7 +57,7 @@ struct RulesTab: View {
                 Spacer()
             } else {
                 List(model.rules, id: \.host) { rule in
-                    RuleRow(rule: rule, onDelete: rule.source == .runtime ? { pendingDelete = rule } : nil)
+                    RuleRow(rule: rule, onDelete: rule.origin == .user ? { pendingDelete = rule } : nil)
                 }
                 .listStyle(.plain)
             }
@@ -118,7 +118,7 @@ private struct RuleRow: View {
     var body: some View {
         HStack {
             Text(rule.host).font(.callout)
-            Text(rule.source.rawValue)
+            Text(rule.origin.rawValue)
                 .font(.caption2)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 1)
@@ -133,7 +133,7 @@ private struct RuleRow: View {
             } else {
                 Image(systemName: "lock")
                     .foregroundStyle(.secondary)
-                    .help("Defined in config.toml")
+                    .help("Default host (protected)")
             }
         }
         .padding(.vertical, 2)

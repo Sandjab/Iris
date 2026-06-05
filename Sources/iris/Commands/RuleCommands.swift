@@ -14,7 +14,7 @@ struct RuleCommand: AsyncParsableCommand {
     struct Add: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "add",
-            abstract: "Add a runtime MITM rule (host pattern)."
+            abstract: "Add a MITM rule (whitelist a host; origin: user)."
         )
 
         @OptionGroup var connection: ConnectionOptions
@@ -42,7 +42,7 @@ struct RuleCommand: AsyncParsableCommand {
     struct List: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "list",
-            abstract: "List MITM rules (TOML + runtime)."
+            abstract: "List MITM rules (default + user)."
         )
 
         @OptionGroup var connection: ConnectionOptions
@@ -68,7 +68,7 @@ struct RuleCommand: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "rm",
             abstract:
-                "Remove a runtime MITM rule. Rules from the TOML config cannot be removed via CLI."
+                "Remove a user-added MITM rule. Default hosts (origin: default) cannot be removed via CLI."
         )
 
         @OptionGroup var connection: ConnectionOptions

@@ -17,7 +17,7 @@ struct IrisDaemonCLI: AsyncParsableCommand {
     @Option(
         name: .long,
         help:
-            "Config TOML path (default ~/Library/Application Support/iris/config.toml; falls back to built-in defaults if absent)."
+            "Config JSON path (default ~/Library/Application Support/iris/config.json; seeded with defaults if absent)."
     )
     var configPath: String?
 
@@ -54,7 +54,19 @@ struct IrisDaemonCLI: AsyncParsableCommand {
         signal(SIGINT, SIG_DFL)
         signal(SIGTERM, SIG_DFL)
 
-        let config = try loadConfig()
+        let resolvedConfigPath: URL =
+            configPath.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+            ?? URL(
+                fileURLWithPath: ("~/Library/Application Support/iris/config.json" as NSString)
+                    .expandingTildeInPath
+            )
+
+        // Boot logger (info) until the resolved config's log level is known.
+        var bootLogger = Logger(label: "io.iris.daemon")
+        bootLogger.logLevel = .info
+        let configStore = try ConfigStore(path: resolvedConfigPath, logger: bootLogger)
+        let config = await configStore.current
+
         var logger = Logger(label: "io.iris.daemon")
         let level = logLevel.flatMap(Self.parseLogLevel(_:)) ?? Self.loggerLevel(from: config.broker.logLevel)
         logger.logLevel = level
@@ -74,24 +86,13 @@ struct IrisDaemonCLI: AsyncParsableCommand {
                 "listen": "\(config.broker.listen)",
                 "events_listen": "\(config.broker.eventsListen)",
                 "admin_socket": "\(config.broker.adminSocket)",
-                "allowed_hosts": "\(config.mitmHosts.map(\.host).sorted())",
+                "allowed_hosts": "\(config.hosts.map(\.host).sorted())",
+                "config_path": "\(resolvedConfigPath.path)",
             ]
         )
 
-        let resolvedConfigPath: URL? =
-            configPath.map {
-                URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath)
-            }
-            ?? {
-                let defaultPath = ("~/Library/Application Support/iris/config.toml" as NSString)
-                    .expandingTildeInPath
-                let url = URL(fileURLWithPath: defaultPath)
-                return FileManager.default.fileExists(atPath: url.path) ? url : nil
-            }()
-
         let daemon = try await Daemon(
-            config: config,
-            configPath: resolvedConfigPath,
+            configStore: configStore,
             secretBackend: inMemorySecrets ? .inMemoryFromEnvironment : .keychain,
             caBackend: inMemoryCa ? .inMemory : .keychain,
             caPath: caURL,
@@ -107,20 +108,6 @@ struct IrisDaemonCLI: AsyncParsableCommand {
         defer { withExtendedLifetime(sighupToken) {} }
 
         try await daemon.run()
-    }
-
-    private func loadConfig() throws -> Config {
-        if let configPath = configPath {
-            let url = URL(fileURLWithPath: (configPath as NSString).expandingTildeInPath)
-            return try ConfigLoader.load(from: url)
-        }
-        let defaultPath = ("~/Library/Application Support/iris/config.toml" as NSString)
-            .expandingTildeInPath
-        let url = URL(fileURLWithPath: defaultPath)
-        if FileManager.default.fileExists(atPath: url.path) {
-            return try ConfigLoader.load(from: url)
-        }
-        return Config.default
     }
 
     private static func parseLogLevel(_ raw: String) -> Logger.Level? {

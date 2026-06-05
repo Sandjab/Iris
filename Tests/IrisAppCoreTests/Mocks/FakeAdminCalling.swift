@@ -110,7 +110,7 @@ final class FakeAdminCalling: AdminCalling, @unchecked Sendable {
     func addRule(host: String) async throws -> MITMRule {
         calls.append("addRule(\(host))")
         if let e = shouldThrow { throw e }
-        let r = MITMRule(host: host, createdAt: Date(timeIntervalSince1970: 0), source: .runtime)
+        let r = MITMRule(host: host, createdAt: Date(timeIntervalSince1970: 0), origin: .user)
         stubRules.append(r)
         return r
     }

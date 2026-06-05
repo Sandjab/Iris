@@ -16,11 +16,14 @@ public struct AdminDispatcher: Sendable {
     public let eventRing: EventRing
     public let caManager: CAManager
     public let daemon: any DaemonControl
-    public let config: Config?
+    public let configStore: ConfigStore
     public let logger: Logger
-    public let runtimeRulesStore: RuntimeRulesStore
-    public let onRulesChanged: @Sendable () async -> Void
-    public let tomlHostsProvider: @Sendable () async -> [String]
+    /// Re-applies the live host set to the proxy after a `rule.*` mutation.
+    public let onHostsChanged: @Sendable () async -> Void
+    /// Re-applies hot security fields to the proxy after a `config.set` mutation.
+    public let onSecurityChanged: @Sendable () async -> Void
+    /// Owned by the daemon (it has the old snapshot to diff `ignored`); the SIGHUP
+    /// path and the RPC `config.reload` path both go through this single closure.
     public let onConfigReload: @Sendable () async throws -> ConfigReloadResult
 
     public init(
@@ -28,10 +31,9 @@ public struct AdminDispatcher: Sendable {
         eventRing: EventRing,
         caManager: CAManager,
         daemon: any DaemonControl,
-        config: Config? = nil,
-        runtimeRulesStore: RuntimeRulesStore,
-        onRulesChanged: @escaping @Sendable () async -> Void = {},
-        tomlHostsProvider: @escaping @Sendable () async -> [String] = { [] },
+        configStore: ConfigStore,
+        onHostsChanged: @escaping @Sendable () async -> Void = {},
+        onSecurityChanged: @escaping @Sendable () async -> Void = {},
         onConfigReload: @escaping @Sendable () async throws -> ConfigReloadResult = {
             throw JSONRPCError.internalError
         },
@@ -41,10 +43,9 @@ public struct AdminDispatcher: Sendable {
         self.eventRing = eventRing
         self.caManager = caManager
         self.daemon = daemon
-        self.config = config
-        self.runtimeRulesStore = runtimeRulesStore
-        self.onRulesChanged = onRulesChanged
-        self.tomlHostsProvider = tomlHostsProvider
+        self.configStore = configStore
+        self.onHostsChanged = onHostsChanged
+        self.onSecurityChanged = onSecurityChanged
         self.onConfigReload = onConfigReload
         self.logger = logger
     }
@@ -66,17 +67,34 @@ public struct AdminDispatcher: Sendable {
             return .failure(id: request.id, error: error)
         } catch let error as SecretStoreError {
             return .failure(id: request.id, error: Self.mapSecretStoreError(error))
-        } catch let error as RuntimeRulesStore.Error {
+        } catch let error as ConfigStore.Error {
             switch error {
             case .invalidHost(let h):
                 return .failure(
                     id: request.id,
                     error: JSONRPCError(code: JSONRPCError.invalidParams.code, message: "invalid host: \(h)")
                 )
-            case .ioError(let msg):
+            case .hostProtected:
+                // Reuse the existing protected-rule error (stable wire code); the CLI
+                // already renders it (`rule rm`). A built-in host can't be deleted.
+                return .failure(id: request.id, error: .ruleProtected)
+            case .unknownKey(let k):
                 return .failure(
                     id: request.id,
-                    error: JSONRPCError(code: JSONRPCError.internalError.code, message: "io error: \(msg)")
+                    error: JSONRPCError(code: JSONRPCError.invalidParams.code, message: "unknown key: \(k)")
+                )
+            case .invalidValue(let field, let value):
+                return .failure(
+                    id: request.id,
+                    error: JSONRPCError(
+                        code: JSONRPCError.invalidParams.code,
+                        message: "invalid value '\(value)' for '\(field)'"
+                    )
+                )
+            case .corrupted(let msg), .ioError(let msg):
+                return .failure(
+                    id: request.id,
+                    error: JSONRPCError(code: JSONRPCError.internalError.code, message: msg)
                 )
             }
         } catch {
@@ -176,51 +194,25 @@ public struct AdminDispatcher: Sendable {
             return try JSONValue.encoding(CAIsTrustedResult(trusted: trusted))
 
         case .configGet:
-            guard let config = config else {
-                throw JSONRPCError.notFound("config not loaded")
-            }
-            return try JSONValue.encoding(config)
+            return try JSONValue.encoding(await configStore.current)
 
         case .ruleAdd:
             let payload = try Self.decode(RuleHostParams.self, from: params)
-            // Spec §3.1: if the host is already defined in TOML, return a
-            // synthesised rule (createdAt = epoch 0, source = .toml) without
-            // touching the runtime store — idempotent no-op.
-            let tomlHosts = Set(await tomlHostsProvider())
-            if tomlHosts.contains(payload.host) {
-                let synthRule = MITMRule(
-                    host: payload.host,
-                    createdAt: Date(timeIntervalSince1970: 0),
-                    source: .toml
-                )
-                return try JSONValue.encoding(synthRule)
-            }
-            let rule = try await runtimeRulesStore.add(host: payload.host, now: Date())
-            await onRulesChanged()
+            // addHost is idempotent: an already-present host (built-in or user)
+            // returns its existing rule without a second entry.
+            let rule = try await configStore.addHost(payload.host, now: Date())
+            await onHostsChanged()
             return try JSONValue.encoding(rule)
 
         case .ruleList:
-            let tomlHosts = await tomlHostsProvider()
-            let tomlRules = tomlHosts.map {
-                MITMRule(host: $0, createdAt: Date(timeIntervalSince1970: 0), source: .toml)
-            }
-            let runtimeRules = await runtimeRulesStore.list()
-            // Dedup by host; TOML wins on collision.
-            var merged: [String: MITMRule] = [:]
-            for rule in runtimeRules { merged[rule.host] = rule }
-            for rule in tomlRules { merged[rule.host] = rule }
-            let sorted = merged.values.sorted { $0.host < $1.host }
-            return try JSONValue.encoding(sorted)
+            return try JSONValue.encoding(await configStore.listHosts())
 
         case .ruleDelete:
             let payload = try Self.decode(RuleHostParams.self, from: params)
-            let tomlHosts = Set(await tomlHostsProvider())
-            if tomlHosts.contains(payload.host) {
-                throw JSONRPCError.ruleProtected
-            }
-            let deleted = try await runtimeRulesStore.delete(host: payload.host)
+            // deleteHost throws .hostProtected for a built-in (origin: default) host.
+            let deleted = try await configStore.deleteHost(payload.host)
             guard deleted else { throw JSONRPCError.ruleNotFound }
-            await onRulesChanged()
+            await onHostsChanged()
             return try JSONValue.encoding(RuleDeletedResult(deleted: true))
 
         case .configReload:

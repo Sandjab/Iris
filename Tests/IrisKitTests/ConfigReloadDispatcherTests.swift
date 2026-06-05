@@ -26,14 +26,14 @@ final class ConfigReloadDispatcherTests: XCTestCase {
     ) async throws -> AdminDispatcher {
         let caManager = CAManager(keyStore: InMemoryCAKeyStore())
         _ = try await caManager.ensureCA()
-        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
-        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
+        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-config-\(UUID().uuidString).json")
+        let configStore = try ConfigStore(path: tmpPath, logger: Logger(label: "test"))
         return AdminDispatcher(
             secretStore: InMemorySecretStore(),
             eventRing: EventRing(capacity: 64),
             caManager: caManager,
             daemon: FakeDaemon(),
-            runtimeRulesStore: rulesStore,
+            configStore: configStore,
             onConfigReload: onConfigReload,
             logger: Logger(label: "test")
         )
@@ -89,14 +89,14 @@ final class ConfigReloadDispatcherTests: XCTestCase {
         // must return internalError — it signals the handler is not wired yet.
         let caManager = CAManager(keyStore: InMemoryCAKeyStore())
         _ = try await caManager.ensureCA()
-        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-rules-\(UUID().uuidString).json")
-        let rulesStore = try await RuntimeRulesStore(path: tmpPath, logger: Logger(label: "test"))
+        let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-config-\(UUID().uuidString).json")
+        let configStore = try ConfigStore(path: tmpPath, logger: Logger(label: "test"))
         let dispatcher = AdminDispatcher(
             secretStore: InMemorySecretStore(),
             eventRing: EventRing(capacity: 64),
             caManager: caManager,
             daemon: FakeDaemon(),
-            runtimeRulesStore: rulesStore
+            configStore: configStore
                 // onConfigReload intentionally omitted — uses default
         )
 
