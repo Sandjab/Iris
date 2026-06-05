@@ -385,6 +385,21 @@ final class ExfilRuleEngineTests: XCTestCase {
         XCTAssertEqual(alert.rule, .nonCanonicalLocation)
     }
 
+    func testR4IgnoresUnknownBodyName() async throws {
+        // R4 cle sur les secrets connus uniquement. Un placeholder inconnu dans
+        // un body suspect ne doit pas bloquer (il ne resout jamais). R2 ne le
+        // bloque pas non plus (R2 cle sur les connus) -> requete autorisee.
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.github.com"])])
+        let hits = [PlaceholderHit(name: "ghost", location: .body, snippet: "{{kc:ghost}}")]
+        let decision = try await ev.evaluate(
+            hits: hits,
+            context: ctx(host: "api.github.com", method: "POST", path: "/issues", contentType: "text/plain")
+        )
+        guard case .allow = decision else {
+            return XCTFail("unknown body name must not fire R4 (known-only)")
+        }
+    }
+
     // MARK: R5
 
     func testR5VolumeAnomalyFiresAtThreshold() async throws {

@@ -196,8 +196,12 @@ public actor ExfilRuleEngine {
             return .block(alert: alert, allHits: effectiveHits)
         }
 
-        // R4 — suspicious content type (medium)
-        if let triggeringHit = Self.suspiciousContentTypeFires(hits: effectiveHits, context: context) {
+        // R4 — suspicious content type (medium). Hits connus uniquement : un nom
+        // inconnu ne resout jamais. NOTE : sur le chemin courant R2 (body
+        // non-canonique) preempte R4 pour tout hit body connu — R4 ne fire donc
+        // plus ; conservee pour la defense en profondeur et un futur allowlist
+        // body-credential.
+        if let triggeringHit = Self.suspiciousContentTypeFires(hits: knownHits, context: context) {
             let alert = Alert(
                 severity: .medium,
                 rule: .suspiciousContentType,
