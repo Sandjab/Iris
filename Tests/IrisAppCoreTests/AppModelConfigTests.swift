@@ -5,6 +5,16 @@ import XCTest
 
 @MainActor
 final class AppModelConfigTests: XCTestCase {
+    func testLoadConfigFetchesAndStores() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        admin.stubConfig = .default
+        try await model.loadConfig(via: admin)
+        XCTAssertEqual(admin.calls, ["fetchConfig"])
+        XCTAssertEqual(model.config?.version, 1)
+        XCTAssertEqual(model.config?.security.onExfilAttempt, .blockAndNotify)
+    }
+
     func testFakeRecordsAndReturnsConfigStubs() async throws {
         let admin = FakeAdminCalling()
         admin.stubConfig = .default

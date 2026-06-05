@@ -13,6 +13,8 @@ public final class AppModel: ObservableObject {
     @Published public var alerts: [Event] = []
     @Published public var secrets: [Secret] = []
     @Published public var rules: [MITMRule] = []
+    @Published public var config: Config?
+    @Published public var caTrusted: Bool?
     @Published public var unreadAlertCount: Int = 0
     @Published public var streamPaused: Bool = false
     /// Frozen copy of `events` captured when the Logs stream was paused. Lives on the
@@ -173,5 +175,11 @@ public final class AppModel: ObservableObject {
     public func deleteRule(host: String, via admin: AdminCalling) async throws {
         try await admin.deleteRule(host: host)
         try await refreshRules(via: admin)
+    }
+
+    // MARK: - Config / CA (Phase 6.3b)
+
+    public func loadConfig(via admin: AdminCalling) async throws {
+        config = try await admin.fetchConfig()
     }
 }
