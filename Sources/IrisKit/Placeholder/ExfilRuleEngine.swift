@@ -164,7 +164,7 @@ public actor ExfilRuleEngine {
 
         // R2 — non-canonical location (high)
         for hit in knownHits {
-            if Self.isNonCanonicalLocation(hit: hit, method: context.method) {
+            if Self.isNonCanonicalLocation(hit: hit) {
                 let alert = Alert(
                     severity: .high,
                     rule: .nonCanonicalLocation,
@@ -249,17 +249,15 @@ public actor ExfilRuleEngine {
         "authorization", "x-api-key", "api-key", "x-auth-token",
     ]
 
-    private static func isNonCanonicalLocation(
-        hit: PlaceholderHit,
-        method: String
-    ) -> Bool {
+    private static func isNonCanonicalLocation(hit: PlaceholderHit) -> Bool {
         switch hit.location {
         case .header(let name):
             return !canonicalAuthHeaders.contains(name)
-        case .urlPath, .queryString:
+        case .urlPath, .queryString, .body:
+            // Substitution reservee aux headers d'auth canoniques : query, path
+            // et body sont tous non-canoniques. Un secret connu qui y apparait
+            // est un signal d'exfil (bloque, forwarde litteral, alerte).
             return true
-        case .body:
-            return method.uppercased() == "GET"
         }
     }
 
