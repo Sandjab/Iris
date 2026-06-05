@@ -29,6 +29,7 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var lastAcknowledgedAt: Date?
 
     private let defaults: UserDefaults
+    private let caInstaller: CATrustInstalling
     private static let tabKey = "io.iris.app.selectedTab"
     private static let ackKey = "io.iris.app.lastAcknowledgedAt"
 
@@ -37,8 +38,12 @@ public final class AppModel: ObservableObject {
     /// Max in-memory alerts ring size.
     public static let alertsCap: Int = 200
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(
+        defaults: UserDefaults = .standard,
+        caInstaller: CATrustInstalling = SystemCATrustInstaller()
+    ) {
         self.defaults = defaults
+        self.caInstaller = caInstaller
         let storedTab = defaults.string(forKey: Self.tabKey).flatMap(Tab.init(rawValue:))
         self.selectedTab = storedTab ?? .overview
         if let ts = defaults.object(forKey: Self.ackKey) as? Date {
@@ -204,5 +209,21 @@ public final class AppModel: ObservableObject {
 
     public func configFilePath(via admin: AdminCalling) async throws -> String {
         try await admin.configPath()
+    }
+
+    public func installCA(via admin: AdminCalling) async throws {
+        if caTrusted == true { return }  // idempotent: skip the auth prompt
+        let path = try await admin.caExportPath()
+        let installer = caInstaller
+        try await Task.detached { try installer.install(pemPath: path) }.value
+        try await refreshCATrust(via: admin)
+    }
+
+    public func uninstallCA(via admin: AdminCalling) async throws {
+        if caTrusted == false { return }
+        let path = try await admin.caExportPath()
+        let installer = caInstaller
+        try await Task.detached { try installer.uninstall(pemPath: path) }.value
+        try await refreshCATrust(via: admin)
     }
 }

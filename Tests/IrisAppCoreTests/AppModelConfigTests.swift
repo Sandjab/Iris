@@ -44,6 +44,44 @@ final class AppModelConfigTests: XCTestCase {
         XCTAssertEqual(admin.calls, ["isCATrusted", "reloadConfig", "fetchConfig", "configPath"])
     }
 
+    func testInstallCAExportsPathThenInstallsAndRefreshes() async throws {
+        let admin = FakeAdminCalling()
+        admin.stubCAExportPath = "/tmp/iris/ca.pem"
+        admin.stubCATrusted = true  // post-install refresh sees trusted
+        let installer = FakeCATrustInstaller()
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!, caInstaller: installer)
+        model.caTrusted = false  // not yet trusted → install proceeds
+
+        try await model.installCA(via: admin)
+
+        XCTAssertEqual(installer.installedPath, "/tmp/iris/ca.pem")
+        XCTAssertEqual(admin.calls, ["caExportPath", "isCATrusted"])
+        XCTAssertEqual(model.caTrusted, true)
+    }
+
+    func testInstallCANoopWhenAlreadyTrusted() async throws {
+        let admin = FakeAdminCalling()
+        let installer = FakeCATrustInstaller()
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!, caInstaller: installer)
+        model.caTrusted = true
+        try await model.installCA(via: admin)
+        XCTAssertNil(installer.installedPath)
+        XCTAssertEqual(admin.calls, [])  // idempotent: no RPC, no shell-out
+    }
+
+    func testUninstallCAExportsPathThenUninstallsAndRefreshes() async throws {
+        let admin = FakeAdminCalling()
+        admin.stubCAExportPath = "/tmp/iris/ca.pem"
+        admin.stubCATrusted = false
+        let installer = FakeCATrustInstaller()
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!, caInstaller: installer)
+        model.caTrusted = true
+        try await model.uninstallCA(via: admin)
+        XCTAssertEqual(installer.uninstalledPath, "/tmp/iris/ca.pem")
+        XCTAssertEqual(admin.calls, ["caExportPath", "isCATrusted"])
+        XCTAssertEqual(model.caTrusted, false)
+    }
+
     func testFakeRecordsAndReturnsConfigStubs() async throws {
         let admin = FakeAdminCalling()
         admin.stubConfig = .default
