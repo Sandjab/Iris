@@ -28,6 +28,22 @@ final class AppModelConfigTests: XCTestCase {
         XCTAssertEqual(admin.calls, ["setConfig(security.on_exfil_attempt=block_only)", "fetchConfig"])
     }
 
+    func testRefreshCATrustReloadAndConfigPath() async throws {
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        admin.stubConfig = .default
+        admin.stubCATrusted = true
+        admin.stubConfigPath = "/tmp/iris/config.json"
+
+        try await model.refreshCATrust(via: admin)
+        XCTAssertEqual(model.caTrusted, true)
+
+        try await model.reloadConfig(via: admin)
+        let path = try await model.configFilePath(via: admin)
+        XCTAssertEqual(path, "/tmp/iris/config.json")
+        XCTAssertEqual(admin.calls, ["isCATrusted", "reloadConfig", "fetchConfig", "configPath"])
+    }
+
     func testFakeRecordsAndReturnsConfigStubs() async throws {
         let admin = FakeAdminCalling()
         admin.stubConfig = .default

@@ -192,4 +192,17 @@ public final class AppModel: ObservableObject {
         try await loadConfig(via: admin)
         return result
     }
+
+    public func refreshCATrust(via admin: AdminCalling) async throws {
+        caTrusted = try await admin.isCATrusted()
+    }
+
+    public func reloadConfig(via admin: AdminCalling) async throws {
+        _ = try await admin.reloadConfig()
+        try await loadConfig(via: admin)
+    }
+
+    public func configFilePath(via admin: AdminCalling) async throws -> String {
+        try await admin.configPath()
+    }
 }
