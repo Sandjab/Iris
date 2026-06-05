@@ -81,30 +81,4 @@ final class AppModelConfigTests: XCTestCase {
         XCTAssertEqual(admin.calls, ["caExportPath", "isCATrusted"])
         XCTAssertEqual(model.caTrusted, false)
     }
-
-    func testFakeRecordsAndReturnsConfigStubs() async throws {
-        let admin = FakeAdminCalling()
-        admin.stubConfig = .default
-        admin.stubCATrusted = true
-        admin.stubConfigPath = "/tmp/iris/config.json"
-        admin.stubCAExportPath = "/tmp/iris/ca.pem"
-
-        _ = try await admin.fetchConfig()
-        _ = try await admin.setConfig(updates: [ConfigSetParams.Update(key: "backups.max_count", value: "3")])
-        _ = try await admin.reloadConfig()
-        let cfgPath = try await admin.configPath()
-        let trusted = try await admin.isCATrusted()
-        let caPath = try await admin.caExportPath()
-
-        XCTAssertEqual(cfgPath, "/tmp/iris/config.json")
-        XCTAssertTrue(trusted)
-        XCTAssertEqual(caPath, "/tmp/iris/ca.pem")
-        XCTAssertEqual(
-            admin.calls,
-            [
-                "fetchConfig", "setConfig(backups.max_count=3)", "reloadConfig", "configPath", "isCATrusted",
-                "caExportPath",
-            ]
-        )
-    }
 }
