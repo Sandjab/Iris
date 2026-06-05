@@ -108,27 +108,36 @@ The menu bar app and CLI both talk to the daemon over the Unix domain socket for
 
 ## Configuration
 
-`~/Library/Application Support/iris/config.toml`:
+A single JSON file owned by the daemon, seeded with defaults on first run and
+edited via the CLI/app (`iris config set`, `iris rule add/rm`) — never by hand:
+`~/Library/Application Support/iris/config.json`:
 
-```toml
-[broker]
-listen        = "127.0.0.1:8888"
-events_listen = "127.0.0.1:8889"
-admin_socket  = "~/Library/Application Support/iris/admin.sock"
-log_level     = "info"
-
-# Hosts where the broker decrypts and scans for placeholders.
-# Anything else is CONNECT-only, end-to-end encrypted to the agent.
-[[mitm_host]]
-host = "api.anthropic.com"
-
-[[mitm_host]]
-host = "api.github.com"
-
-# Secrets are managed via the app, the CLI, or directly via Keychain.
-# Their allowed_hosts list is stored alongside in this file (or in Keychain
-# attributes — see SPECS.md).
+```json
+{
+  "version": 1,
+  "broker": {
+    "listen": "127.0.0.1:8888",
+    "events_listen": "127.0.0.1:8899",
+    "admin_socket": "~/Library/Application Support/iris/admin.sock",
+    "log_level": "info",
+    "event_retention_days": 7,
+    "event_ring_size": 10000
+  },
+  "security": {
+    "on_exfil_attempt": "block_and_notify",
+    "max_substitutions_per_minute": 60
+  },
+  "backups": { "max_count": 10 },
+  "hosts": [
+    { "host": "api.anthropic.com", "origin": "default", "created_at": "2026-06-05T12:00:00Z" }
+  ]
+}
 ```
+
+`hosts` are the MITM whitelist (where the broker decrypts and scans for
+placeholders; anything else is CONNECT-only, end-to-end encrypted to the agent).
+A `default` host is protected (not removable via RPC). Secrets are NOT in this
+file — they live in the Keychain alongside their `allowed_hosts` (see `SPECS.md`).
 
 ## Security model
 
