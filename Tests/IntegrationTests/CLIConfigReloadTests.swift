@@ -37,13 +37,14 @@ final class CLIConfigReloadTests: XCTestCase {
     }
 
     func testConfigReloadWithIgnoredFieldWarnsOnStderr() throws {
-        // Modify the TOML on disk to change broker.listen (structural field).
-        let originalToml = try String(contentsOfFile: harness.configPath, encoding: .utf8)
-        let modifiedToml = originalToml.replacingOccurrences(
+        // Modify config.json on disk to change broker.listen (structural field).
+        let original = try String(contentsOfFile: harness.configPath, encoding: .utf8)
+        let modified = original.replacingOccurrences(
             of: "127.0.0.1:\(harness.brokerPort)",
             with: "127.0.0.1:19999"
         )
-        try modifiedToml.write(toFile: harness.configPath, atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(modified, original, "listen value should be present to edit")
+        try modified.write(toFile: harness.configPath, atomically: true, encoding: .utf8)
 
         let result = try harness.runIris(["config", "reload"])
         XCTAssertEqual(result.code, 0, "should exit 0 even with ignored changes\nstderr=\(result.stderr)")
@@ -54,13 +55,14 @@ final class CLIConfigReloadTests: XCTestCase {
     }
 
     func testConfigReloadHotReloadsSecurityPolicy() throws {
-        // Change max_substitutions_per_minute in the config (hot-reloadable).
-        let originalToml = try String(contentsOfFile: harness.configPath, encoding: .utf8)
-        let modifiedToml = originalToml.replacingOccurrences(
-            of: "max_substitutions_per_minute = 60",
-            with: "max_substitutions_per_minute = 7"
+        // Change max_substitutions_per_minute in config.json (hot-reloadable).
+        let original = try String(contentsOfFile: harness.configPath, encoding: .utf8)
+        let modified = original.replacingOccurrences(
+            of: "\"max_substitutions_per_minute\": 60",
+            with: "\"max_substitutions_per_minute\": 7"
         )
-        try modifiedToml.write(toFile: harness.configPath, atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(modified, original, "max_substitutions_per_minute value should be present to edit")
+        try modified.write(toFile: harness.configPath, atomically: true, encoding: .utf8)
 
         let reload = try harness.runIris(["config", "reload", "--json"])
         XCTAssertEqual(reload.code, 0, "reload should succeed\nstderr=\(reload.stderr)")
@@ -73,6 +75,13 @@ final class CLIConfigReloadTests: XCTestCase {
         XCTAssertFalse(
             decoded.ignored.contains("security.max_substitutions_per_minute"),
             "hot-reloadable field should not appear in ignored list"
+        )
+
+        // Confirm the new value actually took effect.
+        let get = try harness.runIris(["config", "get"])
+        XCTAssertTrue(
+            get.stdout.contains("max_substitutions_per_minute = 7"),
+            "hot reload should apply the new value, got: \(get.stdout)"
         )
     }
 }

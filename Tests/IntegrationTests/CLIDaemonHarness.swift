@@ -200,7 +200,7 @@ final class CLIDaemonHarness {
         // --socket-path right after them.
         let subcommandWords: Set<String> = [
             "secret", "add", "list", "show", "edit", "rotate", "rm", "quarantine", "unquarantine",
-            "status", "pause", "resume", "ca", "get", "reload",
+            "status", "pause", "resume", "ca", "get", "set", "reload",
             "config", "rule", "logs", "doctor",
             "mcp", "wrap",
         ]
@@ -298,7 +298,7 @@ final class CLIDaemonHarness {
     func runIrisBackground(_ args: [String]) throws -> BackgroundIris {
         let subcommandWords: Set<String> = [
             "secret", "add", "list", "show", "edit", "rotate", "rm", "quarantine", "unquarantine",
-            "status", "pause", "resume", "ca", "get", "reload",
+            "status", "pause", "resume", "ca", "get", "set", "reload",
             "config", "rule", "logs", "doctor",
             "mcp", "wrap",
         ]
