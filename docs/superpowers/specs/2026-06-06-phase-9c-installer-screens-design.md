@@ -20,8 +20,9 @@ de marque, sans toucher au code applicatif.
 **Dans le périmètre :**
 - 4 écrans Distribution XML — `welcome`, `readme`, `license`, `conclusion` — en
   **HTML** (sauf la licence en texte), **localisés en/fr** via dossiers `*.lproj`.
-- Image de fond de l'assistant — `background.png` (@1x) + `background@2x.png`,
-  direction **D2/doré** (cf §2.3), **rendue une fois et commitée**.
+- Image de fond de l'assistant — `background.png` (image unique 1240×836, résolution
+  retina ; cf §2.3 pour le pourquoi du fichier unique), direction **D2/doré**,
+  **rendue une fois et commitée**.
 - Restructuration `packaging/build-pkg.sh` : `pkgbuild` (composant) +
   `productbuild --distribution … --resources … --sign --timestamp`.
 - `Distribution.xml` commité (synthétisé puis enrichi).
@@ -74,8 +75,7 @@ unlocalized resources (such as image files) and/or standard lproj directories
 la langue système. **Primaire = anglais** (cohérent avec l'app, le README, SPECS,
 LICENSE — toute la surface produit est en anglais) ; **fr** en traduction.
 
-Les images de fond (`background.png`, `background@2x.png`) sont **non localisées**
-→ à la racine de `resources/`.
+L'image de fond (`background.png`) est **non localisée** → à la racine de `resources/`.
 
 `<title>` du Distribution = `Iris` (nom de produit, neutre) — on ne localise pas
 les chaînes de niveau Distribution (over-engineering) ; tout le contenu lisible
@@ -90,7 +90,12 @@ Composition **cantonnée à gauche / bas-gauche** : le volet de droite de l'Inst
 porte son propre texte + le bouton « Continuer » → le fond doit rester discret
 derrière. `alignment`/`scaling` exacts **réglés au smoke**.
 
-`background.png` / `background@2x.png` sont **rendus une fois et commités** (pas de
+**Fichier unique** `background.png` (1240×836, résolution retina), pas de variante
+`@2x` : `productbuild --resources` ne copie dans le produit que les fichiers
+*référencés* par le Distribution XML + les dossiers `*.lproj` ; un `background@2x.png`
+non référencé serait **silencieusement omis** (vérifié en T7). `scaling="tofit"`
+adapte l'image unique à la fenêtre (net en retina via les 1240 px, downscale propre
+en 1×). `background.png` est **rendu une fois et commité** (pas de
 génération au build → pas de dépendance ImageMagick dans la release). La silhouette
 dérive de l'image source fournie (recolorée navy). Méthode de rendu (SVG rasterisé
 ou composition) = détail du plan d'implémentation ; l'asset livré est le PNG.
@@ -133,9 +138,10 @@ packaging/
 │   └── postinstall
 └── installer/                # NOUVEAU
     ├── Distribution.xml       # commité (synthétisé + enrichi)
+    ├── make-background.sh     # régénère background.png depuis src/
+    ├── src/mercury-silhouette.png  # source de marque commitée
     └── resources/             # → --resources
-        ├── background.png      # D2/doré, commité, non localisé
-        ├── background@2x.png
+        ├── background.png      # D2/doré 1240×836, commité, non localisé (fichier unique)
         ├── en.lproj/  welcome.html  readme.html  conclusion.html  [license.txt généré]
         └── fr.lproj/  welcome.html  readme.html  conclusion.html  [license.txt généré]
 ```

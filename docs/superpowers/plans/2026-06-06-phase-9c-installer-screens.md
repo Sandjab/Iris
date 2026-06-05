@@ -17,9 +17,8 @@
 | Fichier | Responsabilité |
 |---|---|
 | `packaging/installer/src/mercury-silhouette.png` | **Créer.** Source de marque commitée (silhouette Mercure N&B, downscalée), pour régénérer le fond. |
-| `packaging/installer/make-background.sh` | **Créer.** Régénère `background.png`/`@2x` depuis la source (masque → navy → composition). |
-| `packaging/installer/resources/background.png` | **Créer (généré, commité).** Fond @1x 620×418. |
-| `packaging/installer/resources/background@2x.png` | **Créer (généré, commité).** Fond @2x 1240×836. |
+| `packaging/installer/make-background.sh` | **Créer.** Régénère `background.png` depuis la source (masque → navy → composition). |
+| `packaging/installer/resources/background.png` | **Créer (généré, commité).** Fond unique 1240×836 (retina). _(Amendé : pas de `@2x` — cf note Task 1.)_ |
 | `packaging/installer/resources/en.lproj/{welcome,readme,conclusion}.html` | **Créer.** Écrans anglais. |
 | `packaging/installer/resources/fr.lproj/{welcome,readme,conclusion}.html` | **Créer.** Écrans français. |
 | `packaging/installer/resources/{en,fr}.lproj/license.txt` | **Généré au build** (copie de `LICENSE`), **gitignoré**. |
@@ -29,7 +28,15 @@
 
 ---
 
-## Task 1: Asset de fond (silhouette source + script + PNG @1x/@2x)
+## Task 1: Asset de fond (silhouette source + script + PNG)
+
+> **⚠️ Amendé en exécution (commit `aee3e54`)** : les étapes ci-dessous décrivaient un
+> couple `background.png` (@1x 620×418) + `background@2x.png` (@2x 1240×836). La vérif T7
+> a montré que `productbuild --resources` n'embarque **que** les fichiers référencés par
+> le Distribution XML + les `*.lproj` ; un `background@2x.png` non référencé est omis.
+> → **fichier unique** `background.png` à **1240×836** (retina), `scaling="tofit"` l'adapte
+> à la fenêtre. Le `make-background.sh` commité dans le repo fait foi (pas d'étape `@2x`,
+> pas de downscale @1x). Les blocs ci-dessous restent en l'état comme trace historique.
 
 **Files:**
 - Create: `packaging/installer/src/mercury-silhouette.png`
@@ -470,7 +477,7 @@ test -f /tmp/iris-9c/expanded/Resources/fr.lproj/welcome.html && \
 test -f /tmp/iris-9c/expanded/Resources/background.png && \
 test -f /tmp/iris-9c/expanded/Distribution && echo "CÂBLAGE OK"
 ```
-Expected : `CÂBLAGE OK`, et la liste montre `en.lproj/{welcome,readme,conclusion,license.txt}.html|txt`, idem `fr.lproj`, plus `background.png`/`background@2x.png`.
+Expected : `CÂBLAGE OK`, et la liste montre `en.lproj/{welcome,readme,conclusion,license.txt}.html|txt`, idem `fr.lproj`, plus `background.png` (fichier unique).
 
 - [ ] **Step 4: Nettoyer les artefacts temporaires et les license.txt générés**
 
