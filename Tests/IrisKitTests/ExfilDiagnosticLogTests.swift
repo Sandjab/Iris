@@ -106,9 +106,11 @@ final class ExfilDiagnosticLogTests: XCTestCase {
                 contentType: "application/json"
             )
         )
-        // Sanity: this is indeed the R3 multipleSecrets block we want to diagnose.
-        guard case .block(let alert, _) = decision, alert.rule == .multipleSecrets else {
-            return XCTFail("expected R3 multipleSecrets block for two distinct names")
+        // Post-fix (R3 known-only) : un secret connu en header + un placeholder
+        // inconnu en body ne bloque plus. L'inventaire est logue avant les regles,
+        // donc capture quelle que soit la decision.
+        guard case .allow = decision else {
+            return XCTFail("known header secret + unknown body name should allow (R3 known-only)")
         }
 
         let dump = sink.dump()

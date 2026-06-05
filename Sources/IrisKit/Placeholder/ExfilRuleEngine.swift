@@ -176,15 +176,16 @@ public actor ExfilRuleEngine {
             }
         }
 
-        // R3 — multiple distinct secrets (medium). Counts all hits, including
-        // unknown names (design §7.1): mixed known + typo is exactly the pattern
-        // we want to flag.
-        let distinctNames = Set(effectiveHits.map(\.name))
+        // R3 — multiple distinct KNOWN secrets (medium). Les noms inconnus ne
+        // resolvent jamais (ne fuient pas) et la grammaire {{kc:...}} apparait
+        // dans du texte ordinaire (la doc d'IRIS elle-meme) -> on ne les compte
+        // pas. Aligne sur R1/R2/R5 qui cles deja sur knownHits.
+        let distinctNames = Set(knownHits.map(\.name))
         if distinctNames.count >= 2 {
             guard let triggeringName = distinctNames.sorted().first else {
                 return .allow(resolvable: knownHits)
             }
-            let triggeringHit = effectiveHits.first { $0.name == triggeringName } ?? effectiveHits[0]
+            let triggeringHit = knownHits.first { $0.name == triggeringName } ?? knownHits[0]
             let alert = Alert(
                 severity: .medium,
                 rule: .multipleSecrets,

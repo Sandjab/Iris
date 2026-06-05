@@ -198,37 +198,20 @@ final class ExfilRuleEngineTests: XCTestCase {
         }
     }
 
-    func testR3CountsUnknownNames() async throws {
-        // 1 known + 1 unknown = 2 distinct names → R3 fires.
+    func testR3IgnoresUnknownNames() async throws {
+        // R3 ne compte que les secrets CONNUS (un env-dump de vrais credentials).
+        // Un nom inconnu ne resout jamais -> ne peut fuiter -> ne doit pas bloquer.
+        // C'est le fix du faux positif de la doc {{kc:NAME}}.
         let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
         let hits = [
             PlaceholderHit(name: "foo", location: .header(name: "authorization"), snippet: "{{kc:foo}}"),
             PlaceholderHit(name: "ghost", location: .header(name: "x-api-key"), snippet: "{{kc:ghost}}"),
         ]
         let decision = try await ev.evaluate(hits: hits, context: ctx())
-        guard case .block(let alert, _) = decision else {
-            return XCTFail("expected block")
+        guard case .allow(let resolvable) = decision else {
+            return XCTFail("1 known + 1 unknown -> R3 must not fire (known-only)")
         }
-        XCTAssertEqual(alert.rule, .multipleSecrets)
-        XCTAssertEqual(alert.secretName, "foo")  // alphabetical winner over { foo, ghost }
-        XCTAssertEqual(alert.detectedAt, .header)
-    }
-
-    func testR3TiebreakWinnerCanBeUnknownName() async throws {
-        // Known "zeta" and unknown "alpha" — alphabetical winner is the unknown.
-        // Asserts the triggering hit lookup uses original `hits`, not `knownHits`.
-        let ev = try await makeEvaluator(secrets: [("zeta", ["api.anthropic.com"])])
-        let hits = [
-            PlaceholderHit(name: "zeta", location: .header(name: "authorization"), snippet: "{{kc:zeta}}"),
-            PlaceholderHit(name: "alpha", location: .queryString, snippet: "?x={{kc:alpha}}"),
-        ]
-        let decision = try await ev.evaluate(hits: hits, context: ctx())
-        guard case .block(let alert, _) = decision else {
-            return XCTFail("expected block")
-        }
-        XCTAssertEqual(alert.rule, .multipleSecrets)
-        XCTAssertEqual(alert.secretName, "alpha")
-        XCTAssertEqual(alert.detectedAt, .queryString)
+        XCTAssertEqual(resolvable.map(\.name), ["foo"])
     }
 
     // MARK: R4
