@@ -190,6 +190,7 @@ struct SettingsTab: View {
 
     private func reload() async {
         errorText = nil
+        syncFields()  // sync immediately if config is already loaded (bootstrap) — avoids empty-field flicker
         do {
             try await model.loadConfig(via: admin)
             try await model.refreshCATrust(via: admin)
