@@ -197,10 +197,12 @@ public actor ExfilRuleEngine {
         }
 
         // R4 — suspicious content type (medium). Hits connus uniquement : un nom
-        // inconnu ne resout jamais. NOTE : sur le chemin courant R2 (body
-        // non-canonique) preempte R4 pour tout hit body connu — R4 ne fire donc
-        // plus ; conservee pour la defense en profondeur et un futur allowlist
-        // body-credential.
+        // inconnu ne resout jamais. NOTE : actuellement INATTEIGNABLE — R2 (body
+        // non-canonique) bloque tout hit body connu avant d'arriver ici, et
+        // suspiciousContentTypeFires ne fire que sur un hit body. R4 est conservee
+        // telle quelle pour qu'un futur allowlist body-credential (qui retirerait
+        // le cas .body de isNonCanonicalLocation) herite automatiquement de R4
+        // comme second filtre, sans changement separe.
         if let triggeringHit = Self.suspiciousContentTypeFires(hits: knownHits, context: context) {
             let alert = Alert(
                 severity: .medium,

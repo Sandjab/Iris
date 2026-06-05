@@ -130,6 +130,46 @@ final class ExfilDiagnosticLogTests: XCTestCase {
         XCTAssertTrue(dump.contains("/api/event_logging/v2/batch"), "path should be logged")
     }
 
+    func testHitInventoryIsLoggedEvenWhenRequestIsBlocked() async throws {
+        // The inventory logs before the rules run, so it must be present even on
+        // a block path. Two known secrets in canonical headers -> R3 blocks.
+        let store = InMemorySecretStore()
+        for name in ["alpha", "beta"] {
+            _ = try await store.add(
+                Data("value-\(name)".utf8),
+                named: name,
+                allowedHosts: ["api.anthropic.com"],
+                createdAt: Date()
+            )
+        }
+        let sink = CapturedLog()
+        let engine = ExfilRuleEngine(
+            secretStore: store,
+            maxSubstitutionsPerMinuteProvider: { 60 },
+            logger: makeLogger(into: sink)
+        )
+        let decision = try await engine.evaluate(
+            hits: [
+                PlaceholderHit(name: "alpha", location: .header(name: "authorization"), snippet: "{{kc:alpha}}"),
+                PlaceholderHit(name: "beta", location: .header(name: "x-api-key"), snippet: "{{kc:beta}}"),
+            ],
+            context: RequestContext(
+                host: "api.anthropic.com",
+                method: "POST",
+                path: "/v1/messages",
+                contentType: "application/json"
+            )
+        )
+        guard case .block = decision else {
+            return XCTFail("two known secrets must block (R3)")
+        }
+        let dump = sink.dump()
+        XCTAssertTrue(dump.contains("alpha"), "inventory should log on a blocked request")
+        XCTAssertTrue(dump.contains("beta"))
+        XCTAssertFalse(dump.contains("value-alpha"), "no secret value in the log")
+        XCTAssertFalse(dump.contains("value-beta"), "no secret value in the log")
+    }
+
     /// At `info` (production default), the per-request inventory must stay quiet:
     /// it is a `debug` opt-in, not background spam (handoff: gate it).
     func testInventoryIsSilentBelowDebugLevel() async throws {
