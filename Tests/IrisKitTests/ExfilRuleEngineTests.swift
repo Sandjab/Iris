@@ -120,6 +120,20 @@ final class ExfilRuleEngineTests: XCTestCase {
         }
     }
 
+    func testR2CanonicalHeaderMatchIsCaseInsensitive() async throws {
+        // HTTP header names are case-insensitive (RFC 7230). A known secret in a
+        // mixed-case canonical auth header must be allowed, not blocked by R2.
+        let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
+        let hits = [
+            PlaceholderHit(name: "foo", location: .header(name: "X-API-Key"), snippet: "{{kc:foo}}")
+        ]
+        let decision = try await ev.evaluate(hits: hits, context: ctx())
+        guard case .allow(let resolvable) = decision else {
+            return XCTFail("mixed-case canonical header must be allowed")
+        }
+        XCTAssertEqual(resolvable.map(\.name), ["foo"])
+    }
+
     func testR2HitInURLPathBlocks() async throws {
         let ev = try await makeEvaluator(secrets: [("foo", ["api.anthropic.com"])])
         let hits = [PlaceholderHit(name: "foo", location: .urlPath, snippet: "/{{kc:foo}}")]

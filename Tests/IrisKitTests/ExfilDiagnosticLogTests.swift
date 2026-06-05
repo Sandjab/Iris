@@ -168,6 +168,8 @@ final class ExfilDiagnosticLogTests: XCTestCase {
         XCTAssertTrue(dump.contains("beta"))
         XCTAssertFalse(dump.contains("value-alpha"), "no secret value in the log")
         XCTAssertFalse(dump.contains("value-beta"), "no secret value in the log")
+        // The R3 trigger value is the count of distinct KNOWN names.
+        XCTAssertTrue(dump.contains("distinctKnownNames=2"), "log should expose the R3 trigger count")
     }
 
     /// At `info` (production default), the per-request inventory must stay quiet:

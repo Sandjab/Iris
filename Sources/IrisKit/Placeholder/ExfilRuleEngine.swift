@@ -143,6 +143,7 @@ public actor ExfilRuleEngine {
                 "method": "\(context.method)",
                 "path": "\(context.path)",
                 "distinctNames": "\(Set(effectiveHits.map(\.name)).count)",
+                "distinctKnownNames": "\(Set(knownHits.map(\.name)).count)",
                 "hits": "\(inventory)",
             ]
         )
@@ -261,7 +262,10 @@ public actor ExfilRuleEngine {
     private static func isNonCanonicalLocation(hit: PlaceholderHit) -> Bool {
         switch hit.location {
         case .header(let name):
-            return !canonicalAuthHeaders.contains(name)
+            // HTTP header names are case-insensitive (RFC 7230 §3.2). The scanner
+            // already lowercases them; lowercasing here too guards against a
+            // manually-constructed PlaceholderHit (tests / future callers).
+            return !canonicalAuthHeaders.contains(name.lowercased())
         case .urlPath, .queryString, .body:
             // Substitution reservee aux headers d'auth canoniques : query, path
             // et body sont tous non-canoniques. Un secret connu qui y apparait
