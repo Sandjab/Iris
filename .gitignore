@@ -72,3 +72,6 @@ fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
 .DS_Store
+
+# Phase 9c : licence copiée depuis LICENSE au build (source unique)
+packaging/installer/resources/*.lproj/license.txt
