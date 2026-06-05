@@ -87,6 +87,30 @@ extension AdminClient: AdminCalling {
             returning: RuleDeletedResult.self
         )
     }
+
+    public func fetchConfig() async throws -> Config {
+        try await call(.configGet, returning: Config.self)
+    }
+
+    public func setConfig(updates: [ConfigSetParams.Update]) async throws -> ConfigSetResult {
+        try await call(.configSet, params: ConfigSetParams(updates: updates), returning: ConfigSetResult.self)
+    }
+
+    public func reloadConfig() async throws -> ConfigReloadResult {
+        try await call(.configReload, returning: ConfigReloadResult.self)
+    }
+
+    public func configPath() async throws -> String {
+        try await call(.configPath, returning: ConfigPathResult.self).path
+    }
+
+    public func isCATrusted() async throws -> Bool {
+        try await call(.caIsTrusted, returning: CAIsTrustedResult.self).trusted
+    }
+
+    public func caExportPath() async throws -> String {
+        try await call(.caExportPath, returning: CAExportPathResult.self).path
+    }
 }
 
 // MARK: - EventsClient + EventsSubscribing
