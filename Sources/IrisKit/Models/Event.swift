@@ -11,6 +11,8 @@ public struct Event: Codable, Sendable, Identifiable, Equatable {
     public let durationMs: UInt32?
     public let substitutedSecrets: [String]
     public let alert: Alert?
+    /// Non-nil only for `kind == .systemAlert`. Mutually exclusive with `alert`.
+    public let systemAlert: SystemAlert?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -23,6 +25,7 @@ public struct Event: Codable, Sendable, Identifiable, Equatable {
         case durationMs = "duration_ms"
         case substitutedSecrets = "substituted_secrets"
         case alert
+        case systemAlert = "system_alert"
     }
 
     public enum Kind: String, Codable, Sendable, CaseIterable {
@@ -31,6 +34,9 @@ public struct Event: Codable, Sendable, Identifiable, Equatable {
         case noMatch
         case exfilBlocked
         case error
+        /// A daemon-level, non-exfil alert (e.g. degraded boot after config
+        /// corruption). Carries a `SystemAlert` payload, never an `Alert`.
+        case systemAlert
     }
 
     public init(
@@ -43,7 +49,8 @@ public struct Event: Codable, Sendable, Identifiable, Equatable {
         statusCode: Int? = nil,
         durationMs: UInt32? = nil,
         substitutedSecrets: [String] = [],
-        alert: Alert? = nil
+        alert: Alert? = nil,
+        systemAlert: SystemAlert? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -55,5 +62,6 @@ public struct Event: Codable, Sendable, Identifiable, Equatable {
         self.durationMs = durationMs
         self.substitutedSecrets = substitutedSecrets
         self.alert = alert
+        self.systemAlert = systemAlert
     }
 }

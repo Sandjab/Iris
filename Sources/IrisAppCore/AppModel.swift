@@ -97,7 +97,9 @@ public final class AppModel: ObservableObject {
 
     public func ingest(_ event: Event) {
         ingestInto(&events, event: event, cap: Self.eventsCap)
-        if event.kind == .exfilBlocked {
+        // Both exfil alerts and daemon-level system alerts (e.g. degraded boot
+        // after config corruption, Phase 6.3a) surface in the Security tab.
+        if event.kind == .exfilBlocked || event.kind == .systemAlert {
             ingestInto(&alerts, event: event, cap: Self.alertsCap)
             recomputeUnreadCount()
         }

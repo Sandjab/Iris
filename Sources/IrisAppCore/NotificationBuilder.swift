@@ -4,7 +4,17 @@ import UserNotifications
 
 public enum NotificationBuilder {
     /// SPECS §15.3 — notify only on exfiltration alerts of severity >= medium.
+    /// Phase 6.3a extends this to daemon-level `SystemAlert`s (same threshold).
     public static func build(from event: Event) -> UNMutableNotificationContent? {
+        if event.kind == .systemAlert, let system = event.systemAlert {
+            guard system.severity >= .medium else { return nil }
+            let content = UNMutableNotificationContent()
+            content.title = "IRIS configuration alert"
+            content.body = system.message
+            content.userInfo = ["event_id": event.id.uuidString]
+            return content
+        }
+
         guard event.kind == .exfilBlocked, let alert = event.alert else { return nil }
         guard alert.severity >= .medium else { return nil }
 

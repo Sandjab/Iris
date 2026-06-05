@@ -78,4 +78,26 @@ final class NotificationBuilderTests: XCTestCase {
         XCTAssertFalse(content.subtitle.contains(dangerousValue))
         XCTAssertFalse(content.body.contains(dangerousValue))
     }
+
+    private func makeSystemAlertEvent(severity: Alert.Severity) -> Event {
+        Event(
+            timestamp: Date(),
+            kind: .systemAlert,
+            host: "config",
+            method: "-",
+            path: "-",
+            systemAlert: SystemAlert(severity: severity, message: "config.json corrupted — defaults re-seeded")
+        )
+    }
+
+    func testSystemAlertProducesNotificationForHighSeverity() {
+        let content = NotificationBuilder.build(from: makeSystemAlertEvent(severity: .high))
+        XCTAssertNotNil(content)
+        XCTAssertEqual(content?.title, "IRIS configuration alert")
+        XCTAssertTrue(content?.body.contains("corrupted") == true)
+    }
+
+    func testLowSeveritySystemAlertReturnsNil() {
+        XCTAssertNil(NotificationBuilder.build(from: makeSystemAlertEvent(severity: .low)))
+    }
 }

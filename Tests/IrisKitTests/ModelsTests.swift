@@ -87,6 +87,41 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(Event.Kind.noMatch.rawValue, "noMatch")
         XCTAssertEqual(Event.Kind.exfilBlocked.rawValue, "exfilBlocked")
         XCTAssertEqual(Event.Kind.error.rawValue, "error")
+        XCTAssertEqual(Event.Kind.systemAlert.rawValue, "systemAlert")
+    }
+
+    func testSystemAlertRoundTrip() throws {
+        let alert = SystemAlert(severity: .high, message: "config.json corrupted — defaults re-seeded")
+        XCTAssertEqual(try roundTrip(alert), alert)
+    }
+
+    func testEventRoundTripWithSystemAlert() throws {
+        let event = Event(
+            id: UUID(uuidString: "22222222-3333-4444-5555-666666666666") ?? UUID(),
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            kind: .systemAlert,
+            host: "config",
+            method: "-",
+            path: "-",
+            systemAlert: SystemAlert(severity: .high, message: "config.json corrupted — defaults re-seeded")
+        )
+        XCTAssertEqual(try roundTrip(event), event)
+    }
+
+    /// Wire back-compat: an Event JSON without `system_alert` (pre-6.3a) decodes
+    /// with `systemAlert == nil`, never failing.
+    func testEventDecodesWhenSystemAlertKeyAbsent() throws {
+        let json = """
+            {"id":"33333333-4444-5555-6666-777777777777","timestamp":"2023-11-14T22:13:20Z",\
+            "kind":"substituted","host":"api.anthropic.com","method":"POST","path":"/v1/messages",\
+            "substituted_secrets":[]}
+            """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let event = try decoder.decode(Event.self, from: Data(json.utf8))
+        XCTAssertNil(event.systemAlert)
+        XCTAssertNil(event.alert)
+        XCTAssertEqual(event.kind, .substituted)
     }
 
     func testAlertSeverityIsOrdered() {

@@ -83,6 +83,7 @@ struct EventRow: View {
         case .noMatch: return .gray
         case .exfilBlocked: return .red
         case .error: return .orange
+        case .systemAlert: return .red
         }
     }
 

@@ -140,6 +140,29 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.alerts[0].id, evt.id)
     }
 
+    func testSystemAlertEventIsAlsoAddedToAlerts() {
+        let model = AppModel(defaults: defaults)
+        let evt = Event(
+            timestamp: Date(),
+            kind: .systemAlert,
+            host: "config",
+            method: "-",
+            path: "-",
+            systemAlert: SystemAlert(severity: .high, message: "config.json corrupted — defaults re-seeded")
+        )
+        model.ingest(evt)
+        XCTAssertEqual(model.events.count, 1)
+        XCTAssertEqual(model.alerts.count, 1)
+        XCTAssertEqual(model.alerts[0].id, evt.id)
+    }
+
+    func testNonAlertEventIsNotAddedToAlerts() {
+        let model = AppModel(defaults: defaults)
+        model.ingest(makeEvent(kind: .substituted))
+        XCTAssertEqual(model.events.count, 1)
+        XCTAssertTrue(model.alerts.isEmpty)
+    }
+
     func testUnreadCountIncrementsForNewAlerts() {
         let model = AppModel(defaults: defaults)
         model.markAllAlertsRead(now: Date(timeIntervalSince1970: 1_000))
