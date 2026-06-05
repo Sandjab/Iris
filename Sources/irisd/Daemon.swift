@@ -29,31 +29,26 @@ public actor Daemon {
     }
 
     private var currentConfig: Config
-    private let configPath: URL?
+    private let configStore: ConfigStore
     private let logger: Logger
     private let proxy: ProxyServer
     private let adminServer: AdminServer
     private let eventsServer: EventsServer
     private let eventLoopGroup: EventLoopGroup
-    private let runtimeRulesStore: RuntimeRulesStore
     private let reloadBox: NIOLockedValueBox<@Sendable () async throws -> ConfigReloadResult>
-    /// Holds the current set of TOML-defined MITM hosts. Updated by `reload()`
-    /// so that the `onRulesChanged` and `tomlHostsProvider` closures always see
-    /// the live value, not the boot-time snapshot captured in `init`.
-    private let tomlHostsBox: NIOLockedValueBox<Set<String>>
     private var didStart = false
 
     public init(
-        config: Config,
-        configPath: URL? = nil,
+        configStore: ConfigStore,
         secretBackend: SecretBackend,
         caBackend: CABackend = .keychain,
         caPath: URL,
         logger: Logger
     ) async throws {
+        let config = await configStore.current
         try config.validate()
         self.currentConfig = config
-        self.configPath = configPath
+        self.configStore = configStore
         self.logger = logger
         self.eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)
 
@@ -88,24 +83,8 @@ public actor Daemon {
         let listenHost = try Self.host(of: config.broker.listen)
         let listenPort = try Self.port(of: config.broker.listen)
 
-        // Runtime rules are stored beside the admin socket.
-        let runtimeRulesPath = config.broker.resolvedAdminSocketURL
-            .deletingLastPathComponent()
-            .appendingPathComponent("runtime-rules.json")
-        let runtimeRulesParent = runtimeRulesPath.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: runtimeRulesParent, withIntermediateDirectories: true)
-        let runtimeRulesStore = try await RuntimeRulesStore(path: runtimeRulesPath, logger: logger)
-
-        // allowedHosts = TOML hosts ∪ persisted runtime rules.
-        let tomlHosts = Set(config.mitmHosts.map(\.host))
-        let runtimeHosts = Set(await runtimeRulesStore.list().map(\.host))
-        let allowedHosts = tomlHosts.union(runtimeHosts)
-        self.runtimeRulesStore = runtimeRulesStore
-
-        // Mutable box holding the current TOML hosts. Captured by closures so
-        // reload() can update them without re-constructing the dispatcher.
-        let tomlHostsBox = NIOLockedValueBox<Set<String>>(tomlHosts)
-        self.tomlHostsBox = tomlHostsBox
+        // Hosts come straight from the unified config store (no TOML ∪ runtime merge).
+        let allowedHosts = await configStore.allowedHosts()
 
         let proxyConfig = ProxyServer.Configuration(
             listenHost: listenHost,
@@ -127,6 +106,28 @@ public actor Daemon {
         let bus = EventsBus(queueDepth: 1000)
         await proxy.eventRing.attach(bus: bus)
 
+        // Degraded boot: if config.json was corrupted and re-seeded, emit a loud
+        // high-severity system alert through the standard event channel (ring →
+        // SSE → Security tab / `iris logs`). `recoveredFromCorruption` is an
+        // immutable `let` on the store, so it reads synchronously.
+        if await configStore.recoveredFromCorruption {
+            logger.error("Started in degraded mode: config.json was corrupted and reset to defaults")
+            await proxy.eventRing.append(
+                Event(
+                    timestamp: Date(),
+                    kind: .systemAlert,
+                    host: "config",
+                    method: "-",
+                    path: "-",
+                    systemAlert: SystemAlert(
+                        severity: .high,
+                        message:
+                            "config.json was corrupted at startup — factory defaults re-seeded; the corrupted file was backed up under backups/."
+                    )
+                )
+            )
+        }
+
         // Daemon control closures bridge the dispatcher to the proxy's
         // paused-flag without pulling the proxy through the IPC layer.
         let daemonControl = InProcessDaemonControl(
@@ -134,18 +135,17 @@ public actor Daemon {
             writePaused: { [proxy] paused in proxy.setPaused(paused) }
         )
 
-        // Capture proxy in a local constant so the @Sendable closures below
-        // hold a direct reference without crossing actor isolation.
+        // Capture proxy + store in local constants so the @Sendable closures
+        // below hold direct references without crossing actor isolation.
         let capturedProxy = proxy
-        let capturedRulesStore = runtimeRulesStore
+        let capturedStore = configStore
 
         // onConfigReload is defined after `self` is fully initialised (all
         // stored properties are set above). We can't close over `self` here
-        // because the actor isn't yet initialised; instead we capture the
-        // concrete values the reload path needs and supply a sentinel that
-        // App.swift replaces via `setReloadHandler` once `init` returns.
-        // We use a shared mutable box so that Daemon.run() can swap in the
-        // real handler without any additional parameter plumbing.
+        // because the actor isn't yet initialised; instead we use a shared
+        // mutable box swapped in at the end of init. Both the SIGHUP path and
+        // the RPC `config.reload` path go through this single closure, so the
+        // daemon's `currentConfig` diff (the `ignored` list) stays authoritative.
         let reloadBox = NIOLockedValueBox<@Sendable () async throws -> ConfigReloadResult>(
             { throw JSONRPCError.internalError }
         )
@@ -154,15 +154,16 @@ public actor Daemon {
             eventRing: proxy.eventRing,
             caManager: caManager,
             daemon: daemonControl,
-            config: config,
-            runtimeRulesStore: runtimeRulesStore,
-            onRulesChanged: { [capturedProxy, capturedRulesStore, tomlHostsBox] in
-                let toml = tomlHostsBox.withLockedValue { $0 }
-                let runtime = Set(await capturedRulesStore.list().map(\.host))
-                await capturedProxy.updateAllowedHosts(toml.union(runtime))
+            configStore: configStore,
+            onHostsChanged: { [capturedProxy, capturedStore] in
+                await capturedProxy.updateAllowedHosts(await capturedStore.allowedHosts())
             },
-            tomlHostsProvider: { [tomlHostsBox] in
-                Array(tomlHostsBox.withLockedValue { $0 })
+            onSecurityChanged: { [capturedProxy, capturedStore] in
+                let cfg = await capturedStore.current
+                await capturedProxy.updateSecurityPolicy(
+                    maxSubstitutionsPerMinute: cfg.security.maxSubstitutionsPerMinute,
+                    onExfilAttempt: cfg.security.onExfilAttempt
+                )
             },
             onConfigReload: { [reloadBox] in
                 let fn = reloadBox.withLockedValue { $0 }
@@ -252,19 +253,13 @@ public actor Daemon {
     /// Returns `ConfigReloadResult(reloaded: true, ignored:)` on success.
     /// Throws `JSONRPCError.configReloadFailed` if the file cannot be parsed.
     public func reload() async throws -> ConfigReloadResult {
-        guard let configPath else {
-            logger.info("config.reload: no config file backing — no-op")
-            return ConfigReloadResult(reloaded: true, ignored: [])
-        }
-
         let newConfig: Config
         do {
-            newConfig = try ConfigLoader.load(from: configPath)
-            // Defensive: ConfigLoader.load already calls validate(), but call
-            // again here to make the contract explicit and to catch any future
-            // refactor that splits parse from validate. Cheap, runs once per
-            // reload, guarantees no partial application of a bad config.
-            try newConfig.validate()
+            // Re-read config.json from disk and adopt it (parse + validate).
+            // A corrupted file surfaces as ConfigStore.Error.corrupted here — it
+            // is NOT re-seeded on the explicit reload path; the on-disk file and
+            // the running config stay untouched.
+            newConfig = try await configStore.reloadFromDisk()
         } catch {
             logger.warning(
                 "config.reload failed to parse or validate",
@@ -273,71 +268,31 @@ public actor Daemon {
             throw JSONRPCError.configReloadFailed("\(error)")
         }
 
+        // Structural fields require a restart; we surface them in `ignored`.
         var ignored: [String] = []
-
-        if newConfig.broker.listen != currentConfig.broker.listen {
-            logger.warning(
-                "config.reload: ignoring change of broker.listen — restart required",
-                metadata: [
-                    "old": "\(currentConfig.broker.listen)",
-                    "new": "\(newConfig.broker.listen)",
-                ]
-            )
-            ignored.append("broker.listen")
-        }
-        if newConfig.broker.eventsListen != currentConfig.broker.eventsListen {
-            logger.warning(
-                "config.reload: ignoring change of broker.events_listen — restart required"
-            )
-            ignored.append("broker.events_listen")
-        }
-        if newConfig.broker.adminSocket != currentConfig.broker.adminSocket {
-            logger.warning(
-                "config.reload: ignoring change of broker.admin_socket — restart required"
-            )
-            ignored.append("broker.admin_socket")
-        }
-        if newConfig.broker.eventRetentionDays != currentConfig.broker.eventRetentionDays {
-            logger.warning(
-                "config.reload: ignoring change of broker.event_retention_days — restart required",
-                metadata: [
-                    "old": "\(currentConfig.broker.eventRetentionDays)",
-                    "new": "\(newConfig.broker.eventRetentionDays)",
-                ]
-            )
+        let old = currentConfig
+        if newConfig.broker.listen != old.broker.listen { ignored.append("broker.listen") }
+        if newConfig.broker.eventsListen != old.broker.eventsListen { ignored.append("broker.events_listen") }
+        if newConfig.broker.adminSocket != old.broker.adminSocket { ignored.append("broker.admin_socket") }
+        if newConfig.broker.eventRetentionDays != old.broker.eventRetentionDays {
             ignored.append("broker.event_retention_days")
         }
-        if newConfig.broker.eventRingSize != currentConfig.broker.eventRingSize {
+        if newConfig.broker.eventRingSize != old.broker.eventRingSize { ignored.append("broker.event_ring_size") }
+        if newConfig.broker.logLevel != old.broker.logLevel { ignored.append("broker.log_level") }
+        if !ignored.isEmpty {
             logger.warning(
-                "config.reload: ignoring change of broker.event_ring_size — restart required",
-                metadata: [
-                    "old": "\(currentConfig.broker.eventRingSize)",
-                    "new": "\(newConfig.broker.eventRingSize)",
-                ]
+                "config.reload: structural fields changed — restart required",
+                metadata: ["ignored": "\(ignored)"]
             )
-            ignored.append("broker.event_ring_size")
-        }
-        if newConfig.broker.logLevel != currentConfig.broker.logLevel {
-            logger.warning(
-                "config.reload: log_level change not yet wired to backend (Phase 5.3.1.x)"
-            )
-            ignored.append("broker.log_level")
         }
 
-        // Apply hot-reloadable security policy.
+        // Apply hot-reloadable security policy + host set.
         await proxy.updateSecurityPolicy(
             maxSubstitutionsPerMinute: newConfig.security.maxSubstitutionsPerMinute,
             onExfilAttempt: newConfig.security.onExfilAttempt
         )
-
-        // Swap config and update tomlHostsBox so closures see the new TOML.
         currentConfig = newConfig
-        tomlHostsBox.withLockedValue { $0 = Set(newConfig.mitmHosts.map(\.host)) }
-
-        // Recompute allowedHosts = new TOML hosts ∪ persisted runtime rules.
-        let tomlHosts = tomlHostsBox.withLockedValue { $0 }
-        let runtimeHosts = Set(await runtimeRulesStore.list().map(\.host))
-        await proxy.updateAllowedHosts(tomlHosts.union(runtimeHosts))
+        await proxy.updateAllowedHosts(Set(newConfig.hosts.map(\.host)))
 
         logger.info("config.reload OK", metadata: ["ignored": "\(ignored)"])
         return ConfigReloadResult(reloaded: true, ignored: ignored)

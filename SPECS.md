@@ -150,7 +150,7 @@ Long-running process launched by LaunchAgent. Single instance per user session.
 - Bind the proxy listener on `config.broker.listen`.
 - Bind the events SSE endpoint on `config.broker.events_listen`.
 - Bind the admin Unix socket on `config.broker.admin_socket`.
-- Load config from TOML at startup; reload on SIGHUP.
+- Load config from `config.json` at startup (seed defaults if absent); reload on SIGHUP.
 - Maintain in-memory map of `Secret` (by name) with `allowed_hosts` and Keychain reference.
 - Maintain LRU cache of resolved secret values (TTL: 5 min, max 32 entries).
 - Maintain an in-memory ring buffer of last 10 000 events; persist to SQLite for durable history.
@@ -164,7 +164,7 @@ SwiftPM library, linked by `irisd`, `iris`, and `IrisApp`. Pure Swift, no UI.
 
 **Contents:**
 
-- `Config` — TOML parsing + validation
+- `Config` + `ConfigStore` — JSON config: seed, validate, atomic 0600 write, timestamped backups
 - `Secret`, `MITMRule`, `Event`, `Alert` — data models (Codable, Sendable)
 - `SecretStore` protocol + `KeychainSecretStore` (production) + `InMemorySecretStore` (tests)
 - `CAManager` — generate, store, export, install CA
@@ -296,40 +296,40 @@ public struct Alert: Codable, Sendable, Hashable {
 
 ## 6. Configuration format
 
-Path: `~/Library/Application Support/iris/config.toml`
+Path: `~/Library/Application Support/iris/config.json`
 
-```toml
-[broker]
-listen        = "127.0.0.1:8888"
-events_listen = "127.0.0.1:8889"
-admin_socket  = "~/Library/Application Support/iris/admin.sock"
-log_level     = "info"             # trace | debug | info | warn | error
-event_retention_days = 7
-event_ring_size = 10000
+The configuration is a **single JSON file owned by the daemon** (app-first model, Phase 6.3a). It is **seeded** from built-in defaults on first run if absent, and mutated via the CLI/app over RPC (`config.set`, `rule.add`/`rule.delete`) — the daemon is the only writer. Before every write it backs up the current file under `backups/config-<timestamp>.json` (rotated to `backups.max_count`). `TOMLKit` and the old `runtime-rules.json` are gone.
 
-[security]
-# Behavior when an exfiltration attempt is detected.
-# block_only           = block substitution, log alert, no notification
-# block_and_notify     = + macOS notification
-# block_notify_pause   = + pause daemon entirely until user resumes
-on_exfil_attempt = "block_and_notify"
-
-# Volume anomaly threshold (rule R5).
-max_substitutions_per_minute = 60
-
-[[mitm_host]]
-host = "api.anthropic.com"
-
-[[mitm_host]]
-host = "api.github.com"
-
-[[mitm_host]]
-host = "api.openai.com"
+```json
+{
+  "version": 1,
+  "broker": {
+    "listen": "127.0.0.1:8888",
+    "events_listen": "127.0.0.1:8899",
+    "admin_socket": "~/Library/Application Support/iris/admin.sock",
+    "log_level": "info",
+    "event_retention_days": 7,
+    "event_ring_size": 10000
+  },
+  "security": {
+    "on_exfil_attempt": "block_and_notify",
+    "max_substitutions_per_minute": 60
+  },
+  "backups": { "max_count": 10 },
+  "hosts": [
+    { "host": "api.anthropic.com", "origin": "default", "created_at": "2026-06-05T12:00:00Z" }
+  ]
+}
 ```
 
-**Note:** secrets are NOT stored in this file. They live in Keychain, plus their `allowed_hosts` array which is also stored in Keychain attributes (see [§12](#12-keychain-integration)). Rationale: a stolen `config.toml` should reveal nothing useful.
+- `on_exfil_attempt`: `block_only` (block + log, no notification) | `block_and_notify` (+ macOS notification) | `block_notify_pause` (+ pause daemon until resumed).
+- `max_substitutions_per_minute`: volume anomaly threshold (rule R5).
+- `hosts[].origin`: `default` (seeded, **protected** — not removable via RPC, prevents accidentally breaking `claude`) | `user` (added via `rule.add`).
+- **Hot-editable** at runtime (no restart): `security.*`, `backups.max_count`, and `hosts` (via `rule.*`). **Structural** fields (`broker.*`) persist but require a restart; `config.set` returns them under `requires_restart`. `broker.log_level` is restart-required (backend wiring is a separate TODO).
 
-The MITM whitelist IS in `config.toml` because it's not sensitive and benefits from being human-editable.
+**Note:** secrets are NOT stored in this file. They live in Keychain, plus their `allowed_hosts` array which is also stored in Keychain attributes (see [§12](#12-keychain-integration)). Rationale: a stolen `config.json` should reveal nothing useful.
+
+**Corruption at boot → degraded boot (not refusal):** if `config.json` is unparseable at startup, the daemon backs it up (`backups/config-corrupted-<timestamp>.json`), re-seeds defaults, stays up (substitution active with safe defaults), and emits a high-severity system alert (visible in the Security tab / `iris logs`). Only an unrepairable I/O error (unreadable dir, full disk) aborts boot.
 
 ---
 
@@ -700,8 +700,9 @@ rule.add(host)                                → MITMRule
 rule.list()                                   → [MITMRule]
 rule.delete(host)                             → { deleted: true }
 
-config.reload()                               → { reloaded: true }
+config.reload()                               → { reloaded: true, ignored: [...] }
 config.get()                                  → Config              (sanitized)
+config.set(updates: [{key, value}])           → { applied: [...], requires_restart: [...] }
 
 daemon.status()                               → { pid, uptime_s, version, stats }
 daemon.pause()                                → { paused: true }
@@ -822,12 +823,12 @@ Tabs (segmented control, persisted in `UserDefaults`):
     - Inline warning: "Adding a host means traffic to it can have placeholders substituted into it. Make sure no secret allows hosts you don't trust."
 
 6. **Settings**
-    - Listen ports (read-only display, edit via `config.toml` reload)
+    - Listen ports (read-only display; structural — restart required)
     - Log level dropdown
     - Event retention days
-    - `on_exfil_attempt` dropdown
-    - Max substitutions/minute
-    - "Open config.toml in editor"
+    - `on_exfil_attempt` dropdown (hot-editable via `config.set`)
+    - Max substitutions/minute (hot-editable via `config.set`)
+    - "Open config.json"
     - "Reload config" button
     - "Trust store status" indicator + "Install CA" button if not trusted
     - "Quit & Uninstall" (confirmation, removes LaunchAgent, asks about Keychain items)
@@ -1084,7 +1085,7 @@ iris/
 │   ├── IrisKit/
 │   │   ├── Config/
 │   │   │   ├── Config.swift
-│   │   │   └── ConfigLoader.swift
+│   │   │   └── ConfigStore.swift
 │   │   ├── Models/
 │   │   │   ├── Secret.swift
 │   │   │   ├── MITMRule.swift

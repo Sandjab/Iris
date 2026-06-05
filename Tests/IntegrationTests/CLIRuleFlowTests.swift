@@ -26,13 +26,13 @@ final class CLIRuleFlowTests: XCTestCase {
             "add stdout should show the new host, got: \(add.stdout)"
         )
 
-        // list (text) — should contain both TOML host and new runtime host
+        // list (text) — should contain both the built-in host and the new user host
         let listTxt = try harness.runIris(["rule", "list"])
         XCTAssertEqual(listTxt.code, 0, "rule list failed\nstderr=\(listTxt.stderr)")
-        XCTAssertTrue(listTxt.stdout.contains("api.anthropic.com"), "TOML host missing from list")
-        XCTAssertTrue(listTxt.stdout.contains("api.runtime.example.com"), "runtime host missing from list")
-        XCTAssertTrue(listTxt.stdout.contains("toml"), "TOML source label missing")
-        XCTAssertTrue(listTxt.stdout.contains("runtime"), "runtime source label missing")
+        XCTAssertTrue(listTxt.stdout.contains("api.anthropic.com"), "built-in host missing from list")
+        XCTAssertTrue(listTxt.stdout.contains("api.runtime.example.com"), "user host missing from list")
+        XCTAssertTrue(listTxt.stdout.contains("default"), "default origin label missing")
+        XCTAssertTrue(listTxt.stdout.contains("user"), "user origin label missing")
 
         // list (JSON)
         let listJSON = try harness.runIris(["rule", "list", "--json"])
@@ -62,14 +62,14 @@ final class CLIRuleFlowTests: XCTestCase {
         )
     }
 
-    // MARK: - TOML rule protection
+    // MARK: - Default (built-in) host protection
 
-    func testRuleRmTomlRefused() throws {
+    func testRuleRmDefaultHostRefused() throws {
         let result = try harness.runIris(["rule", "rm", "api.anthropic.com"])
-        XCTAssertNotEqual(result.code, 0, "removing a TOML rule must fail")
+        XCTAssertNotEqual(result.code, 0, "removing a default (built-in) host must fail")
         XCTAssertTrue(
-            result.stderr.contains("config TOML") || result.stderr.contains("edit the file directly"),
-            "stderr should explain TOML-rule protection, got: \(result.stderr)"
+            result.stderr.contains("protected") || result.stderr.contains("origin: default"),
+            "stderr should explain default-host protection, got: \(result.stderr)"
         )
     }
 
@@ -88,7 +88,7 @@ final class CLIRuleFlowTests: XCTestCase {
         let rules = try decoder.decode([MITMRule].self, from: Data(listResult.stdout.utf8))
         XCTAssertTrue(
             rules.contains(where: {
-                $0.host == "api.persistent.example.com" && $0.source == .runtime
+                $0.host == "api.persistent.example.com" && $0.origin == .user
             }),
             "runtime rule should survive daemon restart; got hosts: \(rules.map(\.host))"
         )

@@ -21,7 +21,8 @@ struct LogsCommand: AsyncParsableCommand {
 
     @Option(
         name: .customLong("kind"),
-        help: "Comma-separated event kinds (substituted, passThrough, noMatch, exfilBlocked, error)."
+        help:
+            "Comma-separated event kinds (substituted, passThrough, noMatch, exfilBlocked, error, systemAlert)."
     )
     var kindRaw: String = ""
 

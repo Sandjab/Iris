@@ -62,3 +62,20 @@ public struct Alert: Codable, Sendable, Hashable {
         self.snippet = snippet
     }
 }
+
+/// A daemon-level alert that is **not** tied to an exfiltration attempt, a
+/// secret, or a request. It rides the same `Event` channel (ring → SSE →
+/// Security tab / `iris logs`) as `Alert`, but carries only a severity and a
+/// human-readable message. Introduced for degraded-boot reporting when
+/// `config.json` is corrupted (Phase 6.3a): the daemon stays up, re-seeds
+/// defaults, and emits a `severity: .high` `SystemAlert` so the recovery is
+/// loud and reaches the user.
+public struct SystemAlert: Codable, Sendable, Hashable {
+    public let severity: Alert.Severity
+    public let message: String
+
+    public init(severity: Alert.Severity, message: String) {
+        self.severity = severity
+        self.message = message
+    }
+}

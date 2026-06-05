@@ -31,7 +31,7 @@ struct ConnectionOptions: ParsableArguments {
 
     @Option(
         name: .customLong("config-path"),
-        help: "Read socket path from the TOML config file at this path instead of the default."
+        help: "Read socket path from the JSON config file at this path instead of the default."
     )
     var configPath: String?
 
@@ -43,7 +43,10 @@ struct ConnectionOptions: ParsableArguments {
         }
         if let cfgPath = configPath {
             let url = URL(fileURLWithPath: (cfgPath as NSString).expandingTildeInPath)
-            let cfg = try ConfigLoader.load(from: url)
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let cfg = try decoder.decode(Config.self, from: data)
             return cfg.broker.expandedAdminSocket
         }
         return Config.default.broker.expandedAdminSocket

@@ -142,7 +142,7 @@ extension JSONRPCError {
 
     public static let ruleProtected = JSONRPCError(
         code: -32010,
-        message: "rule defined in config TOML — edit the file directly"
+        message: "default host (origin: default) is protected — cannot be removed"
     )
     public static let ruleNotFound = JSONRPCError(code: -32011, message: "rule not found")
 

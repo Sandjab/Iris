@@ -35,7 +35,7 @@ final class AppModelCRUDTests: XCTestCase {
     func testAddRuleCallsRPCThenRefetchesAndSorts() async throws {
         let model = makeModel()
         let admin = FakeAdminCalling()
-        admin.stubRules = [MITMRule(host: "z.com", createdAt: .distantPast, source: .toml)]
+        admin.stubRules = [MITMRule(host: "z.com", createdAt: .distantPast, origin: .builtin)]
         try await model.addRule(host: "a.com", via: admin)
         XCTAssertEqual(admin.calls, ["addRule(a.com)", "listRules"])
         XCTAssertEqual(model.rules.map(\.host), ["a.com", "z.com"])

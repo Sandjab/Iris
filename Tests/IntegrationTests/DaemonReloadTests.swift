@@ -6,30 +6,61 @@ import XCTest
 @testable import irisd
 
 /// Unit-level tests for `Daemon.reload()` — exercises the real reload logic
-/// (parse, validate, diff, apply) end-to-end without going through the IPC
-/// layer. Uses in-memory secret/CA backends and a temp TOML file.
+/// (re-read config.json, validate, diff, apply) end-to-end without going through
+/// the IPC layer. Uses in-memory secret/CA backends and a temp config.json.
 final class DaemonReloadTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// Boots an ephemeral Daemon backed by a temp TOML, using in-memory
-    /// stores and an unbound proxy (Daemon never calls run() in these tests,
-    /// so no actual sockets are opened).
-    private func makeDaemon(
-        tomlText: String,
-        configURL: URL
-    ) async throws -> Daemon {
-        try tomlText.write(to: configURL, atomically: true, encoding: .utf8)
-        let config = try ConfigLoader.load(from: configURL)
+    private func makeConfig(
+        proxyPort: Int,
+        eventsPort: Int,
+        adminSocket: String,
+        maxSubs: Int = 60,
+        onExfil: ExfilAttemptPolicy = .blockOnly,
+        logLevel: LogLevel = .error,
+        retentionDays: Int = 1,
+        ringSize: Int = 100,
+        listenHost: String = "127.0.0.1",
+        hosts: [String] = ["api.anthropic.com"]
+    ) -> Config {
+        Config(
+            version: 1,
+            broker: BrokerConfig(
+                listen: "\(listenHost):\(proxyPort)",
+                eventsListen: "127.0.0.1:\(eventsPort)",
+                adminSocket: adminSocket,
+                logLevel: logLevel,
+                eventRetentionDays: retentionDays,
+                eventRingSize: ringSize
+            ),
+            security: SecurityConfig(onExfilAttempt: onExfil, maxSubstitutionsPerMinute: maxSubs),
+            backups: BackupsConfig(maxCount: 10),
+            hosts: hosts.map {
+                HostEntry(host: $0, origin: .user, createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+            }
+        )
+    }
+
+    private func write(_ config: Config, to url: URL) throws {
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        try enc.encode(config).write(to: url)
+    }
+
+    /// Boots an ephemeral Daemon backed by a temp config.json, using in-memory
+    /// stores and an unbound proxy (Daemon never calls run() in these tests, so
+    /// no actual sockets are opened).
+    private func makeDaemon(config: Config, configURL: URL) async throws -> Daemon {
+        try write(config, to: configURL)
+        let configStore = try ConfigStore(path: configURL, logger: Logger(label: "test.daemon.reload"))
         let caURL = configURL.deletingLastPathComponent().appendingPathComponent("ca.pem")
-        let logger = Logger(label: "test.daemon.reload")
         return try await Daemon(
-            config: config,
-            configPath: configURL,
+            configStore: configStore,
             secretBackend: .inMemoryFromEnvironment,
             caBackend: .inMemory,
             caPath: caURL,
-            logger: logger
+            logger: Logger(label: "test.daemon.reload")
         )
     }
 
@@ -37,37 +68,6 @@ final class DaemonReloadTests: XCTestCase {
         let tmp = URL(fileURLWithPath: "/tmp/iris-reload-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         return tmp
-    }
-
-    private func makeToml(
-        proxyPort: Int,
-        eventsPort: Int,
-        adminSocket: String,
-        maxSubs: Int = 60,
-        onExfil: String = "block_only",
-        listenHost: String = "127.0.0.1",
-        hosts: [String] = ["api.anthropic.com"]
-    ) -> String {
-        var lines = [
-            "[broker]",
-            "listen               = \"\(listenHost):\(proxyPort)\"",
-            "events_listen        = \"127.0.0.1:\(eventsPort)\"",
-            "admin_socket         = \"\(adminSocket)\"",
-            "log_level            = \"error\"",
-            "event_retention_days = 1",
-            "event_ring_size      = 100",
-            "",
-            "[security]",
-            "on_exfil_attempt             = \"\(onExfil)\"",
-            "max_substitutions_per_minute = \(maxSubs)",
-            "",
-        ]
-        for host in hosts {
-            lines.append("[[mitm_host]]")
-            lines.append("host = \"\(host)\"")
-            lines.append("")
-        }
-        return lines.joined(separator: "\n")
     }
 
     /// Derive two adjacent ephemeral ports from a short ID. Same trick as
@@ -83,77 +83,78 @@ final class DaemonReloadTests: XCTestCase {
     func testReloadHotSwapsSecurityPolicy() async throws {
         let tmp = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
-        let configURL = tmp.appendingPathComponent("config.toml")
+        let configURL = tmp.appendingPathComponent("config.json")
         let adminSocket = tmp.appendingPathComponent("admin.sock").path
         let (proxyPort, eventsPort) = ports(from: tmp.lastPathComponent)
 
-        let initialToml = makeToml(
-            proxyPort: proxyPort,
-            eventsPort: eventsPort,
-            adminSocket: adminSocket,
-            maxSubs: 60,
-            onExfil: "block_only"
+        let daemon = try await makeDaemon(
+            config: makeConfig(
+                proxyPort: proxyPort,
+                eventsPort: eventsPort,
+                adminSocket: adminSocket,
+                maxSubs: 60,
+                onExfil: .blockOnly
+            ),
+            configURL: configURL
         )
-        let daemon = try await makeDaemon(tomlText: initialToml, configURL: configURL)
 
-        // Verify boot-time policy.
         let before = await daemon.proxyForTesting.securityPolicySnapshot()
         XCTAssertEqual(before.maxSubstitutionsPerMinute, 60)
         XCTAssertEqual(before.onExfilAttempt, .blockOnly)
 
-        // Rewrite TOML with new hot-reloadable values.
-        let updated = makeToml(
-            proxyPort: proxyPort,
-            eventsPort: eventsPort,
-            adminSocket: adminSocket,
-            maxSubs: 999,
-            onExfil: "block_notify_pause"
+        try write(
+            makeConfig(
+                proxyPort: proxyPort,
+                eventsPort: eventsPort,
+                adminSocket: adminSocket,
+                maxSubs: 999,
+                onExfil: .blockNotifyPause
+            ),
+            to: configURL
         )
-        try updated.write(to: configURL, atomically: true, encoding: .utf8)
 
         let result = try await daemon.reload()
         XCTAssertTrue(result.reloaded)
         XCTAssertEqual(result.ignored, [])
 
-        // Verify proxy now reflects the new policy.
         let after = await daemon.proxyForTesting.securityPolicySnapshot()
         XCTAssertEqual(after.maxSubstitutionsPerMinute, 999)
         XCTAssertEqual(after.onExfilAttempt, .blockNotifyPause)
     }
 
-    func testReloadOnInvalidTomlLeavesStateIntact() async throws {
+    func testReloadOnInvalidJSONLeavesStateIntact() async throws {
         let tmp = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
-        let configURL = tmp.appendingPathComponent("config.toml")
+        let configURL = tmp.appendingPathComponent("config.json")
         let adminSocket = tmp.appendingPathComponent("admin.sock").path
         let (proxyPort, eventsPort) = ports(from: tmp.lastPathComponent)
 
-        let initialToml = makeToml(
-            proxyPort: proxyPort,
-            eventsPort: eventsPort,
-            adminSocket: adminSocket,
-            maxSubs: 60,
-            onExfil: "block_only",
-            hosts: ["api.boot.example.com"]
+        let daemon = try await makeDaemon(
+            config: makeConfig(
+                proxyPort: proxyPort,
+                eventsPort: eventsPort,
+                adminSocket: adminSocket,
+                hosts: ["api.boot.example.com"]
+            ),
+            configURL: configURL
         )
-        let daemon = try await makeDaemon(tomlText: initialToml, configURL: configURL)
 
         let policyBefore = await daemon.proxyForTesting.securityPolicySnapshot()
         let hostsBefore = await daemon.proxyForTesting.allowedHostsSnapshot()
 
-        // Overwrite with garbage.
-        try "not valid toml &&".write(to: configURL, atomically: true, encoding: .utf8)
+        // Overwrite with garbage. The explicit reload path surfaces the parse
+        // failure as an error WITHOUT re-seeding (that only happens at boot).
+        try "not valid json &&".write(to: configURL, atomically: true, encoding: .utf8)
 
         do {
             _ = try await daemon.reload()
-            XCTFail("reload should throw on invalid TOML")
+            XCTFail("reload should throw on invalid JSON")
         } catch let error as JSONRPCError {
             XCTAssertEqual(error.code, JSONRPCError.configReloadFailed("x").code)
         } catch {
             XCTFail("expected JSONRPCError, got \(error)")
         }
 
-        // State must be unchanged.
         let policyAfter = await daemon.proxyForTesting.securityPolicySnapshot()
         let hostsAfter = await daemon.proxyForTesting.allowedHostsSnapshot()
         XCTAssertEqual(policyAfter, policyBefore)
@@ -163,36 +164,28 @@ final class DaemonReloadTests: XCTestCase {
     func testReloadIgnoresStructuralFields() async throws {
         let tmp = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
-        let configURL = tmp.appendingPathComponent("config.toml")
+        let configURL = tmp.appendingPathComponent("config.json")
         let adminSocket = tmp.appendingPathComponent("admin.sock").path
         let (proxyPort, eventsPort) = ports(from: tmp.lastPathComponent)
 
-        let initialToml = makeToml(
-            proxyPort: proxyPort,
-            eventsPort: eventsPort,
-            adminSocket: adminSocket
+        let daemon = try await makeDaemon(
+            config: makeConfig(proxyPort: proxyPort, eventsPort: eventsPort, adminSocket: adminSocket),
+            configURL: configURL
         )
-        let daemon = try await makeDaemon(tomlText: initialToml, configURL: configURL)
 
-        // Rewrite TOML changing ALL 6 structural fields at once.
+        // Rewrite changing ALL 6 structural fields at once.
         let altSocket = tmp.appendingPathComponent("other.sock").path
-        let mutated = """
-            [broker]
-            listen               = "127.0.0.1:\(proxyPort + 100)"
-            events_listen        = "127.0.0.1:\(eventsPort + 100)"
-            admin_socket         = "\(altSocket)"
-            log_level            = "debug"
-            event_retention_days = 30
-            event_ring_size      = 500
-
-            [security]
-            on_exfil_attempt             = "block_only"
-            max_substitutions_per_minute = 60
-
-            [[mitm_host]]
-            host = "api.anthropic.com"
-            """
-        try mutated.write(to: configURL, atomically: true, encoding: .utf8)
+        try write(
+            makeConfig(
+                proxyPort: proxyPort + 100,
+                eventsPort: eventsPort + 100,
+                adminSocket: altSocket,
+                logLevel: .debug,
+                retentionDays: 30,
+                ringSize: 500
+            ),
+            to: configURL
+        )
 
         let result = try await daemon.reload()
         XCTAssertTrue(result.reloaded)
@@ -205,40 +198,40 @@ final class DaemonReloadTests: XCTestCase {
         XCTAssertTrue(ignored.contains("broker.event_ring_size"))
     }
 
-    func testReloadRefreshesTomlHostsInRuleList() async throws {
-        // Regression test for stale-capture bug: closures in Daemon.init used to
-        // close over the boot-time `config` value instead of a mutable box. After
-        // reload(), rule.list must reflect the NEW TOML hosts, not the original ones.
+    func testReloadRefreshesHostsInAllowedSet() async throws {
+        // Regression: reload() must apply the NEW host set to the proxy, not the
+        // boot-time one.
         let tmp = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
-        let configURL = tmp.appendingPathComponent("config.toml")
+        let configURL = tmp.appendingPathComponent("config.json")
         let adminSocket = tmp.appendingPathComponent("admin.sock").path
         let (proxyPort, eventsPort) = ports(from: tmp.lastPathComponent)
 
-        let initialToml = makeToml(
-            proxyPort: proxyPort,
-            eventsPort: eventsPort,
-            adminSocket: adminSocket,
-            hosts: ["original.example.com"]
+        let daemon = try await makeDaemon(
+            config: makeConfig(
+                proxyPort: proxyPort,
+                eventsPort: eventsPort,
+                adminSocket: adminSocket,
+                hosts: ["original.example.com"]
+            ),
+            configURL: configURL
         )
-        let daemon = try await makeDaemon(tomlText: initialToml, configURL: configURL)
 
-        // Boot-time: allowedHosts snapshot must contain the original host.
         let bootHosts = await daemon.proxyForTesting.allowedHostsSnapshot()
         XCTAssertTrue(bootHosts.contains("original.example.com"), "boot hosts=\(bootHosts)")
 
-        // Reload with a different TOML host.
-        let updatedToml = makeToml(
-            proxyPort: proxyPort,
-            eventsPort: eventsPort,
-            adminSocket: adminSocket,
-            hosts: ["replaced.example.com"]
+        try write(
+            makeConfig(
+                proxyPort: proxyPort,
+                eventsPort: eventsPort,
+                adminSocket: adminSocket,
+                hosts: ["replaced.example.com"]
+            ),
+            to: configURL
         )
-        try updatedToml.write(to: configURL, atomically: true, encoding: .utf8)
         let result = try await daemon.reload()
         XCTAssertTrue(result.reloaded)
 
-        // After reload: proxy must reflect the replaced host, not the original.
         let afterHosts = await daemon.proxyForTesting.allowedHostsSnapshot()
         XCTAssertTrue(afterHosts.contains("replaced.example.com"), "after-reload hosts=\(afterHosts)")
         XCTAssertFalse(
@@ -248,43 +241,24 @@ final class DaemonReloadTests: XCTestCase {
     }
 
     func testReloadRejectsSemanticallyInvalidConfig() async throws {
-        // Catches the bug where parse succeeds but semantics are bad.
-        // Config.validate() rejects port 0 (`validateListenAddress`).
+        // Parses fine, but Config.validate() rejects port 0 → reload must reject
+        // BEFORE any swap or diff (atomicity), leaving state intact.
         let tmp = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
-        let configURL = tmp.appendingPathComponent("config.toml")
+        let configURL = tmp.appendingPathComponent("config.json")
         let adminSocket = tmp.appendingPathComponent("admin.sock").path
         let (proxyPort, eventsPort) = ports(from: tmp.lastPathComponent)
 
-        let initialToml = makeToml(
-            proxyPort: proxyPort,
-            eventsPort: eventsPort,
-            adminSocket: adminSocket
+        let daemon = try await makeDaemon(
+            config: makeConfig(proxyPort: proxyPort, eventsPort: eventsPort, adminSocket: adminSocket),
+            configURL: configURL
         )
-        let daemon = try await makeDaemon(tomlText: initialToml, configURL: configURL)
 
-        // Write TOML that parses fine but fails validate() — port 0.
-        // `broker.listen` is a structural field; even if validation didn't
-        // catch it, the structural-diff path would just mark it ignored.
-        // The semantic check must reject port 0 BEFORE any swap or diff.
-        // Using `events_listen` with port 0 — same validator, same rejection.
-        let semanticallyInvalid = """
-            [broker]
-            listen               = "127.0.0.1:\(proxyPort)"
-            events_listen        = "127.0.0.1:0"
-            admin_socket         = "\(adminSocket)"
-            log_level            = "error"
-            event_retention_days = 1
-            event_ring_size      = 100
-
-            [security]
-            on_exfil_attempt             = "block_only"
-            max_substitutions_per_minute = 60
-
-            [[mitm_host]]
-            host = "api.anthropic.com"
-            """
-        try semanticallyInvalid.write(to: configURL, atomically: true, encoding: .utf8)
+        // events_listen port 0 — valid JSON, fails validate().
+        try write(
+            makeConfig(proxyPort: proxyPort, eventsPort: 0, adminSocket: adminSocket),
+            to: configURL
+        )
 
         let policyBefore = await daemon.proxyForTesting.securityPolicySnapshot()
 
@@ -297,7 +271,6 @@ final class DaemonReloadTests: XCTestCase {
             XCTFail("expected JSONRPCError.configReloadFailed, got \(error)")
         }
 
-        // State must be unchanged.
         let policyAfter = await daemon.proxyForTesting.securityPolicySnapshot()
         XCTAssertEqual(policyAfter, policyBefore)
     }

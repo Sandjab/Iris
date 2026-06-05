@@ -1,25 +1,39 @@
 import Foundation
 
 public struct Config: Codable, Sendable, Hashable {
+    public let version: Int
     public let broker: BrokerConfig
     public let security: SecurityConfig
-    public let mitmHosts: [MITMHostEntry]
+    public let backups: BackupsConfig
+    public let hosts: [HostEntry]
 
     enum CodingKeys: String, CodingKey {
+        case version
         case broker
         case security
-        case mitmHosts = "mitm_host"
+        case backups
+        case hosts
     }
 
-    public init(broker: BrokerConfig, security: SecurityConfig, mitmHosts: [MITMHostEntry]) {
+    public init(
+        version: Int = 1,
+        broker: BrokerConfig,
+        security: SecurityConfig,
+        backups: BackupsConfig,
+        hosts: [HostEntry]
+    ) {
+        self.version = version
         self.broker = broker
         self.security = security
-        self.mitmHosts = mitmHosts
+        self.backups = backups
+        self.hosts = hosts
     }
 
-    /// Built-in defaults used when no config file is found at the standard
-    /// location. Mirrors the values documented in `docs/user-guide.md`.
+    /// Built-in defaults, used to seed `config.json` on first run.
+    /// The seeded host carries an epoch sentinel `created_at`; `ConfigStore.seed()`
+    /// rewrites it with the real seed timestamp (a static `let` can't call `Date()`).
     public static let `default` = Config(
+        version: 1,
         broker: BrokerConfig(
             listen: "127.0.0.1:8888",
             eventsListen: "127.0.0.1:8899",
@@ -32,8 +46,54 @@ public struct Config: Codable, Sendable, Hashable {
             onExfilAttempt: .blockAndNotify,
             maxSubstitutionsPerMinute: 60
         ),
-        mitmHosts: [MITMHostEntry(host: "api.anthropic.com")]
+        backups: BackupsConfig(maxCount: 10),
+        hosts: [HostEntry(host: "api.anthropic.com", origin: .builtin, createdAt: Date(timeIntervalSince1970: 0))]
     )
+
+    /// Returns a copy with `hosts` replaced.
+    public func with(hosts: [HostEntry]) -> Config {
+        Config(version: version, broker: broker, security: security, backups: backups, hosts: hosts)
+    }
+}
+
+public struct BackupsConfig: Codable, Sendable, Hashable {
+    public let maxCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case maxCount = "max_count"
+    }
+
+    public init(maxCount: Int) {
+        self.maxCount = maxCount
+    }
+}
+
+public struct HostEntry: Codable, Sendable, Hashable {
+    public let host: String
+    public let origin: MITMRule.Origin  // .builtin (seeded, protected) | .user (added)
+    public let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case host
+        case origin
+        case createdAt = "created_at"
+    }
+
+    public init(host: String, origin: MITMRule.Origin, createdAt: Date) {
+        self.host = host
+        self.origin = origin
+        self.createdAt = createdAt
+    }
+
+    /// Tolerant decode: a host entry without an `origin` key (unlikely, but
+    /// robust against a hand-edited file) defaults to `.user`. Seeded hosts
+    /// always carry `origin: .builtin`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.host = try c.decode(String.self, forKey: .host)
+        self.origin = try c.decodeIfPresent(MITMRule.Origin.self, forKey: .origin) ?? .user
+        self.createdAt = try c.decode(Date.self, forKey: .createdAt)
+    }
 }
 
 public struct BrokerConfig: Codable, Sendable, Hashable {
@@ -108,20 +168,29 @@ public enum ExfilAttemptPolicy: String, Codable, Sendable, CaseIterable {
     case blockNotifyPause = "block_notify_pause"
 }
 
-public struct MITMHostEntry: Codable, Sendable, Hashable {
-    public let host: String
-
-    public init(host: String) {
-        self.host = host
-    }
-}
-
 extension Config {
     public func validate() throws {
         try broker.validate()
         try security.validate()
-        for entry in mitmHosts {
+        try backups.validate()
+        for entry in hosts {
             try entry.validate()
+        }
+    }
+}
+
+extension BackupsConfig {
+    public func validate() throws {
+        guard maxCount >= 1 else {
+            throw ConfigError.invalidValue(field: "backups.max_count", value: "\(maxCount)")
+        }
+    }
+}
+
+extension HostEntry {
+    public func validate() throws {
+        guard Secret.isValidHost(host) else {
+            throw ConfigError.invalidValue(field: "hosts.host", value: host)
         }
     }
 }
@@ -166,14 +235,6 @@ extension SecurityConfig {
                 field: "security.max_substitutions_per_minute",
                 value: "\(maxSubstitutionsPerMinute)"
             )
-        }
-    }
-}
-
-extension MITMHostEntry {
-    public func validate() throws {
-        guard Secret.isValidHost(host) else {
-            throw ConfigError.invalidValue(field: "mitm_host.host", value: host)
         }
     }
 }

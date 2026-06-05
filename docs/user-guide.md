@@ -35,13 +35,14 @@
 | IPC admin Unix socket + flux SSE d'events | Phase 3 ✅ | Disponible |
 | Scoping `allowed_hosts` + exfil rules (R1-R5) | Phase 4 ✅ | Disponible |
 | CLI `iris` (secret / status / logs / doctor / mcp) | Phase 5 ✅ | Disponible |
-| Menu bar app `Iris.app` | Phase 6 ✅ | Disponible (Overview / Logs / Security + CRUD secrets & rules ; onglet Settings et « Install CA » = Phase 6.3, à venir) |
+| Menu bar app `Iris.app` | Phase 6 ✅ | Disponible (Overview / Logs / Security + CRUD secrets & rules ; onglet Settings = Phase 6.3b, à venir) |
+| Modèle de config unifié (`config.json` app-first, `iris config set`) | Phase 6.3a ✅ | Disponible |
 | LaunchAgent + `SMAppService` (auto-start) | Phase 7 ⏳ | À venir |
-| ACL Keychain signed-binary | Phase 8 ⏳ | À venir |
+| ACL Keychain signed-binary | Phase 8 ✅ | Disponible |
 | `.pkg` signé + notarisé | Phase 9 ✅ | Disponible |
 | Hardening + fuzz tests | Phase 10 ✅ | Disponible |
 
-**Aujourd'hui** : le broker est utilisable de bout en bout — secrets en Keychain via la CLI `iris` ou l'app menu bar, proxy MITM avec substitution scopée par `allowed_hosts`, détection d'exfiltration, streaming des réponses, et `.pkg` signé + notarisé. Restent à venir : le démarrage automatique (LaunchAgent/`SMAppService`, Phase 7), le durcissement de l'ACL Keychain liée au binaire signé (Phase 8), et l'onglet Settings / « Install CA » de l'app (Phase 6.3). Le mode `--in-memory-secrets` (secrets via `IRIS_SECRET_<NAME>`) reste disponible pour le debug.
+**Aujourd'hui** : le broker est utilisable de bout en bout — secrets en Keychain via la CLI `iris` ou l'app menu bar, proxy MITM avec substitution scopée par `allowed_hosts`, détection d'exfiltration, streaming des réponses, ACL Keychain liée au binaire signé, config unifiée `config.json` (seedée au 1er boot, éditable via `iris config set`), et `.pkg` signé + notarisé. Reste à venir : le démarrage automatique (LaunchAgent/`SMAppService`, Phase 7) et l'onglet Settings / « Install CA » de l'app (Phase 6.3b). Le mode `--in-memory-secrets` (secrets via `IRIS_SECRET_<NAME>`) reste disponible pour le debug.
 
 ---
 
@@ -252,6 +253,32 @@ L'app `Iris.app` expose un onglet **Secrets** avec les mêmes opérations sous f
 ![App — onglet Secrets](screenshots/10-app-secrets-tab.png "Onglet Secrets de l'app")
 
 ![App — sheet Add Secret](screenshots/11-app-add-secret-sheet.png "Sheet Add Secret")
+
+### 5.8 Whitelist MITM et configuration
+
+La whitelist des hosts interceptés et tous les réglages vivent dans un fichier **unique géré par le daemon** : `~/Library/Application Support/iris/config.json`. Il est **créé automatiquement** (seedé avec des valeurs par défaut) au premier démarrage — rien à éditer à la main. Le daemon en est le seul auteur ; chaque écriture est précédée d'un backup horodaté sous `backups/` (rotation configurable via `backups.max_count`).
+
+Gérer la whitelist :
+
+```bash
+iris rule add api.github.com      # autoriser un host (origin: user)
+iris rule list                    # HOST / ORIGIN (default|user) / CREATED
+iris rule rm api.github.com       # retirer un host user
+```
+
+Le host par défaut `api.anthropic.com` est marqué `origin: default` et **protégé** : `iris rule rm api.anthropic.com` est refusé (évite de casser `claude` par mégarde).
+
+Lire et changer les réglages :
+
+```bash
+iris config get                                              # dump lisible
+iris config set security.on_exfil_attempt block_only         # appliqué à chaud
+iris config set security.max_substitutions_per_minute 120    # appliqué à chaud
+iris config set backups.max_count 5                          # appliqué à chaud
+iris config set broker.event_ring_size 20000                 # → requires_restart
+```
+
+Les champs `security.*` et `backups.max_count` prennent effet immédiatement ; les champs `broker.*` (ports, socket, tailles) sont persistés mais nécessitent un redémarrage du daemon — `config set` le signale dans `requires_restart`. Si `config.json` est corrompu au démarrage, le daemon le sauvegarde, repart sur les défauts et émet une alerte `high` (visible dans l'onglet Security et `iris logs`) plutôt que de refuser de démarrer.
 
 ---
 

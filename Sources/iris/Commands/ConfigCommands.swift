@@ -5,8 +5,8 @@ import IrisKit
 struct ConfigCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "config",
-        abstract: "Inspect or reload the daemon configuration.",
-        subcommands: [Get.self, Reload.self]
+        abstract: "Inspect, change, or reload the daemon configuration.",
+        subcommands: [Get.self, Set.self, Reload.self]
     )
 
     struct Get: AsyncParsableCommand {
@@ -24,6 +24,8 @@ struct ConfigCommand: AsyncParsableCommand {
             }
             let humanText: String = {
                 var lines: [String] = []
+                lines.append("version = \(config.version)")
+                lines.append("")
                 lines.append("[broker]")
                 lines.append("listen = \"\(config.broker.listen)\"")
                 lines.append("events_listen = \"\(config.broker.eventsListen)\"")
@@ -40,9 +42,13 @@ struct ConfigCommand: AsyncParsableCommand {
                     "max_substitutions_per_minute = \(config.security.maxSubstitutionsPerMinute)"
                 )
                 lines.append("")
-                for entry in config.mitmHosts {
-                    lines.append("[[mitm_host]]")
+                lines.append("[backups]")
+                lines.append("max_count = \(config.backups.maxCount)")
+                lines.append("")
+                for entry in config.hosts.sorted(by: { $0.host < $1.host }) {
+                    lines.append("[[hosts]]")
                     lines.append("host = \"\(entry.host)\"")
+                    lines.append("origin = \"\(entry.origin.rawValue)\"")
                     lines.append("")
                 }
                 return lines.joined(separator: "\n")
@@ -51,10 +57,43 @@ struct ConfigCommand: AsyncParsableCommand {
         }
     }
 
+    struct Set: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "set",
+            abstract: "Set a configuration value (e.g. security.on_exfil_attempt block_only)."
+        )
+
+        @OptionGroup var connection: ConnectionOptions
+        @Argument(help: "Config key (dot-path), e.g. security.max_substitutions_per_minute.")
+        var key: String
+        @Argument(help: "New value.")
+        var value: String
+        @Flag(name: .customLong("json")) var json: Bool = false
+
+        mutating func run() async throws {
+            let params = ConfigSetParams(updates: [.init(key: key, value: value)])
+            let result = try await withAdminClient(connection) { client in
+                try await client.call(.configSet, params: params, returning: ConfigSetResult.self)
+            }
+            var lines: [String] = []
+            if !result.applied.isEmpty {
+                lines.append("applied: \(result.applied.joined(separator: ", "))")
+            }
+            if !result.requiresRestart.isEmpty {
+                lines.append("requires restart: \(result.requiresRestart.joined(separator: ", "))")
+            }
+            try Output.print(
+                humanText: lines.joined(separator: "\n") + "\n",
+                jsonValue: result,
+                json: json
+            )
+        }
+    }
+
     struct Reload: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "reload",
-            abstract: "Reload daemon config from TOML (equivalent to SIGHUP)."
+            abstract: "Reload daemon config from config.json (equivalent to SIGHUP)."
         )
 
         @OptionGroup var connection: ConnectionOptions

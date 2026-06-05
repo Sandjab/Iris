@@ -49,11 +49,17 @@ struct SecurityTab: View {
 
     private var sortedAlerts: [Event] {
         model.alerts.sorted { lhs, rhs in
-            if let l = lhs.alert, let r = rhs.alert, l.severity != r.severity {
-                return l.severity > r.severity
-            }
+            let l = Self.severity(of: lhs)
+            let r = Self.severity(of: rhs)
+            if l != r { return l > r }
             return lhs.timestamp > rhs.timestamp
         }
+    }
+
+    /// Severity of an alert event, whether it carries an exfil `Alert` or a
+    /// daemon-level `SystemAlert` (Phase 6.3a). Defaults to `.low` if neither.
+    static func severity(of event: Event) -> IrisKit.Alert.Severity {
+        event.alert?.severity ?? event.systemAlert?.severity ?? .low
     }
 
     private func quarantine(_ event: Event) async {
@@ -76,22 +82,29 @@ private struct AlertRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 severityChip
-                Text(event.alert?.secretName ?? "").font(.callout.bold())
-                Text("→").foregroundStyle(.secondary)
-                Text(event.host).font(.callout)
+                if let alert = event.alert {
+                    Text(alert.secretName).font(.callout.bold())
+                    Text("→").foregroundStyle(.secondary)
+                    Text(event.host).font(.callout)
+                } else {
+                    Text("Configuration").font(.callout.bold())
+                }
                 Spacer()
                 Text(event.timestamp.formatted(date: .omitted, time: .standard))
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                Button {
-                    Task { await onQuarantine() }
-                } label: {
-                    Image(systemName: "lock.slash")
+                // Quarantine applies to a secret; a system alert has none.
+                if let alert = event.alert {
+                    Button {
+                        Task { await onQuarantine() }
+                    } label: {
+                        Image(systemName: "lock.slash")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Quarantine \(alert.secretName)")
+                    .disabled(alert.secretName.isEmpty)
                 }
-                .buttonStyle(.borderless)
-                .help("Quarantine \(event.alert?.secretName ?? "secret")")
-                .disabled((event.alert?.secretName ?? "").isEmpty)
             }
-            if let snippet = event.alert?.snippet {
+            if let snippet = event.alert?.snippet ?? event.systemAlert?.message {
                 Text(snippet).font(.callout.monospaced()).foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -101,7 +114,7 @@ private struct AlertRow: View {
     }
 
     private var severityChip: some View {
-        let severity = event.alert?.severity ?? .low
+        let severity = event.alert?.severity ?? event.systemAlert?.severity ?? .low
         return Text(severity.rawValue.uppercased()).font(.caption.bold())
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(color(for: severity).opacity(0.2))

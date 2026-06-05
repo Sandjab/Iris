@@ -20,6 +20,7 @@ public enum AdminMethod: String, Codable, Sendable, CaseIterable {
     case caFingerprint = "ca.fingerprint"
     case caIsTrusted = "ca.is_trusted"
     case configGet = "config.get"
+    case configSet = "config.set"
     case ruleAdd = "rule.add"
     case ruleList = "rule.list"
     case ruleDelete = "rule.delete"
@@ -115,6 +116,21 @@ public struct RuleHostParams: Codable, Sendable, Equatable {
     public init(host: String) { self.host = host }
 }
 
+/// A batch of scalar config updates (dot-path key → string value). Hosts are NOT
+/// settable here — use `rule.add`/`rule.delete`.
+public struct ConfigSetParams: Codable, Sendable, Equatable {
+    public struct Update: Codable, Sendable, Equatable {
+        public let key: String
+        public let value: String
+        public init(key: String, value: String) {
+            self.key = key
+            self.value = value
+        }
+    }
+    public let updates: [Update]
+    public init(updates: [Update]) { self.updates = updates }
+}
+
 // MARK: - Results
 
 public struct SecretDeletedResult: Codable, Sendable, Equatable {
@@ -197,6 +213,21 @@ public struct ConfigReloadResult: Codable, Sendable, Equatable {
     public init(reloaded: Bool, ignored: [String]) {
         self.reloaded = reloaded
         self.ignored = ignored
+    }
+}
+
+public struct ConfigSetResult: Codable, Sendable, Equatable {
+    /// Keys applied to the running proxy immediately (hot fields).
+    public let applied: [String]
+    /// Keys persisted but needing a daemon restart to take effect (structural).
+    public let requiresRestart: [String]
+    enum CodingKeys: String, CodingKey {
+        case applied
+        case requiresRestart = "requires_restart"
+    }
+    public init(applied: [String], requiresRestart: [String]) {
+        self.applied = applied
+        self.requiresRestart = requiresRestart
     }
 }
 
