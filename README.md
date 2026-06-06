@@ -9,7 +9,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
 </p>
 
-> **Interception · Resolution · Injection · Substitution**
+> **IRIS: Interception · Resolution · Injection · Substitution**
 
 A minimal credential broker for macOS that lets local AI agents (like Claude Code CLI) use real credentials without ever seeing them.
 
