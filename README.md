@@ -18,7 +18,7 @@ A minimal credential broker for macOS that lets local AI agents (like Claude Cod
 
 Named after the Greek messenger goddess who carried messages between worlds without altering them: IRIS sits between your agent and the upstream APIs, carrying authenticated requests through while keeping the actual credentials on the far side of a trust boundary.
 
-IRIS runs as a background LaunchAgent. It exposes a local HTTPS proxy that intercepts outbound traffic, substitutes placeholders like `{{kc:anthropic_api_key}}` with real values pulled from the macOS Keychain, and forwards the request upstream. The agent's process environment only ever contains the placeholders.
+IRIS runs as a background LaunchAgent paired with a menu bar app — both register with `SMAppService` on first launch and relaunch automatically at every login. It exposes a local HTTPS proxy that intercepts outbound traffic, substitutes placeholders like `{{kc:anthropic_api_key}}` with real values pulled from the macOS Keychain, and forwards the request upstream. The agent's process environment only ever contains the placeholders.
 
 ## Why
 
@@ -72,13 +72,15 @@ iris secret add anthropic_api_key --allowed-hosts api.anthropic.com --value-from
 ## Quickstart
 
 ```bash
-# Install
-sudo installer -pkg iris.pkg -target /
+# Install — double-click Iris.pkg for the guided installer,
+# or headless from the CLI:
+sudo installer -pkg Iris.pkg -target /
 
-# Add your first secret
-iris secret add anthropic_api_key \
+# Add your first secret — read it without leaving a trace in shell history
+read -rs ANTHROPIC_KEY
+printf %s "$ANTHROPIC_KEY" | iris secret add anthropic_api_key \
   --allowed-hosts api.anthropic.com \
-  --value-from-stdin <<< "sk-ant-..."
+  --value-from-stdin
 
 # Configure your shell (one-time, in ~/.zshrc)
 export HTTPS_PROXY="http://127.0.0.1:8888"
@@ -90,7 +92,7 @@ export ANTHROPIC_API_KEY='{{kc:anthropic_api_key}}'
 claude
 ```
 
-The menu bar icon shows up in the top-right after install. Click it for live logs, alerts, and secret management.
+After install, the daemon and the menu bar app both start on their own — and relaunch at every login. The menu bar icon appears in the top-right; click it for live logs, alerts, and secret management. You can toggle either service's auto-start from **Settings → "Launch at login"**.
 
 ## Architecture
 
@@ -104,9 +106,9 @@ The menu bar icon shows up in the top-right after install. Click it for live log
              │ HTTPS (TLS via local CA)
              ▼
 ┌──────────────────────────────────┐         ┌─────────────────────┐
-│  irisd (LaunchAgent)       │         │  System Keychain    │
+│  irisd (LaunchAgent)             │         │  System Keychain    │
 │  ├─ MITM proxy   :8888           │◄────────┤  (secrets + CA key) │
-│  ├─ Events SSE   :8889           │         └─────────────────────┘
+│  ├─ Events SSE   :8899           │         └─────────────────────┘
 │  └─ Admin RPC    unix socket     │
 └────────────┬─────────────────────┘
              │ HTTPS (clean, with real credential)
@@ -156,7 +158,7 @@ See `SPECS.md` for the full threat model. Short version:
 
 - The agent process never has access to plaintext credentials.
 - The broker only substitutes a secret into a request destined for one of that secret's `allowed_hosts`.
-- A placeholder appearing in a request to a non-authorized host is treated as an exfiltration attempt and blocked.
+- A placeholder appearing in a request to a non-authorized host — or anywhere outside a canonical auth header — is treated as an exfiltration attempt: the request is forwarded with the placeholder left intact (never substituted) and the attempt is surfaced as an alert.
 - The local CA private key is stored in Keychain with an ACL bound to the signed `irisd` binary; no other process can read it without explicit user consent.
 - The daemon listens only on `127.0.0.1` and on a `0600` Unix socket.
 
@@ -184,4 +186,4 @@ This is intentional. IRIS is designed for the agentic CLI workflow — narrow, p
 
 ## License
 
-TBD.
+MIT — see [LICENSE](LICENSE).
