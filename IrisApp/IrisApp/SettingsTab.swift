@@ -147,6 +147,7 @@ struct SettingsTab: View {
                     )
                 )
                 .labelsHidden()
+                .disabled(status == nil)
             }
         }
     }
