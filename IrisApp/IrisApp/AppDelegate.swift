@@ -2,12 +2,11 @@ import AppKit
 import Combine
 import IrisAppCore
 import IrisKit
-import SwiftUI
 import UserNotifications
 import os
 
 /// Default admin socket path (SPECS §681). Made configurable via Settings in Phase 6.3.
-/// Module-internal so `PopoverView` reuses it without duplicating the literal.
+/// Module-internal so `MainPanelController` reuses it without duplicating the literal.
 func defaultAdminSocketPath() -> String {
     ("~/Library/Application Support/iris/admin.sock" as NSString).expandingTildeInPath
 }
@@ -17,10 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appModel = AppModel()
     private var notifications: NotificationCoordinator?
     private var statusItem: NSStatusItem?
-    private var popover: NSPopover?
+    private var panelController: MainPanelController?
     private var cancellables: Set<AnyCancellable> = []
     private var pulseWorkItem: DispatchWorkItem?
-    private var popoverMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Multi-instance protection (SPECS §3.3 + §4 edge cases): a second launch exits
@@ -52,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let coordinator = NotificationCoordinator(model: appModel) { [weak self] in
-            self?.openPopover()
+            self?.panelController?.show()
         }
         notifications = coordinator
         Task { await coordinator.requestAuthorization() }
@@ -85,22 +83,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         // One daemon client for the whole app: admin RPC over UDS + loopback SSE.
-        // The same `admin` is reused by both the SyncCoordinator and the popover's
+        // The same `admin` is reused by both the SyncCoordinator and the panel's
         // pause/resume control, so we never spin up (and leak) a per-click EventLoopGroup.
         // It lives for the process lifetime; its owned group is reclaimed at exit.
         let admin = AdminClient(socketPath: defaultAdminSocketPath())
         let eventsClient = EventsClient(port: 8899)
 
-        let popover = NSPopover()
-        // .applicationDefined (not .transient): a transient popover dismisses itself on the
-        // mouseDown of the status button, then handleClick's mouseUp re-opens it — so a second
-        // click never closes it. We own dismissal explicitly (re-click + outside-click monitor).
-        popover.behavior = .applicationDefined
-        popover.contentSize = NSSize(width: 480, height: 600)
-        popover.contentViewController = NSHostingController(
-            rootView: PopoverView(admin: admin).environmentObject(appModel)
-        )
-        self.popover = popover
+        // L'IHM du broker vit dans un panneau déplaçable, redimensionnable, flottant et
+        // non-activant (créé paresseusement au premier clic). Il réutilise le client `admin`
+        // commun à toute l'app et l'`appModel` partagé.
+        panelController = MainPanelController(admin: admin, appModel: appModel)
 
         let sync = SyncCoordinator(model: appModel, admin: admin, events: eventsClient)
         let model = appModel
@@ -132,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleClick(_ sender: NSStatusBarButton) {
         guard let event = NSApp.currentEvent else {
-            togglePopover()
+            panelController?.toggle()
             return
         }
         // Ctrl+left-click is the standard macOS secondary-click shortcut.
@@ -142,39 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if isSecondaryClick {
             showQuitMenu(from: sender)
         } else {
-            togglePopover()
-        }
-    }
-
-    private func togglePopover() {
-        guard let popover else { return }
-        if popover.isShown {
-            closePopover()
-        } else {
-            openPopover()
-        }
-    }
-
-    // Extracted so the notification click handler can force the popover open (not toggle).
-    private func openPopover() {
-        guard let button = statusItem?.button, let popover, !popover.isShown else { return }
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover.contentViewController?.view.window?.makeKey()
-        // .applicationDefined never self-dismisses, so close on any click outside the app.
-        // The status button is handled by handleClick; clicks inside the popover are local
-        // events this global monitor never receives, so they don't dismiss it.
-        popoverMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
-            self?.closePopover()
-        }
-    }
-
-    private func closePopover() {
-        popover?.performClose(nil)
-        if let monitor = popoverMonitor {
-            NSEvent.removeMonitor(monitor)
-            popoverMonitor = nil
+            panelController?.toggle()
         }
     }
 
