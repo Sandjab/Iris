@@ -6,6 +6,7 @@
     <license file="license.txt" mime-type="text/plain"/>
     <conclusion file="conclusion.html" mime-type="text/html"/>
     <background file="background.png" mime-type="image/png" alignment="left" scaling="tofit"/>
+    <background-darkAqua file="background-dark.png" mime-type="image/png" alignment="left" scaling="tofit"/>
     <options customize="never" require-scripts="false"/>
     <volume-check>
         <allowed-os-versions>

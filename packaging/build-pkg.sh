@@ -67,9 +67,11 @@ codesign -s "$APP_IDENTITY" -f --timestamp -o runtime "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 # --- 7. PKG guidé signé Developer ID Installer ----------------------------
-#   a. Licence : source unique -> copiée dans chaque lproj (gitignorée)
-cp LICENSE "$RESOURCES/en.lproj/license.txt"
-cp LICENSE "$RESOURCES/fr.lproj/license.txt"
+#   a. Licence : ressource UNIQUE non localisée (racine de resources) -> pas de
+#      sélecteur de langue sur l'écran Licence (la MIT n'a pas de version FR légale).
+#      welcome/readme/conclusion restent localisés (en.lproj/fr.lproj).
+rm -f "$RESOURCES"/*.lproj/license.txt
+cp LICENSE "$RESOURCES/license.txt"
 #   b. Composant non signé (les scripts pre/postinstall s'attachent ICI)
 mkdir -p "$COMPONENT_DIR"
 pkgbuild --component "$APP" --install-location /Applications \

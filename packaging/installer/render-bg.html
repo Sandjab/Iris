@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<!--
+  Rendu de la couche de fond de l'installeur (art seul, 1240x836).
+  Source de vérité du placement = positionné dans le playground (cf docs phase-9c),
+  exporté en fractions ci-dessous. Capturé par packaging/installer/make-background.sh
+  via Chrome headless -> resources/background.png (clair) + background-dark.png (sombre).
+  Génère le fond avec la VRAIE police SF + le masque CSS (fidélité au playground) ;
+  magick ne sert qu'à préparer le masque alpha sil-mask.png.
+-->
+<html lang="fr"><head><meta charset="utf-8">
+<style>
+  *{margin:0;box-sizing:border-box}
+  html,body{background:#F6F8FC}
+  .bg{position:relative;width:1240px;height:836px;overflow:hidden;
+    --field:#F6F8FC;--emblem:#0E2A47;--word:#0E2A47;--rule:#C9912E;--tag:#5B6B82;
+    background:var(--field)}
+  .bg[data-theme="dark"]{--field:#1C212B;--emblem:#cfe0f2;--word:#eef3fb;--rule:#C9912E;--tag:#aab4c4}
+  .obj{position:absolute}
+  .emblem-c{position:absolute;inset:0;background:var(--emblem);
+    -webkit-mask:var(--mask) no-repeat center/100% 100%; mask:var(--mask) no-repeat center/100% 100%}
+  .rule-c{position:absolute;inset:0;background:var(--rule);border-radius:3px}
+  .txt{position:absolute;left:0;top:0;white-space:nowrap;line-height:1;font-weight:720;
+    letter-spacing:-.02em;transform-origin:top left;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",sans-serif;font-size:240px}
+  #word .txt{color:var(--word)}
+  #tag .txt{color:var(--tag);font-weight:600;letter-spacing:0}
+</style></head>
+<body>
+  <div class="bg" id="bg">
+    <div class="obj" id="emblem"><div class="emblem-c"></div></div>
+    <div class="obj" id="word"><span class="txt">Iris</span></div>
+    <div class="obj" id="rule"><div class="rule-c"></div></div>
+    <div class="obj" id="tag"><span class="txt">Local credential broker</span></div>
+  </div>
+<script>
+document.documentElement.style.setProperty('--mask', "url('sil-mask.png')");
+// Disposition (fractions de la fenêtre 1240x836), figée depuis le playground.
+const L = {
+  emblem:{x:0.0061,y:0.4108,w:0.2966,h:0.4069},
+  word:  {x:0.0454,y:0.7719,w:0.1700,h:0.1200},
+  rule:  {x:0.0532,y:0.8884,w:0.1856,h:0.0173},
+  tag:   {x:0.0530,y:0.9082,w:0.1805,h:0.0339},
+};
+const W=1240,H=836;
+const params=new URLSearchParams(location.search);
+document.getElementById('bg').dataset.theme = params.get('theme')||'light';
+for(const id in L){
+  const s=L[id], el=document.getElementById(id);
+  el.style.left=(s.x*W)+'px'; el.style.top=(s.y*H)+'px';
+  el.style.width=(s.w*W)+'px'; el.style.height=(s.h*H)+'px';
+  const span=el.querySelector('.txt');
+  if(span){ span.style.transform='none';
+    const bw=span.offsetWidth||1, bh=span.offsetHeight||1;
+    span.style.transform=`scale(${el.clientWidth/bw}, ${el.clientHeight/bh})`;
+  }
+}
+document.title='ready';
+</script>
+</body></html>
