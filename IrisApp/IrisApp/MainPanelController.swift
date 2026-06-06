@@ -63,11 +63,21 @@ final class MainPanelController {
         panel.isReleasedWhenClosed = false
         panel.contentMinSize = NSSize(width: 420, height: 480)
 
-        // Persiste position + taille entre ouvertures et redémarrages. `center()` uniquement
-        // s'il n'y a pas encore de frame sauvée (tout premier lancement).
+        // Persiste position + taille entre ouvertures et redémarrages. Au tout premier
+        // lancement (aucune frame sauvée), on centre sur la zone utile de l'écran. On calcule
+        // le centre géométrique plutôt que `NSWindow.center()` : ce dernier place la fenêtre
+        // horizontalement centrée mais « somewhat above center vertically » (doc Apple).
         panel.setFrameAutosaveName("IrisBrokerPanel")
         if !panel.setFrameUsingName("IrisBrokerPanel") {
-            panel.center()
+            if let screen = NSScreen.main ?? NSScreen.screens.first {
+                let visible = screen.visibleFrame
+                let size = panel.frame.size
+                panel.setFrameOrigin(
+                    NSPoint(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2)
+                )
+            } else {
+                panel.center()
+            }
         }
 
         self.panel = panel
