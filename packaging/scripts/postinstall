@@ -2,11 +2,18 @@
 # IRIS postinstall — Phase 9a : crée le dossier de support, possédé par l'utilisateur
 # installateur. Un postinstall de .pkg s'exécute en root → on résout l'utilisateur réel
 # (console, ou SUDO_USER si lancé en terminal) et on crée le dossier sous son identité.
-# PAS d'auto-start (Phase 7).
+# Auto-start (Phase 7) : relance Iris.app --first-launch sous l'utilisateur réel.
 set -euo pipefail
 INSTALL_USER="${SUDO_USER:-$(stat -f '%Su' /dev/console)}"
 if [ -n "$INSTALL_USER" ] && [ "$INSTALL_USER" != "root" ] && [ "$INSTALL_USER" != "loginwindow" ]; then
     USER_HOME="$(eval echo "~$INSTALL_USER")"
     sudo -u "$INSTALL_USER" mkdir -p "$USER_HOME/Library/Application Support/iris"
+    # Sur une mise à jour, une ancienne instance peut tourner : `open -a` l'activerait
+    # au lieu de lancer la nouvelle version (et --first-launch ne serait pas délivré).
+    # On la quitte d'abord (sans échec si absente / Apple Events refusés).
+    sudo -u "$INSTALL_USER" osascript -e 'quit app "Iris"' 2>/dev/null || true
+    # Phase 7 : enregistrer les services SMAppService dès l'install (auto-start).
+    # L'app détecte --first-launch et appelle register() pour irisd + login-item.
+    sudo -u "$INSTALL_USER" /usr/bin/open -a "/Applications/Iris.app" --args --first-launch
 fi
 exit 0

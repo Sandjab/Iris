@@ -4,6 +4,7 @@ import IrisAppCore
 import IrisKit
 import SwiftUI
 import UserNotifications
+import os
 
 /// Default admin socket path (SPECS §681). Made configurable via Settings in Phase 6.3.
 /// Module-internal so `PopoverView` reuses it without duplicating the literal.
@@ -28,6 +29,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).count > 1 {
             NSApp.terminate(nil)
             return
+        }
+
+        // Phase 7 : le postinstall relance l'app avec `--first-launch` pour enregistrer
+        // les services SMAppService dès l'installation (idempotent, best-effort). Hors
+        // main-actor : register() peut bloquer sur l'IPC launchd. Un échec n'est pas
+        // bloquant — l'utilisateur garde les toggles de Settings.
+        if CommandLine.arguments.contains("--first-launch") {
+            Task.detached {
+                let service = SystemAutoStartService()
+                let log = Logger(subsystem: "io.iris.app", category: "autostart")
+                for target in AutoStartTarget.allCases {
+                    do {
+                        try service.register(target)
+                    } catch {
+                        log.error(
+                            "first-launch register(\(String(describing: target))) failed: \(error.localizedDescription)"
+                        )
+                    }
+                }
+            }
         }
 
         let coordinator = NotificationCoordinator(model: appModel) { [weak self] in
