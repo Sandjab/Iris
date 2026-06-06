@@ -98,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .applicationDefined
         popover.contentSize = NSSize(width: 480, height: 600)
         popover.contentViewController = NSHostingController(
-            rootView: PopoverView(admin: admin).environmentObject(appModel)
+            rootView: BrokerPanelView(admin: admin).environmentObject(appModel)
         )
         self.popover = popover
 

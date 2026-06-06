@@ -1,7 +1,7 @@
 import IrisAppCore
 import SwiftUI
 
-struct PopoverView: View {
+struct BrokerPanelView: View {
     @EnvironmentObject var model: AppModel
     let admin: AdminCalling
 
@@ -28,7 +28,7 @@ struct PopoverView: View {
                 }
             }
         }
-        .frame(width: 480, height: 600)
+        .frame(minWidth: 420, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
     }
 }
 
