@@ -46,4 +46,52 @@ final class AutoStartTests: XCTestCase {
         XCTAssertEqual(model.appAutoStart, .notRegistered)
         XCTAssertEqual(model.daemonAutoStart, .enabled)
     }
+
+    func testEnableIsIdempotentWhenAlreadyEnabled() async throws {
+        let fake = FakeAutoStartService()
+        fake.setStatus(.enabled, for: .daemon)
+        let model = makeModel(fake)
+        model.refreshAutoStart()
+
+        try await model.setAutoStart(.daemon, enabled: true)
+
+        XCTAssertEqual(fake.calls, [])  // skip : aucun register
+    }
+
+    func testDisableIsIdempotentWhenAlreadyOff() async throws {
+        let fake = FakeAutoStartService()  // .notRegistered
+        let model = makeModel(fake)
+        model.refreshAutoStart()
+
+        try await model.setAutoStart(.daemon, enabled: false)
+
+        XCTAssertEqual(fake.calls, [])  // skip : aucun unregister
+    }
+
+    func testRegisterErrorPropagatesAndLeavesStateUnchanged() async throws {
+        struct Boom: Error {}
+        let fake = FakeAutoStartService()
+        fake.shouldThrow = Boom()
+        let model = makeModel(fake)
+        model.refreshAutoStart()  // daemonAutoStart = .notRegistered
+
+        do {
+            try await model.setAutoStart(.daemon, enabled: true)
+            XCTFail("expected setAutoStart to throw")
+        } catch {
+            // attendu
+        }
+
+        XCTAssertEqual(fake.calls, [])  // le fake throw avant d'enregistrer
+        XCTAssertEqual(model.daemonAutoStart, .notRegistered)  // pas de refresh après throw
+    }
+
+    func testOpenLoginItemsSettingsForwardsToSeam() {
+        let fake = FakeAutoStartService()
+        let model = makeModel(fake)
+
+        model.openLoginItemsSettings()
+
+        XCTAssertEqual(fake.calls, ["openLoginItemsSettings"])
+    }
 }

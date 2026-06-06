@@ -253,4 +253,8 @@ public final class AppModel: ObservableObject {
         }.value
         refreshAutoStart()
     }
+
+    public func openLoginItemsSettings() {
+        autoStart.openLoginItemsSettings()
+    }
 }
