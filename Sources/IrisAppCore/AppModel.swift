@@ -236,4 +236,21 @@ public final class AppModel: ObservableObject {
         daemonAutoStart = autoStart.status(.daemon)
         appAutoStart = autoStart.status(.app)
     }
+
+    public func setAutoStart(_ target: AutoStartTarget, enabled: Bool) async throws {
+        let current = (target == .daemon) ? daemonAutoStart : appAutoStart
+        // Idempotent : ne pas re-register/unregister un service déjà dans l'état voulu
+        // (calque de `if caTrusted == true { return }`).
+        if enabled, current == .enabled { return }
+        if !enabled, current == .notRegistered { return }
+        let service = autoStart
+        try await Task.detached {
+            if enabled {
+                try service.register(target)
+            } else {
+                try service.unregister(target)
+            }
+        }.value
+        refreshAutoStart()
+    }
 }

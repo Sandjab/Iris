@@ -20,4 +20,30 @@ final class AutoStartTests: XCTestCase {
         XCTAssertEqual(model.daemonAutoStart, .enabled)
         XCTAssertEqual(model.appAutoStart, .requiresApproval)
     }
+
+    func testEnableDaemonRegistersTargetOnly() async throws {
+        let fake = FakeAutoStartService()  // tout .notRegistered par défaut
+        let model = makeModel(fake)
+        model.refreshAutoStart()
+
+        try await model.setAutoStart(.daemon, enabled: true)
+
+        XCTAssertEqual(fake.calls, ["register(daemon)"])  // app jamais touché
+        XCTAssertEqual(model.daemonAutoStart, .enabled)
+        XCTAssertEqual(model.appAutoStart, .notRegistered)
+    }
+
+    func testDisableAppUnregistersTargetOnly() async throws {
+        let fake = FakeAutoStartService()
+        fake.setStatus(.enabled, for: .app)
+        fake.setStatus(.enabled, for: .daemon)
+        let model = makeModel(fake)
+        model.refreshAutoStart()
+
+        try await model.setAutoStart(.app, enabled: false)
+
+        XCTAssertEqual(fake.calls, ["unregister(app)"])  // daemon jamais touché
+        XCTAssertEqual(model.appAutoStart, .notRegistered)
+        XCTAssertEqual(model.daemonAutoStart, .enabled)
+    }
 }
