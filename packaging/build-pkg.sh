@@ -1,6 +1,6 @@
 #!/bin/bash
-# IRIS build-pkg — Phase 9a : assemble Iris.app (irisd embarqué + plist), signe
-# inner-first Developer ID + hardened runtime, produit build/Iris.pkg signé.
+# IRIS build-pkg — assemble Iris.app (irisd embarqué + plist), signe inner-first,
+# produit un .pkg GUIDÉ (écrans + fond, Phase 9c) signé Developer ID Installer.
 # Tourne EN LOCAL (certs Developer ID requis). NON notarisé (cf notarize.sh, Phase 9b).
 set -euo pipefail
 
@@ -13,6 +13,11 @@ BUILD="build"
 ARCHIVE="$BUILD/Iris.xcarchive"
 EXPORT="$BUILD/export"
 PKG="$BUILD/Iris.pkg"
+VERSION="${IRIS_PKG_VERSION:-0.1.0}"
+COMPONENT_DIR="$BUILD/component"
+COMPONENT_PKG="$COMPONENT_DIR/Iris-component.pkg"
+RESOURCES="packaging/installer/resources"
+DISTRIBUTION="packaging/installer/Distribution.xml"
 # APP est dérivé après l'export (le nom réel suit PRODUCT_NAME → IrisApp.app actuellement).
 DAEMON_BIN=".build/release/irisd"
 
@@ -61,9 +66,26 @@ codesign -s "$APP_IDENTITY" -f --timestamp -o runtime "$APP"
 # --- 6. Vérification signature (--deep légitime ici = vérification) --------
 codesign --verify --deep --strict --verbose=2 "$APP"
 
-# --- 7. PKG signé Developer ID Installer ----------------------------------
-productbuild --component "$APP" /Applications \
+# --- 7. PKG guidé signé Developer ID Installer ----------------------------
+#   a. Licence : ressource UNIQUE non localisée (racine de resources) -> pas de
+#      sélecteur de langue sur l'écran Licence (la MIT n'a pas de version FR légale).
+#      welcome/readme/conclusion restent localisés (en.lproj/fr.lproj).
+rm -f "$RESOURCES"/*.lproj/license.txt
+cp LICENSE "$RESOURCES/license.txt"
+#   b. Composant non signé (les scripts pre/postinstall s'attachent ICI)
+mkdir -p "$COMPONENT_DIR"
+pkgbuild --component "$APP" --install-location /Applications \
   --scripts packaging/scripts \
+  --identifier io.iris.app --version "$VERSION" \
+  "$COMPONENT_PKG"
+#   c. Produit guidé (écrans + fond via Distribution XML) signé.
+#      Version templatée depuis $VERSION → pas de drift avec le pkg-ref du Distribution.
+DISTRIBUTION_BUILD="$BUILD/Distribution.xml"
+mkdir -p "$BUILD"
+sed "s/version=\"0.1.0\"/version=\"$VERSION\"/g" "$DISTRIBUTION" > "$DISTRIBUTION_BUILD"
+productbuild --distribution "$DISTRIBUTION_BUILD" \
+  --package-path "$COMPONENT_DIR" \
+  --resources "$RESOURCES" \
   --sign "$INSTALLER_IDENTITY" --timestamp \
   "$PKG"
 

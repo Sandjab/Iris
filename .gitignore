@@ -72,3 +72,12 @@ fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
 .DS_Store
+
+# Phase 9c : licence copiée depuis LICENSE au build (ressource racine non localisée)
+packaging/installer/resources/license.txt
+packaging/installer/resources/*.lproj/license.txt
+# Phase 9c : masque alpha dérivé de la silhouette (régénéré par make-background.sh)
+packaging/installer/sil-mask.png
+packaging/installer/render-bg.tmp.html
+packaging/installer/playground.html
+packaging/installer/_preview.html

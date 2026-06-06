@@ -1,0 +1,16 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,Helvetica,sans-serif;color:#1b2a4a;font-size:13px;line-height:1.5">
+<h2 style="color:#0E2A47">Avant d'installer</h2>
+<h3>Prérequis</h3>
+<ul>
+<li>macOS 13 (Ventura) ou ultérieur.</li>
+<li>Droits administrateur — pour installer l'app et ajouter la CA locale d'Iris au trust store système.</li>
+</ul>
+<h3>Comment fonctionne l'interception</h3>
+<p>Iris n'intercepte que les <b>processus lancés depuis un shell</b> (terminaux, scripts). L'app configure pour vous deux variables d'environnement au premier lancement :</p>
+<ul>
+<li><code>HTTPS_PROXY=http://127.0.0.1:8888</code></li>
+<li><code>NODE_EXTRA_CA_CERTS="$HOME/Library/Application Support/iris/ca.pem"</code></li>
+</ul>
+<p>Les apps GUI lancées depuis le Finder, le Dock ou Spotlight (Safari, Mail, Slack…) ne sont <b>pas</b> interceptées — c'est volontaire : le cas d'usage cible est l'outillage CLI agentique. Le proxy n'écoute que sur <code>127.0.0.1</code>, rien n'est exposé au réseau.</p>
+</body></html>
