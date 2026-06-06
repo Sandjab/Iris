@@ -15,6 +15,8 @@ public final class AppModel: ObservableObject {
     @Published public var rules: [MITMRule] = []
     @Published public var config: Config?
     @Published public var caTrusted: Bool?
+    @Published public var daemonAutoStart: AutoStartStatus?
+    @Published public var appAutoStart: AutoStartStatus?
     @Published public var unreadAlertCount: Int = 0
     @Published public var streamPaused: Bool = false
     /// Frozen copy of `events` captured when the Logs stream was paused. Lives on the
@@ -30,6 +32,7 @@ public final class AppModel: ObservableObject {
 
     private let defaults: UserDefaults
     private let caInstaller: CATrustInstalling
+    private let autoStart: AutoStartControlling
     private static let tabKey = "io.iris.app.selectedTab"
     private static let ackKey = "io.iris.app.lastAcknowledgedAt"
 
@@ -40,10 +43,12 @@ public final class AppModel: ObservableObject {
 
     public init(
         defaults: UserDefaults = .standard,
-        caInstaller: CATrustInstalling = SystemCATrustInstaller()
+        caInstaller: CATrustInstalling = SystemCATrustInstaller(),
+        autoStart: AutoStartControlling = SystemAutoStartService()
     ) {
         self.defaults = defaults
         self.caInstaller = caInstaller
+        self.autoStart = autoStart
         let storedTab = defaults.string(forKey: Self.tabKey).flatMap(Tab.init(rawValue:))
         self.selectedTab = storedTab ?? .overview
         if let ts = defaults.object(forKey: Self.ackKey) as? Date {
@@ -225,5 +230,10 @@ public final class AppModel: ObservableObject {
         let installer = caInstaller
         try await Task.detached { try installer.uninstall(pemPath: path) }.value
         try await refreshCATrust(via: admin)
+    }
+
+    public func refreshAutoStart() {
+        daemonAutoStart = autoStart.status(.daemon)
+        appAutoStart = autoStart.status(.app)
     }
 }
