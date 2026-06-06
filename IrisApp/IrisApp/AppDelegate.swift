@@ -38,8 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            // Template icon: monochrome SF Symbol. Replaced by xcassets in Task 19.
-            button.image = NSImage(systemSymbolName: "key.fill", accessibilityDescription: "Iris")
+            button.image = NSImage(named: "StatusIcon")
             button.image?.isTemplate = true
             button.target = self
             button.action = #selector(handleClick(_:))

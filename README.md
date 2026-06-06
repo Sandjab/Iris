@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/banner.png" alt="IRIS — Secrets Are Safe." width="720">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.png">
+    <img src="assets/banner.png" alt="IRIS — Secrets Are Safe." width="720">
+  </picture>
 </p>
 
 <p align="center">
