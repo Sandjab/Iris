@@ -19,6 +19,7 @@ struct SettingsTab: View {
                     securityBox(cfg)
                     backupsBox()
                     caBox()
+                    autoStartBox()
                     connectionBox(cfg)
                     footer()
                 } else {
@@ -110,6 +111,46 @@ struct SettingsTab: View {
         }
     }
 
+    @ViewBuilder private func autoStartBox() -> some View {
+        GroupBox("Launch at login") {
+            VStack(alignment: .leading, spacing: 8) {
+                autoStartRow("Background service (irisd)", status: model.daemonAutoStart, target: .daemon)
+                Divider()
+                autoStartRow("Menu bar app (Iris)", status: model.appAutoStart, target: .app)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+        }
+    }
+
+    @ViewBuilder private func autoStartRow(
+        _ label: String,
+        status: AutoStartStatus?,
+        target: AutoStartTarget
+    ) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            switch status {
+            case .requiresApproval?:
+                Label("Needs approval", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Button("Open Login Items…") { model.openLoginItemsSettings() }
+            case .notFound?, .unknown?:
+                Text("Unavailable").foregroundStyle(.secondary)
+            default:  // .enabled / .notRegistered / nil (en cours de chargement)
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { status == .enabled },
+                        set: { newValue in toggleAutoStart(target, enabled: newValue) }
+                    )
+                )
+                .labelsHidden()
+            }
+        }
+    }
+
     @ViewBuilder private func connectionBox(_ cfg: Config) -> some View {
         GroupBox("Connection (read-only)") {
             VStack(alignment: .leading, spacing: 4) {
@@ -177,6 +218,17 @@ struct SettingsTab: View {
         }
     }
 
+    private func toggleAutoStart(_ target: AutoStartTarget, enabled: Bool) {
+        Task {
+            errorText = nil
+            do {
+                try await model.setAutoStart(target, enabled: enabled)
+            } catch {
+                errorText = userMessage(error)
+            }
+        }
+    }
+
     private func reveal() {
         Task {
             do {
@@ -194,6 +246,7 @@ struct SettingsTab: View {
         do {
             try await model.loadConfig(via: admin)
             try await model.refreshCATrust(via: admin)
+            model.refreshAutoStart()
             syncFields()
         } catch {
             errorText = userMessage(error)
