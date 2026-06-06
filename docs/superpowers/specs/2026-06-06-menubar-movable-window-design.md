@@ -98,9 +98,12 @@ Inchangés (restent sur le bouton status) : menu Quit (ctrl/clic droit, `showQui
 - Ligne 31 : `.frame(width: 480, height: 600)` →
   `.frame(minWidth: 420, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)` pour que
   le contenu suive le redimensionnement de la fenêtre.
-- **Optionnel** (au choix de l'utilisateur, hors périmètre minimal) : renommer `PopoverView`
-  → `BrokerPanelView` + son fichier, « Popover » devenant trompeur. Par défaut on garde le
-  nom pour rester surgical ; à trancher au moment du plan.
+- **Rename `PopoverView` → `BrokerPanelView`** (décidé) : « Popover » devient trompeur. Renommer
+  le struct + le fichier `PopoverView.swift` → `BrokerPanelView.swift`. Sites à mettre à jour
+  (vérifiés par grep) : (a) le `rootView` du `NSHostingController` — qui migre dans
+  `MainPanelController` (§4.1), pas dans `AppDelegate` ; (b) le commentaire `AppDelegate.swift:10`
+  qui mentionne « `PopoverView` reuses it » à propos de `defaultAdminSocketPath()` →
+  reformuler (le réutilisateur devient `MainPanelController`). Aucune autre référence.
 
 ### 4.5 Politique d'activation
 
