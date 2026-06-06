@@ -4,8 +4,10 @@ import Foundation
 
 /// In-memory `AutoStartControlling` : statut scriptable par cible, journal des
 /// appels register/unregister, et `shouldThrow` pour simuler un échec.
-/// `@unchecked Sendable` : l'état est protégé par NSLock — register/unregister
-/// sont appelés depuis le `Task.detached` d'AppModel, les lectures depuis le test.
+/// `@unchecked Sendable` : `_calls`/`_statuses` sont écrits depuis le `Task.detached`
+/// d'AppModel et lus depuis le thread de test, donc les deux côtés prennent le NSLock.
+/// `shouldThrow` est posé avant qu'aucune tâche ne soit lancée (happens-before suffit,
+/// pas de protection par lock nécessaire).
 final class FakeAutoStartService: AutoStartControlling, @unchecked Sendable {
     private let lock = NSLock()
     private var _calls: [String] = []
