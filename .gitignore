@@ -79,3 +79,5 @@ packaging/installer/resources/*.lproj/license.txt
 # Phase 9c : masque alpha dérivé de la silhouette (régénéré par make-background.sh)
 packaging/installer/sil-mask.png
 packaging/installer/render-bg.tmp.html
+packaging/installer/playground.html
+packaging/installer/_preview.html

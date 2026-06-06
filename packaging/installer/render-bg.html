@@ -14,7 +14,7 @@
   .bg{position:relative;width:1240px;height:836px;overflow:hidden;
     --field:#F6F8FC;--emblem:#0E2A47;--word:#0E2A47;--rule:#C9912E;--tag:#5B6B82;
     background:var(--field)}
-  .bg[data-theme="dark"]{--field:#1C212B;--emblem:#cfe0f2;--word:#eef3fb;--rule:#C9912E;--tag:#aab4c4}
+  .bg[data-theme="dark"]{--field:#1C212B;--emblem:#eef3fb;--word:#eef3fb;--rule:#C9912E;--tag:#aab4c4}
   .obj{position:absolute}
   .emblem-c{position:absolute;inset:0;background:var(--emblem);
     -webkit-mask:var(--mask) no-repeat center/100% 100%; mask:var(--mask) no-repeat center/100% 100%}
@@ -36,10 +36,10 @@
 document.documentElement.style.setProperty('--mask', "url('sil-mask.png')");
 // Disposition (fractions de la fenêtre 1240x836), figée depuis le playground.
 const L = {
-  emblem:{x:0.0061,y:0.4108,w:0.2966,h:0.4069},
-  word:  {x:0.0454,y:0.7719,w:0.1700,h:0.1200},
-  rule:  {x:0.0532,y:0.8884,w:0.1856,h:0.0173},
-  tag:   {x:0.0530,y:0.9082,w:0.1805,h:0.0339},
+  emblem:{x:-0.0155,y:0.7498,w:0.1350,h:0.1852},
+  word:  {x:0.0971,y:0.7664,w:0.1700,h:0.1200},
+  rule:  {x:0.1045,y:0.8806,w:0.1856,h:0.0173},
+  tag:   {x:0.1058,y:0.9025,w:0.1805,h:0.0339},
 };
 const W=1240,H=836;
 const params=new URLSearchParams(location.search);
