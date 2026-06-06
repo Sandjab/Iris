@@ -10,7 +10,6 @@
 </p>
 
 > **Interception · Resolution · Injection · Substitution**
-> *Secrets Are Safe.*
 
 A minimal credential broker for macOS that lets local AI agents (like Claude Code CLI) use real credentials without ever seeing them.
 
