@@ -82,9 +82,21 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 #      welcome/readme/conclusion restent localisés (en.lproj/fr.lproj).
 rm -f "$RESOURCES"/*.lproj/license.txt
 cp LICENSE "$RESOURCES/license.txt"
-#   b. Composant non signé (les scripts pre/postinstall s'attachent ICI)
+#   b. Composant app NON-RELOCATABLE (les scripts pre/postinstall s'attachent ICI).
+#      Sans BundleIsRelocatable=false, Installer relocalise l'app vers une instance
+#      existante de io.iris.app trouvée ailleurs sur le disque (p.ex. build/export/Iris.app)
+#      au lieu de /Applications → /Applications/Iris.app absent → le postinstall
+#      (open -a /Applications/Iris.app --first-launch) échoue (PKInstallErrorDomain 112).
 mkdir -p "$COMPONENT_DIR"
-pkgbuild --component "$APP" --install-location /Applications \
+APP_ROOT="$BUILD/app-root"
+rm -rf "$APP_ROOT"
+mkdir -p "$APP_ROOT"
+ditto "$APP" "$APP_ROOT/$(basename "$APP")"
+APP_COMPONENT_PLIST="$BUILD/app-component.plist"
+pkgbuild --analyze --root "$APP_ROOT" "$APP_COMPONENT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$APP_COMPONENT_PLIST"
+pkgbuild --root "$APP_ROOT" --component-plist "$APP_COMPONENT_PLIST" \
+  --install-location /Applications \
   --scripts packaging/scripts \
   --identifier io.iris.app --version "$VERSION" \
   "$COMPONENT_PKG"
