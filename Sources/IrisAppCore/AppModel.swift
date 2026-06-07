@@ -29,9 +29,11 @@ public final class AppModel: ObservableObject {
         didSet { defaults.set(selectedTab.rawValue, forKey: Self.tabKey) }
     }
     @Published public private(set) var lastAcknowledgedAt: Date?
+    @Published public private(set) var shellConfigured: Bool?
 
     private let defaults: UserDefaults
     private let caInstaller: CATrustInstalling
+    private let shellConfigurator: ShellConfiguring
     private let autoStart: AutoStartControlling
     private static let tabKey = "io.iris.app.selectedTab"
     private static let ackKey = "io.iris.app.lastAcknowledgedAt"
@@ -44,10 +46,12 @@ public final class AppModel: ObservableObject {
     public init(
         defaults: UserDefaults = .standard,
         caInstaller: CATrustInstalling = SystemCATrustInstaller(),
+        shellConfigurator: ShellConfiguring = SystemShellConfigurator(),
         autoStart: AutoStartControlling = SystemAutoStartService()
     ) {
         self.defaults = defaults
         self.caInstaller = caInstaller
+        self.shellConfigurator = shellConfigurator
         self.autoStart = autoStart
         let storedTab = defaults.string(forKey: Self.tabKey).flatMap(Tab.init(rawValue:))
         self.selectedTab = storedTab ?? .overview
@@ -230,6 +234,26 @@ public final class AppModel: ObservableObject {
         let installer = caInstaller
         try await Task.detached { try installer.uninstall(pemPath: path) }.value
         try await refreshCATrust(via: admin)
+    }
+
+    // MARK: - Shell config (Phase install-completion)
+
+    public func refreshShellConfigured() async {
+        let cfg = shellConfigurator
+        let installed = await Task.detached { cfg.isInstalled() }.value
+        shellConfigured = installed
+    }
+
+    public func configureShell() async throws {
+        let cfg = shellConfigurator
+        try await Task.detached { try cfg.install() }.value
+        await refreshShellConfigured()
+    }
+
+    public func unconfigureShell() async throws {
+        let cfg = shellConfigurator
+        try await Task.detached { try cfg.uninstall() }.value
+        await refreshShellConfigured()
     }
 
     // MARK: - Auto-start (Phase 7)

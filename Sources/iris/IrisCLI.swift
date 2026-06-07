@@ -13,6 +13,7 @@ struct IrisCLI: AsyncParsableCommand {
             PauseCommand.self,
             ResumeCommand.self,
             CACommand.self,
+            ShellCommand.self,
             ConfigCommand.self,
             RuleCommand.self,
             MCPCommand.self,

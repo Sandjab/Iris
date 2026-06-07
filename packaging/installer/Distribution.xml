@@ -16,11 +16,16 @@
     <choices-outline>
         <line choice="default">
             <line choice="io.iris.app"/>
+            <line choice="io.iris.cli"/>
         </line>
     </choices-outline>
     <choice id="default"/>
     <choice id="io.iris.app" visible="false">
         <pkg-ref id="io.iris.app"/>
     </choice>
+    <choice id="io.iris.cli" visible="false">
+        <pkg-ref id="io.iris.cli"/>
+    </choice>
     <pkg-ref id="io.iris.app" version="0.1.0" onConclusion="none">Iris-component.pkg</pkg-ref>
+    <pkg-ref id="io.iris.cli" version="0.1.0" onConclusion="none">Iris-cli.pkg</pkg-ref>
 </installer-gui-script>

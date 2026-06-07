@@ -35,6 +35,16 @@ mkdir -p "$EXPORT"
 swift build -c release --product irisd
 [ -f "$DAEMON_BIN" ] || { echo "error: $DAEMON_BIN introuvable après build" >&2; exit 1; }
 
+# --- 1b. Build + stage CLI iris (→ /usr/local/bin) ------------------------
+swift build -c release --product iris
+IRIS_CLI_BIN=".build/release/iris"
+[ -f "$IRIS_CLI_BIN" ] || { echo "error: $IRIS_CLI_BIN introuvable après build" >&2; exit 1; }
+CLI_ROOT="$BUILD/cli-root/usr/local/bin"
+mkdir -p "$CLI_ROOT"
+ditto "$IRIS_CLI_BIN" "$CLI_ROOT/iris"
+# Signature Developer ID (hardened runtime, identifiant non-bundle, sans entitlements).
+codesign -s "$APP_IDENTITY" -f --timestamp -o runtime -i io.iris.cli "$CLI_ROOT/iris"
+
 # --- 2. Archive de l'app (signature non figée dans le projet → override CLI) --
 xcodebuild archive \
   -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
@@ -72,12 +82,29 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 #      welcome/readme/conclusion restent localisés (en.lproj/fr.lproj).
 rm -f "$RESOURCES"/*.lproj/license.txt
 cp LICENSE "$RESOURCES/license.txt"
-#   b. Composant non signé (les scripts pre/postinstall s'attachent ICI)
+#   b. Composant app NON-RELOCATABLE (les scripts pre/postinstall s'attachent ICI).
+#      Sans BundleIsRelocatable=false, Installer relocalise l'app vers une instance
+#      existante de io.iris.app trouvée ailleurs sur le disque (p.ex. build/export/Iris.app)
+#      au lieu de /Applications → /Applications/Iris.app absent → le postinstall
+#      (open -a /Applications/Iris.app --first-launch) échoue (PKInstallErrorDomain 112).
 mkdir -p "$COMPONENT_DIR"
-pkgbuild --component "$APP" --install-location /Applications \
+APP_ROOT="$BUILD/app-root"
+rm -rf "$APP_ROOT"
+mkdir -p "$APP_ROOT"
+ditto "$APP" "$APP_ROOT/$(basename "$APP")"
+APP_COMPONENT_PLIST="$BUILD/app-component.plist"
+pkgbuild --analyze --root "$APP_ROOT" "$APP_COMPONENT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$APP_COMPONENT_PLIST"
+pkgbuild --root "$APP_ROOT" --component-plist "$APP_COMPONENT_PLIST" \
+  --install-location /Applications \
   --scripts packaging/scripts \
   --identifier io.iris.app --version "$VERSION" \
   "$COMPONENT_PKG"
+#   CLI component: installs iris into /usr/local/bin.
+CLI_COMPONENT_PKG="$COMPONENT_DIR/Iris-cli.pkg"
+pkgbuild --root "$BUILD/cli-root/usr/local/bin" --install-location /usr/local/bin \
+  --identifier io.iris.cli --version "$VERSION" \
+  "$CLI_COMPONENT_PKG"
 #   c. Produit guidé (écrans + fond via Distribution XML) signé.
 #      Version templatée depuis $VERSION → pas de drift avec le pkg-ref du Distribution.
 DISTRIBUTION_BUILD="$BUILD/Distribution.xml"

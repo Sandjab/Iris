@@ -7,7 +7,7 @@
 <li>Droits administrateur — pour installer l'app et ajouter la CA locale d'Iris au trust store système.</li>
 </ul>
 <h3>Comment fonctionne l'interception</h3>
-<p>Iris n'intercepte que les <b>processus lancés depuis un shell</b> (terminaux, scripts). L'app configure pour vous deux variables d'environnement au premier lancement :</p>
+<p>Iris n'intercepte que les <b>processus lancés depuis un shell</b> (terminaux, scripts). Iris peut configurer votre terminal <b>avec votre consentement</b> — en lançant <code>iris shell install</code> dans un terminal (affiche les lignes et demande confirmation avant d'écrire) ou via le bouton <b>Configurer…</b> dans l'onglet Settings → Terminal de l'app. Les variables suivantes sont écrites dans votre profil shell :</p>
 <ul>
 <li><code>HTTPS_PROXY=http://127.0.0.1:8888</code></li>
 <li><code>NODE_EXTRA_CA_CERTS="$HOME/Library/Application Support/iris/ca.pem"</code></li>

@@ -82,10 +82,11 @@ printf %s "$ANTHROPIC_KEY" | iris secret add anthropic_api_key \
   --allowed-hosts api.anthropic.com \
   --value-from-stdin
 
-# Configure your shell (one-time, in ~/.zshrc)
-export HTTPS_PROXY="http://127.0.0.1:8888"
-export NODE_EXTRA_CA_CERTS="$HOME/Library/Application Support/iris/ca.pem"
-export SSL_CERT_FILE="$NODE_EXTRA_CA_CERTS"
+# Configure your shell (one-time) — adds HTTPS_PROXY + NODE_EXTRA_CA_CERTS to ~/.zshrc.
+# It shows the lines and asks before writing; or use Settings → Terminal in the app.
+iris shell install
+
+# Point the tool at a placeholder — your real key stays in the Keychain.
 export ANTHROPIC_API_KEY='{{kc:anthropic_api_key}}'
 
 # Use Claude Code as usual — your real key never enters its process

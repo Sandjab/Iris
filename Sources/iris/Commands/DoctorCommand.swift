@@ -106,7 +106,7 @@ struct DoctorCommand: AsyncParsableCommand {
 
         // 5. shell-env-vars (warn, not fail, when any are absent)
         let env = ProcessInfo.processInfo.environment
-        let expected = ["HTTPS_PROXY", "HTTP_PROXY", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"]
+        let expected = ["HTTPS_PROXY", "NODE_EXTRA_CA_CERTS"]
         let missing = expected.filter { env[$0]?.isEmpty ?? true }
         if missing.isEmpty {
             results.append(.init(name: "shell-env-vars", severity: .ok, detail: "all set"))

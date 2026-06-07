@@ -14,6 +14,8 @@ if [ -n "$INSTALL_USER" ] && [ "$INSTALL_USER" != "root" ] && [ "$INSTALL_USER" 
     sudo -u "$INSTALL_USER" osascript -e 'quit app "Iris"' 2>/dev/null || true
     # Phase 7 : enregistrer les services SMAppService dès l'install (auto-start).
     # L'app détecte --first-launch et appelle register() pour irisd + login-item.
-    sudo -u "$INSTALL_USER" /usr/bin/open -a "/Applications/Iris.app" --args --first-launch
+    # Best-effort : un lancement raté ne doit PAS faire échouer l'install (les fichiers
+    # sont déjà posés) — l'utilisateur peut activer l'auto-start via Settings.
+    sudo -u "$INSTALL_USER" /usr/bin/open -a "/Applications/Iris.app" --args --first-launch || true
 fi
 exit 0
