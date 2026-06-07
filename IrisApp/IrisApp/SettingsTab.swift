@@ -19,6 +19,7 @@ struct SettingsTab: View {
                     securityBox(cfg)
                     backupsBox()
                     caBox()
+                    shellBox()
                     autoStartBox()
                     connectionBox(cfg)
                     footer()
@@ -104,6 +105,29 @@ struct SettingsTab: View {
                     Button("Uninstall…") { caAction(install: false) }
                 } else {
                     Button("Install…") { caAction(install: true) }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+        }
+    }
+
+    @ViewBuilder private func shellBox() -> some View {
+        GroupBox("Terminal") {
+            HStack {
+                switch model.shellConfigured {
+                case .some(true):
+                    Label("Configured", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                case .some(false):
+                    Label("Not configured", systemImage: "circle").foregroundStyle(.orange)
+                case nil:
+                    Text("Unknown").foregroundStyle(.secondary)
+                }
+                Spacer()
+                if model.shellConfigured == true {
+                    Button("Remove…") { shellAction(install: false) }
+                } else {
+                    Button("Configure…") { shellAction(install: true) }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -219,6 +243,17 @@ struct SettingsTab: View {
         }
     }
 
+    private func shellAction(install: Bool) {
+        Task {
+            errorText = nil
+            do {
+                if install { try await model.configureShell() } else { try await model.unconfigureShell() }
+            } catch {
+                errorText = userMessage(error)
+            }
+        }
+    }
+
     private func toggleAutoStart(_ target: AutoStartTarget, enabled: Bool) {
         Task {
             errorText = nil
@@ -248,6 +283,7 @@ struct SettingsTab: View {
             try await model.loadConfig(via: admin)
             try await model.refreshCATrust(via: admin)
             model.refreshAutoStart()
+            model.refreshShellConfigured()
             syncFields()
         } catch {
             errorText = userMessage(error)
