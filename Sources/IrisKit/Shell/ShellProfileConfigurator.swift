@@ -62,4 +62,56 @@ public enum ShellProfileConfigurator {
         if base.isEmpty { return block + "\n" }
         return base + "\n\n" + block + "\n"
     }
+
+    // MARK: - I/O
+
+    /// Default target: the current user's `~/.zshrc` (macOS default shell).
+    public static func defaultProfilePath() -> String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".zshrc").path
+    }
+
+    /// Adds (or refreshes) the iris block in `profilePath`, creating the file if
+    /// absent. Atomic write — never a partial file. The file's POSIX mode is
+    /// preserved. Only a missing file reads as empty; any other read error
+    /// (encoding, permissions, …) propagates so we never overwrite a file we
+    /// couldn't fully read.
+    public static func install(profilePath: String = defaultProfilePath()) throws {
+        let existing: String
+        do {
+            existing = try String(contentsOfFile: profilePath, encoding: .utf8)
+        } catch let error as NSError
+            where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError
+        {
+            existing = ""
+        }
+        try writePreservingMode(applyBlock(to: existing), to: profilePath)
+    }
+
+    /// Removes the iris block from `profilePath`. No-op if the file or block is
+    /// absent. The file's POSIX mode is preserved across the rewrite.
+    public static func uninstall(profilePath: String = defaultProfilePath()) throws {
+        guard let existing = try? String(contentsOfFile: profilePath, encoding: .utf8) else { return }
+        guard containsBlock(existing) else { return }
+        try writePreservingMode(removeBlock(from: existing), to: profilePath)
+    }
+
+    /// Whether the iris block is present in `profilePath`. Fail-safe: any read
+    /// error (missing file, unreadable, non-UTF-8) reads as not installed.
+    public static func isInstalled(profilePath: String = defaultProfilePath()) -> Bool {
+        guard let existing = try? String(contentsOfFile: profilePath, encoding: .utf8) else { return false }
+        return containsBlock(existing)
+    }
+
+    /// Atomic write that restores the file's prior POSIX mode — `String.write`
+    /// recreates the file under the process umask, which would otherwise reset a
+    /// hardened (e.g. 0600) profile to ~0644.
+    private static func writePreservingMode(_ content: String, to path: String) throws {
+        let previousMode = (try? FileManager.default.attributesOfItem(atPath: path))?[.posixPermissions]
+        try content.write(toFile: path, atomically: true, encoding: .utf8)
+        if let mode = previousMode {
+            // Content is already written correctly; a failed mode-restore is non-fatal.
+            try? FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: path)
+        }
+    }
 }

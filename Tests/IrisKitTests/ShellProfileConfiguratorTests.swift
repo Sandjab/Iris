@@ -74,4 +74,67 @@ final class ShellProfileConfiguratorTests: XCTestCase {
         let content = "export FOO=1\n# <<< iris <<<\nexport BAR=2\n"
         XCTAssertEqual(ShellProfileConfigurator.removeBlock(from: content), content)
     }
+
+    func testInstallWritesBlockToFile() throws {
+        let tmp = NSTemporaryDirectory() + "iris-test-\(UUID().uuidString).zshrc"
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+        try "export FOO=1\n".write(toFile: tmp, atomically: true, encoding: .utf8)
+
+        try ShellProfileConfigurator.install(profilePath: tmp)
+
+        let written = try String(contentsOfFile: tmp, encoding: .utf8)
+        XCTAssertTrue(written.contains("export FOO=1"))
+        XCTAssertTrue(ShellProfileConfigurator.containsBlock(written))
+        XCTAssertTrue(ShellProfileConfigurator.isInstalled(profilePath: tmp))
+    }
+
+    func testInstallCreatesFileWhenAbsent() throws {
+        let tmp = NSTemporaryDirectory() + "iris-test-\(UUID().uuidString).zshrc"
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+
+        try ShellProfileConfigurator.install(profilePath: tmp)
+
+        XCTAssertTrue(ShellProfileConfigurator.isInstalled(profilePath: tmp))
+    }
+
+    func testUninstallRemovesBlockKeepsRest() throws {
+        let tmp = NSTemporaryDirectory() + "iris-test-\(UUID().uuidString).zshrc"
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+        try "export FOO=1\n".write(toFile: tmp, atomically: true, encoding: .utf8)
+        try ShellProfileConfigurator.install(profilePath: tmp)
+
+        try ShellProfileConfigurator.uninstall(profilePath: tmp)
+
+        let written = try String(contentsOfFile: tmp, encoding: .utf8)
+        XCTAssertFalse(ShellProfileConfigurator.isInstalled(profilePath: tmp))
+        XCTAssertTrue(written.contains("export FOO=1"))
+    }
+
+    func testIsInstalledFalseWhenFileAbsent() {
+        let tmp = NSTemporaryDirectory() + "iris-absent-\(UUID().uuidString).zshrc"
+        XCTAssertFalse(ShellProfileConfigurator.isInstalled(profilePath: tmp))
+    }
+
+    func testInstallThrowsOnNonUTF8FileInsteadOfOverwriting() throws {
+        let tmp = NSTemporaryDirectory() + "iris-test-\(UUID().uuidString).zshrc"
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+        let invalid = Data([0xFF, 0xFE, 0x00, 0xC0])
+        try invalid.write(to: URL(fileURLWithPath: tmp))
+
+        XCTAssertThrowsError(try ShellProfileConfigurator.install(profilePath: tmp))
+        let after = try Data(contentsOf: URL(fileURLWithPath: tmp))
+        XCTAssertEqual(after, invalid)  // original bytes intact, not overwritten
+    }
+
+    func testInstallPreservesFileMode() throws {
+        let tmp = NSTemporaryDirectory() + "iris-test-\(UUID().uuidString).zshrc"
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+        try "export FOO=1\n".write(toFile: tmp, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmp)
+
+        try ShellProfileConfigurator.install(profilePath: tmp)
+
+        let mode = try FileManager.default.attributesOfItem(atPath: tmp)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(mode?.int16Value, 0o600)
+    }
 }
