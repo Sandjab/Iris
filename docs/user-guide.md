@@ -92,11 +92,10 @@ La vraie clé vit dans le trousseau, ACL-protégée pour le seul binaire `irisd`
 1. Téléchargez `Iris-<version>.pkg` depuis la page Releases du repo.
 2. Double-cliquez sur le `.pkg`. macOS vérifie la signature Apple Developer ID et la notarisation.
 3. Suivez l'assistant. Une fois terminé :
-   - Le daemon `irisd` est installé dans `/usr/local/libexec/`
-   - La CLI `iris` est dans `/usr/local/bin/`
    - L'app `Iris.app` est dans `/Applications/`
-   - Le LaunchAgent `io.iris.daemon.plist` est dans `~/Library/LaunchAgents/`
-4. Le daemon démarre automatiquement à la session suivante (`launchctl bootstrap` automatique).
+   - La CLI `iris` est dans `/usr/local/bin/`
+   - `irisd` est embarqué dans `Iris.app` (`Contents/MacOS/irisd`), géré par **SMAppService**
+4. Le démarrage automatique est géré via **SMAppService** — configurable dans Réglages système → Général → Ouverture de session, ou via les toggles de l'onglet Settings de l'app (Phase 7).
 
 ![Installation .pkg étape 1](screenshots/02-pkg-installer-welcome.png "Écran d'accueil de l'installeur")
 
@@ -116,7 +115,7 @@ Au premier lancement d'`Iris.app`, un assistant vous accompagne :
 
 1. Création de la CA locale (clé privée → trousseau, cert public → `~/Library/Application Support/iris/ca.pem`)
 2. Ajout du CA au trust store système (prompt admin)
-3. Patch automatique de `~/.zshrc` (ou shell détecté) pour exporter `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`
+3. Configuration du terminal **avec votre consentement** : lancez `iris shell install` (affiche les lignes, demande confirmation avant d'écrire) ou cliquez sur « Configurer… » dans l'onglet Settings → Terminal de l'app. Variables exportées : `HTTPS_PROXY`, `HTTP_PROXY` (`http://127.0.0.1:8888`), `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` (`$HOME/Library/Application Support/iris/ca.pem`).
 
 ![Assistant setup — étape CA](screenshots/04-app-setup-ca.png "Création de la CA")
 
@@ -489,10 +488,7 @@ L'app expose la même bascule via un toggle dans le popover.
 launchctl list | grep io.iris.daemon
 ```
 
-Si absent :
-```bash
-launchctl bootstrap gui/$UID ~/Library/LaunchAgents/io.iris.daemon.plist
-```
+Si absent, relancez `Iris.app` — le démarrage automatique est géré par **SMAppService**. Pour le réactiver : basculez le toggle dans l'onglet **Settings** de l'app, ou activez l'entrée dans **Réglages système → Général → Ouverture de session**.
 
 Si présent mais en erreur, consultez les logs :
 ```bash
