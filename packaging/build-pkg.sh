@@ -35,6 +35,16 @@ mkdir -p "$EXPORT"
 swift build -c release --product irisd
 [ -f "$DAEMON_BIN" ] || { echo "error: $DAEMON_BIN introuvable après build" >&2; exit 1; }
 
+# --- 1b. Build + stage CLI iris (→ /usr/local/bin) ------------------------
+swift build -c release --product iris
+IRIS_CLI_BIN=".build/release/iris"
+[ -f "$IRIS_CLI_BIN" ] || { echo "error: $IRIS_CLI_BIN introuvable après build" >&2; exit 1; }
+CLI_ROOT="$BUILD/cli-root/usr/local/bin"
+mkdir -p "$CLI_ROOT"
+ditto "$IRIS_CLI_BIN" "$CLI_ROOT/iris"
+# Signature Developer ID (hardened runtime, identifiant non-bundle, sans entitlements).
+codesign -s "$APP_IDENTITY" -f --timestamp -o runtime -i io.iris.cli "$CLI_ROOT/iris"
+
 # --- 2. Archive de l'app (signature non figée dans le projet → override CLI) --
 xcodebuild archive \
   -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
@@ -78,6 +88,11 @@ pkgbuild --component "$APP" --install-location /Applications \
   --scripts packaging/scripts \
   --identifier io.iris.app --version "$VERSION" \
   "$COMPONENT_PKG"
+#   CLI component: installs iris into /usr/local/bin.
+CLI_COMPONENT_PKG="$COMPONENT_DIR/Iris-cli.pkg"
+pkgbuild --root "$BUILD/cli-root/usr/local/bin" --install-location /usr/local/bin \
+  --identifier io.iris.cli --version "$VERSION" \
+  "$CLI_COMPONENT_PKG"
 #   c. Produit guidé (écrans + fond via Distribution XML) signé.
 #      Version templatée depuis $VERSION → pas de drift avec le pkg-ref du Distribution.
 DISTRIBUTION_BUILD="$BUILD/Distribution.xml"
