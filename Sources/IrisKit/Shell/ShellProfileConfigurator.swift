@@ -96,10 +96,19 @@ public enum ShellProfileConfigurator {
         try writePreservingMode(applyBlock(to: existing), to: profilePath)
     }
 
-    /// Removes the iris block from `profilePath`. No-op if the file or block is
-    /// absent. The file's POSIX mode is preserved across the rewrite.
+    /// Removes the iris block from `profilePath`. No-op if the file is absent or
+    /// the block is not present. The file's POSIX mode is preserved across the
+    /// rewrite. Any read error other than a missing file (e.g. permission denied,
+    /// non-UTF-8 encoding) propagates so we never silently lose a failure.
     public static func uninstall(profilePath: String = defaultProfilePath()) throws {
-        guard let existing = try? String(contentsOfFile: profilePath, encoding: .utf8) else { return }
+        let existing: String
+        do {
+            existing = try String(contentsOfFile: profilePath, encoding: .utf8)
+        } catch let error as NSError
+            where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError
+        {
+            return
+        }
         guard containsBlock(existing) else { return }
         try writePreservingMode(removeBlock(from: existing), to: profilePath)
     }

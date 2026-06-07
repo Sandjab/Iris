@@ -28,11 +28,11 @@ final class AppModelShellTests: XCTestCase {
         XCTAssertEqual(model.shellConfigured, false)
     }
 
-    func testRefreshShellConfiguredReadsSeam() throws {
+    func testRefreshShellConfiguredReadsSeam() async throws {
         let fake = FakeShellConfigurator()
         try fake.install()
         let model = makeModel(fake)
-        model.refreshShellConfigured()
+        await model.refreshShellConfigured()
         XCTAssertEqual(model.shellConfigured, true)
     }
 

@@ -27,8 +27,8 @@ struct ShellCommand: AsyncParsableCommand {
             }
             let block = ShellProfileConfigurator.renderBlock()
             if !assumeYes {
-                FileHandle.standardError.write(
-                    Data(
+                try? FileHandle.standardError.write(
+                    contentsOf: Data(
                         "The following lines will be added to ~/.zshrc:\n\n\(block)\n\nProceed? [y/N] ".utf8
                     )
                 )

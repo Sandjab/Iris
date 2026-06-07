@@ -238,20 +238,22 @@ public final class AppModel: ObservableObject {
 
     // MARK: - Shell config (Phase install-completion)
 
-    public func refreshShellConfigured() {
-        shellConfigured = shellConfigurator.isInstalled()
+    public func refreshShellConfigured() async {
+        let cfg = shellConfigurator
+        let installed = await Task.detached { cfg.isInstalled() }.value
+        shellConfigured = installed
     }
 
     public func configureShell() async throws {
         let cfg = shellConfigurator
         try await Task.detached { try cfg.install() }.value
-        refreshShellConfigured()
+        await refreshShellConfigured()
     }
 
     public func unconfigureShell() async throws {
         let cfg = shellConfigurator
         try await Task.detached { try cfg.uninstall() }.value
-        refreshShellConfigured()
+        await refreshShellConfigured()
     }
 
     // MARK: - Auto-start (Phase 7)

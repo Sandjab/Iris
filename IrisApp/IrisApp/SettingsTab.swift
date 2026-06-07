@@ -283,7 +283,7 @@ struct SettingsTab: View {
             try await model.loadConfig(via: admin)
             try await model.refreshCATrust(via: admin)
             model.refreshAutoStart()
-            model.refreshShellConfigured()
+            await model.refreshShellConfigured()
             syncFields()
         } catch {
             errorText = userMessage(error)
