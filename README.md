@@ -14,6 +14,13 @@
 
 > **IRIS: Interception · Resolution · Injection · Substitution**
 
+> [!WARNING]
+> ## 🚧 Work in Progress — NOT READY FOR RELEASE
+>
+> This repository is under active development and is shared for transparency only.
+> APIs, configuration formats, and behavior may change without notice, and
+> nothing here is production-ready. **Do not depend on it yet.**
+
 A minimal credential broker for macOS that lets local AI agents (like Claude Code CLI) use real credentials without ever seeing them.
 
 Named after the Greek messenger goddess who carried messages between worlds without altering them: IRIS sits between your agent and the upstream APIs, carrying authenticated requests through while keeping the actual credentials on the far side of a trust boundary.
@@ -188,3 +195,12 @@ This is intentional. IRIS is designed for the agentic CLI workflow — narrow, p
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Dashboard
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/dashboard-dark.svg">
+  <img src="assets/dashboard-light.svg" alt="IRIS repo dashboard — refreshed every 6 hours by GitHub Actions">
+</picture>
+
+> Drawn by [`cartouche-svg`](https://github.com/Sandjab/cartouche). The SVG above pulls fresh stats from the GitHub API and refreshes every 6 hours via [`.github/workflows/dashboard.yml`](.github/workflows/dashboard.yml).
