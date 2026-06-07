@@ -77,8 +77,12 @@ les acquis d'ici (CLI survivant + bloc shell balisé retirable).
    # <<< iris <<<
    ```
 6. **Cible shell** : `zsh` → `~/.zshrc` (défaut macOS). Autres shells hors-scope MVP.
-7. **Double surface** : l'app déclenche au 1er lancement ; la même logique est exposée en CLI
-   (`iris shell …`) pour réparer/refaire, et sera réutilisée par la désinstallation.
+7. **Double surface, sans popup automatique** : le consentement passe par (a) la commande
+   `iris shell install` **interactive** (affiche le bloc, demande O/N avant d'écrire ; `--yes`
+   pour sauter) et (b) un bouton « Configurer le terminal » dans l'onglet Settings (montre le bloc
+   puis applique sur clic). **Pas** de fenêtre modale déclenchée au 1er lancement : l'app est
+   lancée en arrière-plan par l'installeur, un modal y serait fragile. La même logique sera
+   réutilisée par la désinstallation.
 
 ## 4. Architecture et composants
 
@@ -109,13 +113,13 @@ Nouvelle commande (cf. `Sources/iris/Commands/`), symétrique de `iris ca instal
 
 S'appuie sur `ShellProfileConfigurator`. Pur (pas d'accès Keychain).
 
-### 4.3 Déclencheur premier lancement (IrisApp)
+### 4.3 Bouton « Configurer le terminal » (IrisApp Settings)
 
-Le flux `--first-launch` existe déjà (Phase 7, enregistrement SMAppService ; cf.
-`AppDelegate.swift`). On y ajoute, **après** le setup CA : si le bloc n'est pas déjà présent,
-présenter une feuille (`NSAlert`/sheet) montrant le bloc à ajouter, avec accord/refus. Si accepté →
-`ShellProfileConfigurator.install()`. Si refusé → ne rien écrire, l'utilisateur pourra le faire
-plus tard via `iris shell install`.
+Ajout dans l'onglet Settings (`SettingsTab.swift`), à côté de CA Install/Uninstall, suivant le même
+pattern testable : un seam `ShellConfiguring` (réplique de `CATrustInstalling`) injecté, une action
+sur `AppModel` (`Task.detached` hors main actor). Le bouton affiche le bloc à ajouter, puis applique
+sur confirmation, et un libellé reflète l'état (présent/absent) via `ShellProfileConfigurator`.
+**Pas** de popup au 1er lancement (cf. décision 7).
 
 ### 4.4 Packaging (`packaging/build-pkg.sh` + `Distribution.xml`)
 
@@ -140,13 +144,15 @@ plus tard via `iris shell install`.
 ## 5. Flux
 
 **Installation (.pkg)** : l'installeur pose `Iris.app` dans `/Applications` **et** `iris` dans
-`/usr/local/bin`. Aucun shell modifié à ce stade.
+`/usr/local/bin`. Aucun shell modifié à ce stade. L'écran de conclusion invite à lancer
+`iris shell install`.
 
-**Premier lancement de l'app** : setup CA (existant) → proposition de config terminal (montrer +
-accord) → si accepté, bloc écrit dans `~/.zshrc`. Message « ouvre une nouvelle fenêtre de
-terminal ».
+**Config terminal (au choix de l'utilisateur)** : soit `iris shell install` depuis le terminal
+(affiche le bloc, demande O/N, écrit si accepté), soit le bouton « Configurer le terminal » dans
+l'onglet Settings de l'app. Aucune écriture sans accord explicite. Message « ouvre une nouvelle
+fenêtre de terminal » ensuite.
 
-**Réparation/refaire** : `iris shell install` (ou `status`) depuis le terminal.
+**Réparation / retrait** : `iris shell status` / `iris shell uninstall` depuis le terminal.
 
 ## 6. Gestion d'erreur
 
@@ -172,8 +178,8 @@ terminal ».
 ## 8. Critères de réussite (smoke)
 
 - [ ] Après install `.pkg`, `which iris` → `/usr/local/bin/iris` et `iris status` répond.
-- [ ] 1er lancement : l'app montre le bloc, demande l'accord ; refus → `~/.zshrc` intact.
-- [ ] Accord → bloc présent dans `~/.zshrc` ; nouvelle fenêtre terminal → `iris doctor` voit les
+- [ ] `iris shell install` affiche le bloc et demande O/N ; réponse « non » → `~/.zshrc` intact.
+- [ ] Accord (ou bouton Settings) → bloc présent dans `~/.zshrc` ; nouvelle fenêtre terminal → `iris doctor` voit les
       variables ; trafic `claude` intercepté.
 - [ ] `iris shell install` deux fois de suite → pas de doublon.
 - [ ] `iris shell uninstall` → bloc retiré, reste du `~/.zshrc` intact.
