@@ -22,6 +22,14 @@
 
 ---
 
+> **⚠️ Correction post-implémentation (lire avant Task 1 / Task 8).** Le bloc shell exporte
+> finalement **2 variables seulement** : `HTTPS_PROXY` et `NODE_EXTRA_CA_CERTS`. Les snippets ci-dessous
+> (Task 1 `renderBlock` + son test, et les listes de Task 8) montraient à tort 4 variables incluant
+> `HTTP_PROXY` et `SSL_CERT_FILE`. **Ne PAS exporter `SSL_CERT_FILE`** : IRIS fait un MITM sélectif
+> (SPECS §8.3, hosts non whitelistés tunnellisés avec leur vrai cert) et `SSL_CERT_FILE` remplace tout
+> le bundle CA d'OpenSSL → casserait ces hosts. `HTTP_PROXY` est omis (HTTPS-only). `DoctorCommand`
+> a été aligné sur ces 2 variables. Corrigé en commit `0a5f1b4` ; le code livré et les tests font foi.
+
 ## Task 1 : `ShellProfileConfigurator` — logique pure du bloc balisé
 
 **Files:**

@@ -66,16 +66,22 @@ les acquis d'ici (CLI survivant + bloc shell balisé retirable).
 4. **Bloc balisé et idempotent** : les lignes sont encadrées par des marqueurs
    `# >>> iris >>>` … `# <<< iris <<<`. Réappliquer met à jour le bloc sans le dupliquer. La
    désinstallation (temps 2) retirera exactement ce bloc, sans toucher au reste du fichier.
-5. **Variables exportées** (celles que `iris doctor` vérifie déjà, cf. `DoctorCommand.swift:109`),
-   valeurs tirées des défauts de config (`Config.swift:38`) :
+5. **Variables exportées** — exactement **deux**, valeurs tirées des défauts de config
+   (`Config.swift:38`) :
    ```bash
    # >>> iris >>>
    export HTTPS_PROXY=http://127.0.0.1:8888
-   export HTTP_PROXY=http://127.0.0.1:8888
    export NODE_EXTRA_CA_CERTS="$HOME/Library/Application Support/iris/ca.pem"
-   export SSL_CERT_FILE="$HOME/Library/Application Support/iris/ca.pem"
    # <<< iris <<<
    ```
+   **⚠️ Correction post-revue (ne PAS ré-ajouter `SSL_CERT_FILE` ni `HTTP_PROXY`).** Une version
+   antérieure de ce spec listait les 4 variables que `iris doctor` vérifiait (`DoctorCommand.swift:109`).
+   C'était une **erreur** : IRIS fait un MITM **sélectif** (SPECS §8.3 ; `ConnectHandler`/`GlueHandler`
+   tunnellisent sans déchiffrer les hosts non whitelistés, qui gardent leur **vrai** certificat).
+   `SSL_CERT_FILE` **remplace** tout le bundle CA d'OpenSSL (Python/curl/Ruby) par la seule CA d'IRIS
+   → casserait la validation TLS de tout host tunnelé. `NODE_EXTRA_CA_CERTS` ne fait qu'**ajouter**,
+   donc reste sûr. `HTTP_PROXY` est omis (design HTTPS-only, conforme à la doc d'origine §4.2).
+   `DoctorCommand.swift:109` a été corrigé pour ne vérifier que ces 2 variables.
 6. **Cible shell** : `zsh` → `~/.zshrc` (défaut macOS). Autres shells hors-scope MVP.
 7. **Double surface, sans popup automatique** : le consentement passe par (a) la commande
    `iris shell install` **interactive** (affiche le bloc, demande O/N avant d'écrire ; `--yes`
@@ -170,8 +176,10 @@ fenêtre de terminal » ensuite.
   jour** (valeurs changées → bloc remplacé) ; **retrait** (enlève exactement le bloc, garde le
   reste) ; retrait quand absent → no-op ; contenu autour des marqueurs préservé.
 - **CLI `iris shell`** : install/uninstall/status sur un fichier temporaire injecté.
-- **Intent (Rule 9)** : un test asserte que le bloc rendu contient les 4 variables canoniques et le
-  port/chemin attendus → casse si une constante diverge.
+- **Intent (Rule 9)** : un test asserte que le bloc rendu contient les 2 variables canoniques
+  (`HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`) avec le port/chemin attendus, **et** des assertions
+  négatives (`SSL_CERT_FILE`/`HTTP_PROXY` absents) → casse si une constante diverge ou si une
+  variable dangereuse est ré-ajoutée.
 - **Packaging** : non testable en unit → **smoke manuel au poste** : `.pkg` installe `iris` dans
   `/usr/local/bin` ; `iris` fonctionne ; `iris` **survit** au drag-to-trash de l'app.
 
