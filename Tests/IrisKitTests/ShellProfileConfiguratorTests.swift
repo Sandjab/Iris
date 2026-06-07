@@ -10,17 +10,26 @@ final class ShellProfileConfiguratorTests: XCTestCase {
             .count
     }
 
-    // Intent (Rule 9): the managed block must export exactly the 4 vars iris doctor
-    // checks, pointing at the real proxy (Config.swift:38) and ca.pem. Breaks if a
-    // constant drifts.
+    // Intent (Rule 9): the managed block must export exactly the 2 canonical vars —
+    // HTTPS_PROXY and NODE_EXTRA_CA_CERTS — pointing at the real proxy
+    // (Config.swift:38) and ca.pem. Breaks if a constant drifts.
+    // Negative assertions lock the design decision: IRIS does selective MITM
+    // (SPECS §8.3) — non-whitelisted hosts are tunnelled with their REAL cert.
+    // SSL_CERT_FILE would REPLACE the OpenSSL CA bundle with iris-only, breaking
+    // TLS to every tunnelled host. NODE_EXTRA_CA_CERTS only ADDS, so it's safe.
+    // HTTP_PROXY is intentionally omitted (HTTPS-only by design). Never re-add these.
     func testRenderBlockContainsCanonicalExports() {
         let block = ShellProfileConfigurator.renderBlock()
         XCTAssertTrue(block.contains(ShellProfileConfigurator.beginMarker))
         XCTAssertTrue(block.contains(ShellProfileConfigurator.endMarker))
         XCTAssertTrue(block.contains("export HTTPS_PROXY=http://127.0.0.1:8888"))
-        XCTAssertTrue(block.contains("export HTTP_PROXY=http://127.0.0.1:8888"))
         XCTAssertTrue(block.contains("export NODE_EXTRA_CA_CERTS=\"$HOME/Library/Application Support/iris/ca.pem\""))
-        XCTAssertTrue(block.contains("export SSL_CERT_FILE=\"$HOME/Library/Application Support/iris/ca.pem\""))
+        // IRIS does selective MITM (SPECS §8.3): non-whitelisted hosts are tunneled with
+        // their REAL cert. SSL_CERT_FILE would REPLACE the OpenSSL CA bundle with iris-only,
+        // breaking TLS to every tunneled host. NODE_EXTRA_CA_CERTS only ADDS, so it's safe.
+        // HTTP_PROXY is intentionally omitted (HTTPS-only by design). Never re-add these.
+        XCTAssertFalse(block.contains("SSL_CERT_FILE"))
+        XCTAssertFalse(block.contains("HTTP_PROXY"))
     }
 
     func testApplyBlockToEmptyContent() {

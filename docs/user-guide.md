@@ -115,7 +115,7 @@ Au premier lancement d'`Iris.app`, un assistant vous accompagne :
 
 1. Création de la CA locale (clé privée → trousseau, cert public → `~/Library/Application Support/iris/ca.pem`)
 2. Ajout du CA au trust store système (prompt admin)
-3. Configuration du terminal **avec votre consentement** : lancez `iris shell install` (affiche les lignes, demande confirmation avant d'écrire) ou cliquez sur « Configurer… » dans l'onglet Settings → Terminal de l'app. Variables exportées : `HTTPS_PROXY`, `HTTP_PROXY` (`http://127.0.0.1:8888`), `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` (`$HOME/Library/Application Support/iris/ca.pem`).
+3. Configuration du terminal **avec votre consentement** : lancez `iris shell install` (affiche les lignes, demande confirmation avant d'écrire) ou cliquez sur « Configurer… » dans l'onglet Settings → Terminal de l'app. Variables exportées : `HTTPS_PROXY` (`http://127.0.0.1:8888`), `NODE_EXTRA_CA_CERTS` (`$HOME/Library/Application Support/iris/ca.pem`).
 
 ![Assistant setup — étape CA](screenshots/04-app-setup-ca.png "Création de la CA")
 
@@ -162,7 +162,7 @@ Sortie attendue :
 ✓ Daemon up (uptime 12s)
 ✓ CA cert present at ~/Library/Application Support/iris/ca.pem
 ✓ CA cert trusted by system
-✓ Env vars : HTTPS_PROXY, NODE_EXTRA_CA_CERTS, SSL_CERT_FILE
+✓ Env vars : HTTPS_PROXY, NODE_EXTRA_CA_CERTS
 ✓ Internal ping 127.0.0.1:8888/__iris_ping → 200 ok
 ✓ apiKeyHelper not set in ~/.claude/settings.json
 ```

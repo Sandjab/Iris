@@ -10,10 +10,20 @@ public enum ShellProfileConfigurator {
     public static let beginMarker = "# >>> iris >>>"
     public static let endMarker = "# <<< iris <<<"
 
-    /// The exact exports IRIS manages. Values mirror the daemon defaults
-    /// (`Config.swift:38` → 127.0.0.1:8888) and the CA export path
-    /// (`~/Library/Application Support/iris/ca.pem`). Single source of truth;
-    /// `iris doctor` (DoctorCommand.swift:109) checks exactly these four vars.
+    /// The canonical 2-variable block IRIS manages. Only `HTTPS_PROXY` and
+    /// `NODE_EXTRA_CA_CERTS` are emitted — deliberately:
+    ///
+    /// - `SSL_CERT_FILE` is intentionally absent. IRIS does selective MITM
+    ///   (SPECS §8.3): non-whitelisted hosts are tunnelled with their REAL cert.
+    ///   `SSL_CERT_FILE` **replaces** the entire OpenSSL CA bundle (Python, Ruby,
+    ///   curl…) with the iris-only `ca.pem`, which would break TLS to every
+    ///   tunnelled host. `NODE_EXTRA_CA_CERTS` only **adds** to Node's bundle, so
+    ///   it is safe.
+    /// - `HTTP_PROXY` is absent because IRIS is HTTPS-only by design.
+    ///
+    /// Values mirror daemon defaults (`Config.swift:38` → 127.0.0.1:8888) and
+    /// the CA export path. Single source of truth; `iris doctor`
+    /// (DoctorCommand.swift) checks exactly these two vars.
     public static func renderBlock(
         proxyURL: String = "http://127.0.0.1:8888",
         caPEMPath: String = "$HOME/Library/Application Support/iris/ca.pem"
@@ -21,9 +31,7 @@ public enum ShellProfileConfigurator {
         """
         \(beginMarker)
         export HTTPS_PROXY=\(proxyURL)
-        export HTTP_PROXY=\(proxyURL)
         export NODE_EXTRA_CA_CERTS="\(caPEMPath)"
-        export SSL_CERT_FILE="\(caPEMPath)"
         \(endMarker)
         """
     }
