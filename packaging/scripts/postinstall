@@ -8,6 +8,14 @@ INSTALL_USER="${SUDO_USER:-$(stat -f '%Su' /dev/console)}"
 if [ -n "$INSTALL_USER" ] && [ "$INSTALL_USER" != "root" ] && [ "$INSTALL_USER" != "loginwindow" ]; then
     USER_HOME="$(eval echo "~$INSTALL_USER")"
     sudo -u "$INSTALL_USER" mkdir -p "$USER_HOME/Library/Application Support/iris"
+    # Temps 2 : déposer le script de désinstallation de secours dans App Support
+    # (survit au drag-to-trash). Best-effort : un échec ne casse pas l'install.
+    if [ -f "$(dirname "$0")/uninstall.sh" ]; then
+        sudo -u "$INSTALL_USER" cp "$(dirname "$0")/uninstall.sh" \
+            "$USER_HOME/Library/Application Support/iris/uninstall.sh" || true
+        sudo -u "$INSTALL_USER" chmod +x \
+            "$USER_HOME/Library/Application Support/iris/uninstall.sh" || true
+    fi
     # Sur une mise à jour, une ancienne instance peut tourner : `open -a` l'activerait
     # au lieu de lancer la nouvelle version (et --first-launch ne serait pas délivré).
     # On la quitte d'abord (sans échec si absente / Apple Events refusés).
