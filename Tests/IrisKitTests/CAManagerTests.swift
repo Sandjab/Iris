@@ -143,6 +143,16 @@ final class CAManagerTests: XCTestCase {
         XCTAssertFalse(second, "deleting an absent key returns false (idempotent)")
     }
 
+    func testCAManagerDeleteKeyRemovesUnderlyingKey() async throws {
+        let store = InMemoryCAKeyStore()
+        let manager = CAManager(keyStore: store)
+        _ = try await manager.signingKey()  // generates + persists
+        let deleted = try await manager.deleteKey()
+        XCTAssertTrue(deleted)
+        let again = try await manager.deleteKey()
+        XCTAssertFalse(again)
+    }
+
     func testEnsureCARegeneratesWhenOnDiskCertHasMismatchingKey() async throws {
         let tempPath = FileManager.default.temporaryDirectory
             .appendingPathComponent("iris-test-\(UUID()).pem")
