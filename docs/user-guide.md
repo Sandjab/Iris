@@ -20,6 +20,7 @@
 9. [Sécurité — ce qu'IRIS garantit (et pas)](#9-sécurité)
 10. [Dépannage](#10-dépannage)
 11. [FAQ](#11-faq)
+12. [Désinstaller](#12-désinstaller)
 
 ---
 
@@ -543,7 +544,7 @@ Certains serveurs MCP utilisent des clients HTTP qui ignorent les variables d'en
 R : Oui. Ces fichiers ne contiennent aucun secret. C'est même un des bénéfices principaux d'IRIS : fin du `.env.example` à dupliquer.
 
 **Q : Que se passe-t-il si je désinstalle IRIS ?**
-R : Vos placeholders deviennent inertes (les requêtes sortantes contiendront `{{kc:...}}` littéral → 401). **L'uninstall ne supprime PAS vos secrets du trousseau** — confirmation explicite demandée. Pour tout retirer, lancez `iris uninstall --remove-secrets` (avec une confirmation supplémentaire).
+R : Vos placeholders deviennent inertes (les requêtes sortantes contiendront `{{kc:...}}` littéral → 401). **L'uninstall ne supprime PAS vos secrets du trousseau** sans demande explicite. Voir [§ 12. Désinstaller](#12-désinstaller) pour la procédure complète.
 
 **Q : IRIS supporte-t-il HTTP/2 ?**
 R : **Pas pour les hosts déchiffrés.** Le proxy MITM fonctionne en **HTTP/1.1 uniquement** : pour les hosts de la whitelist, IRIS annonce `http/1.1` en ALPN, donc le client négocie HTTP/1.1 (downgrade transparent). Le support HTTP/2 côté MITM reste en roadmap. En revanche, le **passthrough TCP** (hosts non whitelistés) fonctionne avec n'importe quelle version de protocole — HTTP/2, HTTP/3 — car IRIS ne déchiffre rien.
@@ -562,6 +563,42 @@ R : Délibérément non supporté. IRIS n'exporte aucune valeur. Si vous devez p
 
 **Q : IRIS marche-t-il avec `direnv` ?**
 R : Oui. `direnv` exporte des env vars comme n'importe quel mécanisme shell. Mettez `{{kc:...}}` dans vos `.envrc` et c'est bon.
+
+---
+
+## 12. Désinstaller
+
+Deux chemins, selon que l'app est encore disponible ou non.
+
+### Depuis l'app (recommandé)
+
+Menu bar → onglet **Settings** → **Quit & Uninstall**. Une boîte de dialogue
+propose de conserver ou de supprimer vos secrets (conservés par défaut). L'app :
+
+- nettoie le trousseau (clé CA, et vos secrets si vous l'avez demandé) — sans
+  aucune invite ;
+- retire le certificat CA du trust store (une invite mot de passe) ;
+- restaure les fichiers de configuration MCP que `iris mcp wrap` avait modifiés ;
+- retire le bloc IRIS de votre `~/.zshrc` ;
+- désenregistre le démarrage automatique ;
+- ouvre le Finder et révèle `uninstall.sh`.
+
+Le **CLI** (`/usr/local/bin/iris`) et l'**application** (`/Applications/Iris.app`)
+appartiennent au système : ils exigent votre mot de passe. Pour les retirer,
+lancez le script révélé dans le Finder.
+
+### Avec le script (app déjà supprimée, ou pour finir)
+
+```bash
+bash "$HOME/Library/Application Support/iris/uninstall.sh"
+```
+
+Le script confirme chaque opération. Options : `--yes` (non-interactif, sauf les
+secrets), `--delete-secrets` (supprime aussi vos secrets). Vos secrets ne sont
+**jamais** supprimés sans demande explicite.
+
+> ⚠️ Pensez à retirer Iris dans **Réglages Système → Général → Ouverture au
+> démarrage** (ce réglage ne peut pas être retiré sans l'application).
 
 ---
 
