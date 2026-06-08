@@ -132,6 +132,17 @@ final class CAManagerTests: XCTestCase {
         XCTAssertEqual(first.fingerprintSHA256, second.fingerprintSHA256)
     }
 
+    func testInMemoryKeyStoreDeleteKeyIsIdempotent() async throws {
+        let store = InMemoryCAKeyStore()
+        _ = try await store.loadOrGenerateKey()  // key now present
+        let first = try await store.deleteKey()
+        XCTAssertTrue(first, "deleting an existing key returns true")
+        let loaded = try await store.loadKey()
+        XCTAssertNil(loaded, "key is gone after delete")
+        let second = try await store.deleteKey()
+        XCTAssertFalse(second, "deleting an absent key returns false (idempotent)")
+    }
+
     func testEnsureCARegeneratesWhenOnDiskCertHasMismatchingKey() async throws {
         let tempPath = FileManager.default.temporaryDirectory
             .appendingPathComponent("iris-test-\(UUID()).pem")
