@@ -365,31 +365,11 @@ struct MCPCommand: AsyncParsableCommand {
 
         mutating func run() async throws {
             let expanded = (path as NSString).expandingTildeInPath
-            let fileURL = URL(fileURLWithPath: expanded)
-            let backupURL = fileURL.appendingPathExtension("iris.bak")
-
-            // Sanity: backup must exist, be readable, and parse as JSON
-            guard let backupData = try? Data(contentsOf: backupURL) else {
-                FileHandle.standardError.write(
-                    Data("no backup found or readable at \(backupURL.path)\n".utf8)
-                )
-                throw ExitCode(IrisExitCode.logicError)
-            }
-            guard
-                (try? JSONSerialization.jsonObject(
-                    with: backupData,
-                    options: [.allowFragments]
-                )) != nil
-            else {
-                FileHandle.standardError.write(
-                    Data("backup is not valid JSON: \(backupURL.path)\n".utf8)
-                )
-                throw ExitCode(IrisExitCode.logicError)
-            }
-
-            // Atomic move: replaceItemAt moves backupURL into fileURL and removes the backup.
             do {
-                _ = try FileManager.default.replaceItemAt(fileURL, withItemAt: backupURL)
+                try MCPPatcher.unwrap(path: expanded)
+            } catch let e as MCPPatcher.UnwrapError {
+                FileHandle.standardError.write(Data("\(e.errorDescription ?? "\(e)")\n".utf8))
+                throw ExitCode(IrisExitCode.logicError)
             } catch {
                 FileHandle.standardError.write(Data("restore failed: \(error)\n".utf8))
                 throw ExitCode(IrisExitCode.ioError)
