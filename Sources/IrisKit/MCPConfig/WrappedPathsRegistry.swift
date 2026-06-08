@@ -27,9 +27,22 @@ public struct WrappedPathsRegistry: Sendable {
             .appendingPathComponent("wrapped-paths.json")
     }
 
+    /// Levée quand le manifeste existe mais ne décode pas. On ne le traite PAS
+    /// comme vide : sinon un `add`/`remove` ultérieur réécrirait le fichier et
+    /// effacerait silencieusement les autres chemins enregistrés.
+    public enum RegistryError: Error, Equatable {
+        case corruptManifest(String)
+    }
+
     public func list() throws -> [String] {
+        // Fichier absent ou illisible → liste vide (état normal avant le 1er wrap).
         guard let data = try? Data(contentsOf: manifestURL) else { return [] }
-        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+        do {
+            return try JSONDecoder().decode([String].self, from: data)
+        } catch {
+            // Fichier présent mais corrompu → remonter, ne pas masquer en `[]`.
+            throw RegistryError.corruptManifest(manifestURL.path)
+        }
     }
 
     public func add(_ path: String) throws {

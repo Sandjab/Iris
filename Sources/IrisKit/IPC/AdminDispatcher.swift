@@ -257,9 +257,19 @@ public struct AdminDispatcher: Sendable {
             let caKeyDeleted = try await caManager.deleteKey()
             var secretsDeleted = 0
             if payload.deleteSecrets {
+                // Best-effort : l'échec d'une suppression (corruption/droits Keychain)
+                // ne doit pas empêcher de retirer les autres secrets. On logge le nom
+                // (jamais la valeur, §6) et on poursuit.
                 for secret in try await secretStore.list() {
-                    try await secretStore.delete(named: secret.name)
-                    secretsDeleted += 1
+                    do {
+                        try await secretStore.delete(named: secret.name)
+                        secretsDeleted += 1
+                    } catch {
+                        logger.warning(
+                            "admin.uninstall: secret deletion failed",
+                            metadata: ["name": "\(secret.name)", "error": "\(error)"]
+                        )
+                    }
                 }
             }
             return try JSONValue.encoding(
