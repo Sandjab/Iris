@@ -21,7 +21,8 @@ public struct WrappedPathsRegistry: Sendable {
             appropriateFor: nil,
             create: true
         )
-        return support
+        return
+            support
             .appendingPathComponent("iris", isDirectory: true)
             .appendingPathComponent("wrapped-paths.json")
     }

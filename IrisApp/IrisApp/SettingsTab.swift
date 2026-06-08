@@ -212,7 +212,10 @@ struct SettingsTab: View {
             Text("Your secrets stay in the Keychain unless you choose to delete them.")
         }
         .alert("Almost done", isPresented: $showUninstallDone) {
-            Button("Reveal uninstall.sh") { revealUninstallScript(); quitApp() }
+            Button("Reveal uninstall.sh") {
+                revealUninstallScript()
+                quitApp()
+            }
             Button("Quit", role: .cancel) { quitApp() }
         } message: {
             Text(uninstallSummary ?? "")
@@ -333,7 +336,11 @@ struct SettingsTab: View {
 
     private func revealUninstallScript() {
         let support = try? FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
         let script = support?
             .appendingPathComponent("iris", isDirectory: true)
             .appendingPathComponent("uninstall.sh")
