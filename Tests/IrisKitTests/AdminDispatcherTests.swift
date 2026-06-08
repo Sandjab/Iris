@@ -26,14 +26,21 @@ final class AdminDispatcherTests: XCTestCase {
     /// Builds a dispatcher backed by a temp `ConfigStore`. When `config` is given,
     /// it is written to the temp file first (so `config.get` returns it); otherwise
     /// the store seeds defaults on first boot.
+    /// Pass a pre-configured `caManager` to control CA key state (e.g. in `admin.uninstall` tests).
     private func makeDispatcher(
         secretStore: any SecretStore = InMemorySecretStore(),
         eventRing: EventRing = EventRing(capacity: 64),
         config: Config? = nil,
-        daemon: FakeDaemon = FakeDaemon()
+        daemon: FakeDaemon = FakeDaemon(),
+        caManager: CAManager? = nil
     ) async throws -> (AdminDispatcher, FakeDaemon, EventRing) {
-        let caManager = CAManager(keyStore: InMemoryCAKeyStore())
-        _ = try await caManager.ensureCA()
+        let resolvedCAManager: CAManager
+        if let caManager {
+            resolvedCAManager = caManager
+        } else {
+            resolvedCAManager = CAManager(keyStore: InMemoryCAKeyStore())
+            _ = try await resolvedCAManager.ensureCA()
+        }
         let tmpPath = URL(fileURLWithPath: "/tmp/iris-test-config-\(UUID().uuidString).json")
         if let config {
             let enc = JSONEncoder()
@@ -44,7 +51,7 @@ final class AdminDispatcherTests: XCTestCase {
         let dispatcher = AdminDispatcher(
             secretStore: secretStore,
             eventRing: eventRing,
-            caManager: caManager,
+            caManager: resolvedCAManager,
             daemon: daemon,
             configStore: configStore,
             logger: Logger(label: "test")
@@ -558,5 +565,62 @@ final class AdminDispatcherTests: XCTestCase {
         let params = try JSONValue.encoding(SecretQuarantineParams(name: "ghost", quarantined: true))
         let resp = await dispatcher.dispatch(request(.secretSetQuarantined, params: params))
         XCTAssertNotNil(resp.error)
+    }
+
+    // MARK: - admin.uninstall
+
+    func testAdminUninstallDeletesCAKeyButKeepsSecretsWhenOptedOut() async throws {
+        let secrets = InMemorySecretStore()
+        _ = try await secrets.add(Data("V".utf8), named: "TOKEN", allowedHosts: ["api.example.com"], createdAt: Date())
+        let keyStore = InMemoryCAKeyStore()
+        let ca = CAManager(keyStore: keyStore)
+        _ = try await ca.signingKey()
+        let (dispatcher, _, _) = try await makeDispatcher(secretStore: secrets, caManager: ca)
+
+        let response = await dispatcher.dispatch(
+            request(.adminUninstall, params: try JSONValue.encoding(AdminUninstallParams(deleteSecrets: false)))
+        )
+        let result = try unwrapResult(response).decode(as: AdminUninstallResult.self)
+        XCTAssertTrue(result.caKeyDeleted)
+        XCTAssertEqual(result.secretsDeleted, 0)
+        let remaining = try await secrets.list()
+        XCTAssertEqual(remaining.count, 1, "secrets are NOT touched when opted out")
+    }
+
+    func testAdminUninstallDeletesSecretsWhenOptedInAndIsValueFree() async throws {
+        let secrets = InMemorySecretStore()
+        _ = try await secrets.add(
+            Data("SUPERSECRET".utf8),
+            named: "TOKEN",
+            allowedHosts: ["api.example.com"],
+            createdAt: Date()
+        )
+        let ca = CAManager(keyStore: InMemoryCAKeyStore())
+        _ = try await ca.signingKey()
+        let (dispatcher, _, _) = try await makeDispatcher(secretStore: secrets, caManager: ca)
+
+        let response = await dispatcher.dispatch(
+            request(.adminUninstall, params: try JSONValue.encoding(AdminUninstallParams(deleteSecrets: true)))
+        )
+        let result = try unwrapResult(response).decode(as: AdminUninstallResult.self)
+        XCTAssertEqual(result.secretsDeleted, 1)
+        let remainingAfterDelete = try await secrets.list()
+        XCTAssertEqual(remainingAfterDelete.count, 0)
+
+        // I3 — non-fuite : aucun octet de valeur dans la réponse encodée.
+        let dump = String(data: try JSONEncoder().encode(response), encoding: .utf8) ?? ""
+        XCTAssertFalse(dump.contains("SUPERSECRET"))
+    }
+
+    func testAdminUninstallIsIdempotent() async throws {
+        let secrets = InMemorySecretStore()
+        let ca = CAManager(keyStore: InMemoryCAKeyStore())
+        let (dispatcher, _, _) = try await makeDispatcher(secretStore: secrets, caManager: ca)
+        let response = await dispatcher.dispatch(
+            request(.adminUninstall, params: try JSONValue.encoding(AdminUninstallParams(deleteSecrets: true)))
+        )
+        let result = try unwrapResult(response).decode(as: AdminUninstallResult.self)
+        XCTAssertFalse(result.caKeyDeleted)
+        XCTAssertEqual(result.secretsDeleted, 0)
     }
 }

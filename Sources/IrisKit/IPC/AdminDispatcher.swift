@@ -251,6 +251,20 @@ public struct AdminDispatcher: Sendable {
         case .eventsClear:
             let n = await eventRing.clear()
             return try JSONValue.encoding(EventsClearResult(deletedCount: n))
+
+        case .adminUninstall:
+            let payload = try Self.decode(AdminUninstallParams.self, from: params)
+            let caKeyDeleted = try await caManager.deleteKey()
+            var secretsDeleted = 0
+            if payload.deleteSecrets {
+                for secret in try await secretStore.list() {
+                    try await secretStore.delete(named: secret.name)
+                    secretsDeleted += 1
+                }
+            }
+            return try JSONValue.encoding(
+                AdminUninstallResult(caKeyDeleted: caKeyDeleted, secretsDeleted: secretsDeleted)
+            )
         }
     }
 

@@ -27,6 +27,7 @@ public enum AdminMethod: String, Codable, Sendable, CaseIterable {
     case ruleDelete = "rule.delete"
     case configReload = "config.reload"
     case eventsClear = "events.clear"
+    case adminUninstall = "admin.uninstall"
 }
 
 // MARK: - Params
@@ -115,6 +116,12 @@ public struct EventsQueryParams: Codable, Sendable, Equatable {
 public struct RuleHostParams: Codable, Sendable, Equatable {
     public let host: String
     public init(host: String) { self.host = host }
+}
+
+public struct AdminUninstallParams: Codable, Sendable, Equatable {
+    public let deleteSecrets: Bool
+    enum CodingKeys: String, CodingKey { case deleteSecrets = "delete_secrets" }
+    public init(deleteSecrets: Bool) { self.deleteSecrets = deleteSecrets }
 }
 
 /// A batch of scalar config updates (dot-path key → string value). Hosts are NOT
@@ -241,6 +248,20 @@ public struct EventsClearResult: Codable, Sendable, Equatable {
     public let deletedCount: Int
     enum CodingKeys: String, CodingKey { case deletedCount = "deleted_count" }
     public init(deletedCount: Int) { self.deletedCount = deletedCount }
+}
+
+/// Result of `admin.uninstall`. Value-free (SPECS §6): only counts/flags.
+public struct AdminUninstallResult: Codable, Sendable, Equatable {
+    public let caKeyDeleted: Bool
+    public let secretsDeleted: Int
+    enum CodingKeys: String, CodingKey {
+        case caKeyDeleted = "ca_key_deleted"
+        case secretsDeleted = "secrets_deleted"
+    }
+    public init(caKeyDeleted: Bool, secretsDeleted: Int) {
+        self.caKeyDeleted = caKeyDeleted
+        self.secretsDeleted = secretsDeleted
+    }
 }
 
 // MARK: - Daemon version
