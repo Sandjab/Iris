@@ -159,6 +159,7 @@ struct MCPCommand: AsyncParsableCommand {
                 throw ExitCode(IrisExitCode.ioError)
             }
 
+            try? wrappedPathsRegistry().add(expanded)
             emitOutcome("patched: \(expanded) (backup at \(backupURL.path))", summary: summary)
         }
 
@@ -343,6 +344,8 @@ struct MCPCommand: AsyncParsableCommand {
                 return
             }
 
+            try? wrappedPathsRegistry().add(fileURL.path)
+
             // 9. Update hash (of what we wrote) + log
             lastWrittenHash = Data(SHA256.hash(data: patchedData))
             logger.info("patched (backup at \(backupURL.lastPathComponent))")
@@ -367,6 +370,7 @@ struct MCPCommand: AsyncParsableCommand {
             let expanded = (path as NSString).expandingTildeInPath
             do {
                 try MCPPatcher.unwrap(path: expanded)
+                try? wrappedPathsRegistry().remove(expanded)
             } catch let e as MCPPatcher.UnwrapError {
                 FileHandle.standardError.write(Data("\(e.errorDescription ?? "\(e)")\n".utf8))
                 throw ExitCode(IrisExitCode.logicError)
@@ -387,6 +391,17 @@ struct MCPCommand: AsyncParsableCommand {
             }
         }
     }
+}
+
+// MARK: - Private helpers
+
+/// Resolves the wrapped-paths registry, honouring an env override used by
+/// integration tests so they never touch the real App Support manifest.
+private func wrappedPathsRegistry() throws -> WrappedPathsRegistry {
+    if let override = ProcessInfo.processInfo.environment["IRIS_WRAPPED_PATHS_MANIFEST"] {
+        return WrappedPathsRegistry(manifestURL: URL(fileURLWithPath: override))
+    }
+    return WrappedPathsRegistry(manifestURL: try WrappedPathsRegistry.defaultManifestURL())
 }
 
 // MARK: - Private types

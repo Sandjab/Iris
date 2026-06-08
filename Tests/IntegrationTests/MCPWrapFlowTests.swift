@@ -151,6 +151,46 @@ final class MCPWrapFlowTests: XCTestCase {
         )
     }
 
+    func testWrapRecordsPathAndUnwrapRemovesIt() throws {
+        let manifest = tmpDir.appendingPathComponent("wrapped-paths.json")
+
+        // Child processes inherit the parent's env (p.environment is nil in the harness).
+        setenv("IRIS_WRAPPED_PATHS_MANIFEST", manifest.path, 1)
+        defer { unsetenv("IRIS_WRAPPED_PATHS_MANIFEST") }
+
+        let mcpFile = try writeFile(
+            "registry-test.mcp.json",
+            content: """
+                {
+                  "mcpServers": {
+                    "alpha": {
+                      "command": "node"
+                    }
+                  }
+                }
+                """
+        )
+
+        // Wrap — uses runIris (mcp wrap has ConnectionOptions)
+        let wrapResult = try harness.runIris(["mcp", "wrap", mcpFile.path])
+        XCTAssertEqual(wrapResult.code, 0, "wrap failed: stderr=\(wrapResult.stderr)")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: mcpFile.path + ".iris.bak"),
+            "backup not created — file may not have been patched"
+        )
+
+        // Registry must now list the wrapped path
+        let reg = WrappedPathsRegistry(manifestURL: manifest)
+        XCTAssertEqual(try reg.list(), [mcpFile.path], "manifest should contain the wrapped path")
+
+        // Unwrap — uses runIrisRaw (mcp unwrap has no ConnectionOptions)
+        let unwrapResult = try harness.runIrisRaw(["mcp", "unwrap", mcpFile.path])
+        XCTAssertEqual(unwrapResult.code, 0, "unwrap failed: stderr=\(unwrapResult.stderr)")
+
+        // Registry must now be empty
+        XCTAssertEqual(try reg.list(), [], "manifest should be empty after unwrap")
+    }
+
     // MARK: - Unwrap tests
 
     func testUnwrapRestoresExact() throws {
