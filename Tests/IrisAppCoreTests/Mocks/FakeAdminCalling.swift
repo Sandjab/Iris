@@ -20,6 +20,8 @@ final class FakeAdminCalling: AdminCalling, @unchecked Sendable {
     var stubCATrusted: Bool = false
     var stubConfigPath: String = "/tmp/iris/config.json"
     var stubCAExportPath: String = "/tmp/iris/ca.pem"
+    var stubUninstallResult = AdminUninstallResult(caKeyDeleted: true, secretsDeleted: 0)
+    var uninstallDeleteSecretsArg: Bool?
     var stubSetResult: ConfigSetResult = ConfigSetResult(applied: [], requiresRestart: [])
     var stubReloadResult: ConfigReloadResult = ConfigReloadResult(reloaded: true, ignored: [])
     /// Captured value bytes from the last add/rotate, to assert the value never leaks into AppModel.
@@ -161,5 +163,12 @@ final class FakeAdminCalling: AdminCalling, @unchecked Sendable {
         calls.append("caExportPath")
         if let e = shouldThrow { throw e }
         return stubCAExportPath
+    }
+
+    func uninstall(deleteSecrets: Bool) async throws -> AdminUninstallResult {
+        calls.append("uninstall")
+        uninstallDeleteSecretsArg = deleteSecrets
+        if let e = shouldThrow { throw e }
+        return stubUninstallResult
     }
 }
