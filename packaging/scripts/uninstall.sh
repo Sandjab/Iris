@@ -143,8 +143,19 @@ else
     ok "aucun bloc iris."
 fi
 
-# 10. Fichiers de support — EN DERNIER (self-suppression, après lecture du registre).
-section "10. Fichiers de support ~/Library/Application Support/iris"
+# 10. Logs du daemon dans /tmp (world-readable). Cf StandardOut/ErrorPath de
+# packaging/io.iris.daemon.plist — le daemon est arrêté (étape 1), rien ne les recrée.
+section "10. Logs du daemon (/tmp/irisd.*.log)"
+if [ -f /tmp/irisd.out.log ] || [ -f /tmp/irisd.err.log ]; then
+    if confirm "Supprimer les logs du daemon (/tmp/irisd.*.log) ?"; then
+        rm -f /tmp/irisd.out.log /tmp/irisd.err.log && ok "supprimés."
+    fi
+else
+    ok "absents."
+fi
+
+# 11. Fichiers de support — EN DERNIER (self-suppression, après lecture du registre).
+section "11. Fichiers de support ~/Library/Application Support/iris"
 if [ -d "$SUP" ]; then
     if confirm "Supprimer $SUP (y compris ce script) ?"; then
         rm -rf "$SUP" && ok "supprimé."

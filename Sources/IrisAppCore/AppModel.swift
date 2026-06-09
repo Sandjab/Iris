@@ -36,8 +36,14 @@ public final class AppModel: ObservableObject {
     private let shellConfigurator: ShellConfiguring
     private let autoStart: AutoStartControlling
     private let mcpUnwrapper: MCPUnwrapping
+    private let daemonLogPaths: [String]
     private static let tabKey = "io.iris.app.selectedTab"
     private static let ackKey = "io.iris.app.lastAcknowledgedAt"
+
+    /// Daemon stdout/stderr log files. Kept in sync with `StandardOutPath` /
+    /// `StandardErrorPath` in `packaging/io.iris.daemon.plist`; the uninstall flow
+    /// removes them so nothing survives in world-readable `/tmp`.
+    public static let defaultDaemonLogPaths = ["/tmp/irisd.out.log", "/tmp/irisd.err.log"]
 
     /// Max in-memory events ring size.
     public static let eventsCap: Int = 1000
@@ -49,13 +55,15 @@ public final class AppModel: ObservableObject {
         caInstaller: CATrustInstalling = SystemCATrustInstaller(),
         shellConfigurator: ShellConfiguring = SystemShellConfigurator(),
         autoStart: AutoStartControlling = SystemAutoStartService(),
-        mcpUnwrapper: MCPUnwrapping? = nil
+        mcpUnwrapper: MCPUnwrapping? = nil,
+        daemonLogPaths: [String] = AppModel.defaultDaemonLogPaths
     ) {
         self.defaults = defaults
         self.caInstaller = caInstaller
         self.shellConfigurator = shellConfigurator
         self.autoStart = autoStart
         self.mcpUnwrapper = mcpUnwrapper ?? (try? SystemMCPUnwrapper()) ?? NoopMCPUnwrapper()
+        self.daemonLogPaths = daemonLogPaths
         let storedTab = defaults.string(forKey: Self.tabKey).flatMap(Tab.init(rawValue:))
         self.selectedTab = storedTab ?? .overview
         if let ts = defaults.object(forKey: Self.ackKey) as? Date {
@@ -310,12 +318,17 @@ public final class AppModel: ObservableObject {
             report.failures.append(.init(step: .rpc, message: "\(error)"))
         }
 
-        // 2. Trust store (admin prompt).
+        // 2. Trust store (admin prompt) — idempotent: only attempt removal when the
+        // CA is actually trusted (mirrors `uninstallCA`). Otherwise there's nothing
+        // to remove and `security remove-trusted-cert` exits non-zero, surfacing a
+        // spurious "Could not complete: ca".
         report.steps.append(.ca)
         do {
-            let path = try await admin.caExportPath()
-            let installer = caInstaller
-            try await Task.detached { try installer.uninstall(pemPath: path) }.value
+            if try await admin.isCATrusted() {
+                let path = try await admin.caExportPath()
+                let installer = caInstaller
+                try await Task.detached { try installer.uninstall(pemPath: path) }.value
+            }
         } catch {
             report.failures.append(.init(step: .ca, message: "\(error)"))
         }
@@ -355,6 +368,18 @@ public final class AppModel: ObservableObject {
             report.failures.append(.init(step: .unregisterApp, message: "\(error)"))
         }
 
+        // 6. Daemon logs (last — the daemon is now stopped, so it won't recreate them).
+        // They live in world-readable /tmp; a clean uninstall leaves nothing behind.
+        report.steps.append(.logs)
+        let fileManager = FileManager.default
+        for path in daemonLogPaths where fileManager.fileExists(atPath: path) {
+            do {
+                try fileManager.removeItem(atPath: path)
+            } catch {
+                report.failures.append(.init(step: .logs, message: "\(error)"))
+            }
+        }
+
         return report
     }
 }
@@ -363,7 +388,7 @@ public final class AppModel: ObservableObject {
 
 public struct UninstallReport: Sendable, Equatable {
     public enum Step: Sendable, Equatable {
-        case rpc, ca, mcp, shell, unregisterDaemon, unregisterApp
+        case rpc, ca, mcp, shell, unregisterDaemon, unregisterApp, logs
     }
     public struct Failure: Sendable, Equatable {
         public let step: Step
