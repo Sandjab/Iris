@@ -63,4 +63,9 @@ public protocol AdminCalling: Sendable {
 
     /// Path of the public CA PEM (for install/uninstall).
     func caExportPath() async throws -> String
+
+    /// Daemon-side uninstall: removes the CA private key always, and the user's
+    /// secrets only when `deleteSecrets` is true. Must run while the daemon is
+    /// alive (ACL 8b) — call before unregistering the service.
+    func uninstall(deleteSecrets: Bool) async throws -> AdminUninstallResult
 }

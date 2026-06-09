@@ -164,6 +164,34 @@ final class MCPPatcherTests: XCTestCase {
         XCTAssertEqual(summary.skippedHttpSse, 0)
     }
 
+    func testUnwrapRestoresFromBackupAndRemovesIt() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iris-unwrap-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let file = dir.appendingPathComponent(".mcp.json")
+        let backup = dir.appendingPathComponent(".mcp.json.iris.bak")
+        try Data(#"{"original":true}"#.utf8).write(to: backup)
+        try Data(#"{"patched":true}"#.utf8).write(to: file)
+
+        try MCPPatcher.unwrap(path: file.path)
+
+        let restored = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(restored.contains("original"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backup.path), "backup is removed")
+    }
+
+    func testUnwrapThrowsWhenBackupMissing() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iris-unwrap-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent(".mcp.json")
+        try Data("{}".utf8).write(to: file)
+        XCTAssertThrowsError(try MCPPatcher.unwrap(path: file.path))
+    }
+
     func testPatcherWorksOnJSONCDocument() throws {
         let input = """
             // Top-level comment

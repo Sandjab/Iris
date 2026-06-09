@@ -11,6 +11,10 @@ struct SettingsTab: View {
     @State private var maxBackupsText: String = ""
     @State private var errorText: String?
     @State private var statusText: String?
+    @State private var showUninstallConfirm = false
+    @State private var deleteSecretsOnUninstall = false
+    @State private var uninstallSummary: String?
+    @State private var showUninstallDone = false
 
     var body: some View {
         ScrollView {
@@ -21,6 +25,7 @@ struct SettingsTab: View {
                     caBox()
                     shellBox()
                     autoStartBox()
+                    uninstallBox()
                     connectionBox(cfg)
                     footer()
                 } else {
@@ -176,6 +181,47 @@ struct SettingsTab: View {
         }
     }
 
+    @ViewBuilder private func uninstallBox() -> some View {
+        GroupBox("Uninstall") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Stops irisd, removes auto-start, the CA certificate and the terminal configuration.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Spacer()
+                    Button("Quit & Uninstall…", role: .destructive) { showUninstallConfirm = true }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+        }
+        .confirmationDialog(
+            "Uninstall IRIS?",
+            isPresented: $showUninstallConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Uninstall (keep my secrets)", role: .destructive) {
+                deleteSecretsOnUninstall = false
+                runUninstall()
+            }
+            Button("Uninstall and delete my secrets", role: .destructive) {
+                deleteSecretsOnUninstall = true
+                runUninstall()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your secrets stay in the Keychain unless you choose to delete them.")
+        }
+        .alert("Almost done", isPresented: $showUninstallDone) {
+            Button("Reveal uninstall.sh") {
+                revealUninstallScript()
+                quitApp()
+            }
+            Button("Quit", role: .cancel) { quitApp() }
+        } message: {
+            Text(uninstallSummary ?? "")
+        }
+    }
+
     @ViewBuilder private func connectionBox(_ cfg: Config) -> some View {
         GroupBox("Connection (read-only)") {
             VStack(alignment: .leading, spacing: 4) {
@@ -263,6 +309,50 @@ struct SettingsTab: View {
                 errorText = userMessage(error)
             }
         }
+    }
+
+    private func runUninstall() {
+        Task {
+            let report = await model.uninstall(deleteSecrets: deleteSecretsOnUninstall, via: admin)
+            uninstallSummary = Self.summarize(report)
+            showUninstallDone = true
+        }
+    }
+
+    private static func summarize(_ r: UninstallReport) -> String {
+        var lines = [String]()
+        lines.append("CA key removed: \(r.caKeyDeleted ? "yes" : "no")")
+        lines.append("Secrets deleted: \(r.secretsDeleted)")
+        if !r.mcpRestored.isEmpty { lines.append("MCP configs restored: \(r.mcpRestored.count)") }
+        if !r.failures.isEmpty {
+            lines.append("Could not complete: " + r.failures.map { "\($0.step)" }.joined(separator: ", "))
+        }
+        lines.append("")
+        lines.append(
+            "To finish: the CLI and the app need your password. Run uninstall.sh (in the Finder), or drag Iris to the Trash."
+        )
+        return lines.joined(separator: "\n")
+    }
+
+    private func revealUninstallScript() {
+        let support = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        let script = support?
+            .appendingPathComponent("iris", isDirectory: true)
+            .appendingPathComponent("uninstall.sh")
+        if let script, FileManager.default.fileExists(atPath: script.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([script])
+        } else {
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications"))
+        }
+    }
+
+    private func quitApp() {
+        NSApplication.shared.terminate(nil)
     }
 
     private func reveal() {

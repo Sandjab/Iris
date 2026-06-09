@@ -25,6 +25,33 @@ public enum MCPPatcher {
 
     // MARK: - Public API
 
+    public enum UnwrapError: Error, LocalizedError, Equatable {
+        case noBackup(String)
+        case invalidBackupJSON(String)
+        public var errorDescription: String? {
+            switch self {
+            case .noBackup(let p): return "no backup found or readable at \(p)"
+            case .invalidBackupJSON(let p): return "backup is not valid JSON: \(p)"
+            }
+        }
+    }
+
+    /// Restores `path` from its sibling `<path>.iris.bak`, then removes the backup.
+    /// Mirrors the previous CLI behaviour (atomic `replaceItemAt`). Validates that
+    /// the backup parses as JSON before clobbering the live file.
+    public static func unwrap(path: String) throws {
+        let fileURL = URL(fileURLWithPath: path)
+        let backupURL = fileURL.appendingPathExtension("iris.bak")
+        guard let backupData = try? Data(contentsOf: backupURL) else {
+            throw UnwrapError.noBackup(backupURL.path)
+        }
+        guard (try? JSONSerialization.jsonObject(with: backupData, options: [.allowFragments])) != nil
+        else {
+            throw UnwrapError.invalidBackupJSON(backupURL.path)
+        }
+        _ = try FileManager.default.replaceItemAt(fileURL, withItemAt: backupURL)
+    }
+
     public static func patch(
         document: OrderedJSONDocument,
         brokerListen: String,

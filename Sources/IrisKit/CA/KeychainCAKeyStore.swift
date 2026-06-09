@@ -83,4 +83,21 @@ public actor KeychainCAKeyStore: CAKeyStore {
             throw CAError.keychainStatus(addStatus)
         }
     }
+
+    public func deleteKey() async throws -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        switch status {
+        case errSecSuccess:
+            return true
+        case errSecItemNotFound:
+            return false
+        default:
+            throw CAError.keychainStatus(status)
+        }
+    }
 }

@@ -15,4 +15,10 @@ public actor InMemoryCAKeyStore: CAKeyStore {
     public func storeKey(_ key: P256.Signing.PrivateKey) async throws {
         self.key = key
     }
+
+    public func deleteKey() async throws -> Bool {
+        let had = key != nil
+        key = nil
+        return had
+    }
 }

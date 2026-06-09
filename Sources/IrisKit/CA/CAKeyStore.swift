@@ -4,6 +4,9 @@ import Foundation
 public protocol CAKeyStore: Sendable {
     func loadKey() async throws -> P256.Signing.PrivateKey?
     func storeKey(_ key: P256.Signing.PrivateKey) async throws
+    /// Removes the persisted CA private key. Returns `true` if an item was
+    /// removed, `false` if none was present (idempotent).
+    func deleteKey() async throws -> Bool
 }
 
 extension CAKeyStore {

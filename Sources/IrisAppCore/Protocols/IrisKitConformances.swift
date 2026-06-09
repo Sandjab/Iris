@@ -111,6 +111,14 @@ extension AdminClient: AdminCalling {
     public func caExportPath() async throws -> String {
         try await call(.caExportPath, returning: CAExportPathResult.self).path
     }
+
+    public func uninstall(deleteSecrets: Bool) async throws -> AdminUninstallResult {
+        try await call(
+            .adminUninstall,
+            params: AdminUninstallParams(deleteSecrets: deleteSecrets),
+            returning: AdminUninstallResult.self
+        )
+    }
 }
 
 // MARK: - EventsClient + EventsSubscribing

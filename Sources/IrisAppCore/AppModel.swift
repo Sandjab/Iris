@@ -35,8 +35,15 @@ public final class AppModel: ObservableObject {
     private let caInstaller: CATrustInstalling
     private let shellConfigurator: ShellConfiguring
     private let autoStart: AutoStartControlling
+    private let mcpUnwrapper: MCPUnwrapping
+    private let daemonLogPaths: [String]
     private static let tabKey = "io.iris.app.selectedTab"
     private static let ackKey = "io.iris.app.lastAcknowledgedAt"
+
+    /// Daemon stdout/stderr log files. Kept in sync with `StandardOutPath` /
+    /// `StandardErrorPath` in `packaging/io.iris.daemon.plist`; the uninstall flow
+    /// removes them so nothing survives in world-readable `/tmp`.
+    public static let defaultDaemonLogPaths = ["/tmp/irisd.out.log", "/tmp/irisd.err.log"]
 
     /// Max in-memory events ring size.
     public static let eventsCap: Int = 1000
@@ -47,12 +54,16 @@ public final class AppModel: ObservableObject {
         defaults: UserDefaults = .standard,
         caInstaller: CATrustInstalling = SystemCATrustInstaller(),
         shellConfigurator: ShellConfiguring = SystemShellConfigurator(),
-        autoStart: AutoStartControlling = SystemAutoStartService()
+        autoStart: AutoStartControlling = SystemAutoStartService(),
+        mcpUnwrapper: MCPUnwrapping? = nil,
+        daemonLogPaths: [String] = AppModel.defaultDaemonLogPaths
     ) {
         self.defaults = defaults
         self.caInstaller = caInstaller
         self.shellConfigurator = shellConfigurator
         self.autoStart = autoStart
+        self.mcpUnwrapper = mcpUnwrapper ?? (try? SystemMCPUnwrapper()) ?? NoopMCPUnwrapper()
+        self.daemonLogPaths = daemonLogPaths
         let storedTab = defaults.string(forKey: Self.tabKey).flatMap(Tab.init(rawValue:))
         self.selectedTab = storedTab ?? .overview
         if let ts = defaults.object(forKey: Self.ackKey) as? Date {
@@ -287,4 +298,119 @@ public final class AppModel: ObservableObject {
     public func openLoginItemsSettings() {
         autoStart.openLoginItemsSettings()
     }
+
+    // MARK: - Uninstall (Temps 2)
+
+    /// Orchestrates the in-app uninstall. Strict order (I1): the daemon RPC runs
+    /// first, while irisd is alive and holds the Keychain ACL; unregister last,
+    /// which stops the daemon and releases the bundle lock. Each step is isolated:
+    /// a failure is recorded and the next step still runs (Rule 12 — fail loud).
+    public func uninstall(deleteSecrets: Bool, via admin: AdminCalling) async -> UninstallReport {
+        var report = UninstallReport()
+
+        // Capture the trust state BEFORE step 1 deletes the CA key: the daemon's
+        // is_trusted handler runs `ensureCA()`, which regenerates a missing key —
+        // querying it after deletion would resurrect the key we just removed.
+        let caWasTrusted = (try? await admin.isCATrusted()) ?? false
+
+        // 1. Keychain via daemon (must precede unregister).
+        report.steps.append(.rpc)
+        do {
+            let r = try await admin.uninstall(deleteSecrets: deleteSecrets)
+            report.caKeyDeleted = r.caKeyDeleted
+            report.secretsDeleted = r.secretsDeleted
+        } catch {
+            report.failures.append(.init(step: .rpc, message: "\(error)"))
+        }
+
+        // 2. Trust store (admin prompt) — idempotent: only when the CA was actually
+        // trusted (captured above). Otherwise there's nothing to remove and
+        // `security remove-trusted-cert` exits non-zero → spurious "Could not complete: ca".
+        // `caExportPath` is side-effect free (reads publicCertPath), so it's safe here.
+        report.steps.append(.ca)
+        if caWasTrusted {
+            do {
+                let path = try await admin.caExportPath()
+                let installer = caInstaller
+                try await Task.detached { try installer.uninstall(pemPath: path) }.value
+            } catch {
+                report.failures.append(.init(step: .ca, message: "\(error)"))
+            }
+        }
+
+        // 3. MCP unwrap.
+        report.steps.append(.mcp)
+        do {
+            let unwrapper = mcpUnwrapper
+            let r = try await Task.detached { try unwrapper.unwrapAll() }.value
+            report.mcpRestored = r.restored
+        } catch {
+            report.failures.append(.init(step: .mcp, message: "\(error)"))
+        }
+
+        // 4. Shell block.
+        report.steps.append(.shell)
+        do {
+            let cfg = shellConfigurator
+            try await Task.detached { try cfg.uninstall() }.value
+        } catch {
+            report.failures.append(.init(step: .shell, message: "\(error)"))
+        }
+
+        // 5. Auto-start (last — releases the bundle lock).
+        report.steps.append(.unregisterDaemon)
+        do {
+            let service = autoStart
+            try await Task.detached { try service.unregister(.daemon) }.value
+        } catch {
+            report.failures.append(.init(step: .unregisterDaemon, message: "\(error)"))
+        }
+        report.steps.append(.unregisterApp)
+        do {
+            let service = autoStart
+            try await Task.detached { try service.unregister(.app) }.value
+        } catch {
+            report.failures.append(.init(step: .unregisterApp, message: "\(error)"))
+        }
+
+        // 6. Daemon logs (last — the daemon is now stopped, so it won't recreate them).
+        // They live in world-readable /tmp; a clean uninstall leaves nothing behind.
+        report.steps.append(.logs)
+        let fileManager = FileManager.default
+        for path in daemonLogPaths where fileManager.fileExists(atPath: path) {
+            do {
+                try fileManager.removeItem(atPath: path)
+            } catch {
+                report.failures.append(.init(step: .logs, message: "\(error)"))
+            }
+        }
+
+        return report
+    }
+}
+
+// MARK: - UninstallReport
+
+public struct UninstallReport: Sendable, Equatable {
+    public enum Step: Sendable, Equatable {
+        case rpc, ca, mcp, shell, unregisterDaemon, unregisterApp, logs
+    }
+    public struct Failure: Sendable, Equatable {
+        public let step: Step
+        public let message: String
+    }
+    /// Steps actually attempted, in execution order (I1 lives here).
+    public var steps: [Step] = []
+    public var failures: [Failure] = []
+    public var caKeyDeleted = false
+    public var secretsDeleted = 0
+    public var mcpRestored: [String] = []
+}
+
+// MARK: - NoopMCPUnwrapper
+
+/// Used when the wrapped-paths manifest can't be located at launch; the
+/// uninstall flow then simply restores nothing rather than crashing.
+struct NoopMCPUnwrapper: MCPUnwrapping {
+    func unwrapAll() throws -> MCPUnwrapReport { MCPUnwrapReport() }
 }

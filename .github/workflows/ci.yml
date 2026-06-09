@@ -11,6 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Shell script syntax (uninstall.sh)
+        run: bash -n packaging/scripts/uninstall.sh
+
       - name: Toolchain versions
         run: |
           xcodebuild -version

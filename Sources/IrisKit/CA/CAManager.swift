@@ -117,6 +117,13 @@ public actor CAManager {
         try await keyStore.loadOrGenerateKey()
     }
 
+    /// Removes the persisted CA private key from the underlying key store.
+    /// Used by the admin RPC `admin.uninstall`. Returns `true` if an item was
+    /// removed. Does not touch the on-disk public PEM (that is the script's job).
+    public func deleteKey() async throws -> Bool {
+        try await keyStore.deleteKey()
+    }
+
     /// Returns the issuer DN that leaf certs must reference.
     public func issuerDistinguishedName() throws -> DistinguishedName {
         do {
