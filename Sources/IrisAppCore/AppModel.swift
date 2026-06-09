@@ -308,6 +308,11 @@ public final class AppModel: ObservableObject {
     public func uninstall(deleteSecrets: Bool, via admin: AdminCalling) async -> UninstallReport {
         var report = UninstallReport()
 
+        // Capture the trust state BEFORE step 1 deletes the CA key: the daemon's
+        // is_trusted handler runs `ensureCA()`, which regenerates a missing key —
+        // querying it after deletion would resurrect the key we just removed.
+        let caWasTrusted = (try? await admin.isCATrusted()) ?? false
+
         // 1. Keychain via daemon (must precede unregister).
         report.steps.append(.rpc)
         do {
@@ -318,19 +323,19 @@ public final class AppModel: ObservableObject {
             report.failures.append(.init(step: .rpc, message: "\(error)"))
         }
 
-        // 2. Trust store (admin prompt) — idempotent: only attempt removal when the
-        // CA is actually trusted (mirrors `uninstallCA`). Otherwise there's nothing
-        // to remove and `security remove-trusted-cert` exits non-zero, surfacing a
-        // spurious "Could not complete: ca".
+        // 2. Trust store (admin prompt) — idempotent: only when the CA was actually
+        // trusted (captured above). Otherwise there's nothing to remove and
+        // `security remove-trusted-cert` exits non-zero → spurious "Could not complete: ca".
+        // `caExportPath` is side-effect free (reads publicCertPath), so it's safe here.
         report.steps.append(.ca)
-        do {
-            if try await admin.isCATrusted() {
+        if caWasTrusted {
+            do {
                 let path = try await admin.caExportPath()
                 let installer = caInstaller
                 try await Task.detached { try installer.uninstall(pemPath: path) }.value
+            } catch {
+                report.failures.append(.init(step: .ca, message: "\(error)"))
             }
-        } catch {
-            report.failures.append(.init(step: .ca, message: "\(error)"))
         }
 
         // 3. MCP unwrap.

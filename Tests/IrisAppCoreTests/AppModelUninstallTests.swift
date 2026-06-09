@@ -74,6 +74,23 @@ final class AppModelUninstallTests: XCTestCase {
         XCTAssertNil(ca.uninstalledPath)
     }
 
+    func testUninstallQueriesTrustBeforeDeletingCAKey() async {
+        // Trust must be checked BEFORE the RPC deletes the CA key. The daemon's
+        // is_trusted handler runs `ensureCA()`, which regenerates the key if absent —
+        // querying it after deletion resurrects the key the uninstall just removed.
+        let admin = FakeAdminCalling()
+        admin.stubCATrusted = true
+        let model = makeModel()
+
+        _ = await model.uninstall(deleteSecrets: false, via: admin)
+
+        let trustIdx = admin.calls.firstIndex(of: "isCATrusted")
+        let rpcIdx = admin.calls.firstIndex(of: "uninstall")
+        XCTAssertNotNil(trustIdx)
+        XCTAssertNotNil(rpcIdx)
+        XCTAssertLessThan(trustIdx!, rpcIdx!)
+    }
+
     func testUninstallDeletesDaemonLogs() async throws {
         // Daemon logs live in world-readable /tmp; "clean uninstall" must remove them.
         let dir = FileManager.default.temporaryDirectory
