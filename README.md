@@ -14,12 +14,10 @@
 
 > **IRIS: Interception · Resolution · Injection · Substitution**
 
-> [!WARNING]
-> ## 🚧 Work in Progress — NOT READY FOR RELEASE
->
-> This repository is under active development and is shared for transparency only.
-> APIs, configuration formats, and behavior may change without notice, and
-> nothing here is production-ready. **Do not depend on it yet.**
+> [!NOTE]
+> **v1.0.0 — first stable release.** IRIS is a young project, but the 1.0 API,
+> configuration formats, and behavior are now stable. Feedback and bug reports
+> are very welcome.
 
 A minimal credential broker for macOS that lets local AI agents (like Claude Code CLI) use real credentials without ever seeing them.
 
