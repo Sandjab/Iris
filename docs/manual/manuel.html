@@ -360,7 +360,7 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
     <div class="brand-logo">IR</div>
     <div>
       <div class="brand-name">IRIS</div>
-      <div class="brand-sub">Manuel · v0.1</div>
+      <div class="brand-sub">Manuel · v1.0</div>
     </div>
   </div>
   <div class="search">
@@ -378,23 +378,25 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
       <li><a href="#provider-compat"><span class="num">7.</span>Compatibilité par fournisseur</a></li>
 
       <li class="group">Partie II — Installer & configurer</li>
-      <li><a href="#install"><span class="num">8.</span>Installation <span class="badge-soon">.pkg</span></a></li>
+      <li><a href="#install"><span class="num">8.</span>Installation</a></li>
       <li><a href="#setup-shell"><span class="num">9.</span>Configuration shell</a></li>
-      <li><a href="#config-toml"><span class="num">10.</span>Fichier config.toml</a></li>
+      <li><a href="#config-toml"><span class="num">10.</span>Fichier config.json</a></li>
       <li><a href="#ca-trust"><span class="num">11.</span>CA &amp; trust store</a></li>
 
-      <li class="group">Partie III — Utiliser au quotidien</li>
+      <li class="group">Partie III — La ligne de commande</li>
       <li><a href="#cli-overview"><span class="num">12.</span>CLI — vue d'ensemble</a></li>
       <li><a href="#cli-secrets"><span class="num">13.</span>Gérer les secrets</a></li>
       <li><a href="#cli-rules"><span class="num">14.</span>Whitelist MITM</a></li>
       <li><a href="#cli-monitoring"><span class="num">15.</span>Monitoring &amp; logs</a></li>
       <li><a href="#cli-mcp"><span class="num">16.</span>Wrapping MCP</a></li>
       <li><a href="#cli-control"><span class="num">17.</span>Pause / Resume / Doctor</a></li>
-      <li><a href="#menubar"><span class="num">18.</span>App menu bar <span class="badge-soon">à venir</span></a></li>
 
-      <li class="group">Partie IV — Exploitation</li>
-      <li><a href="#launchagent"><span class="num">19.</span>LaunchAgent <span class="badge-soon">à venir</span></a></li>
-      <li><a href="#packaging"><span class="num">20.</span>Distribution <span class="badge-soon">à venir</span></a></li>
+      <li class="group">Partie IV — L'application menu-bar</li>
+      <li><a href="#menubar"><span class="num">18.</span>App menu-bar</a></li>
+
+      <li class="group">Partie V — Exploitation</li>
+      <li><a href="#launchagent"><span class="num">19.</span>Démarrage automatique</a></li>
+      <li><a href="#packaging"><span class="num">20.</span>Distribution &amp; désinstallation</a></li>
       <li><a href="#troubleshoot"><span class="num">21.</span>Dépannage</a></li>
       <li><a href="#faq"><span class="num">22.</span>FAQ</a></li>
 
@@ -412,10 +414,9 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
   <h1>IRIS — Manuel utilisateur</h1>
   <p class="tagline">Interception · Resolution · Injection · Substitution. <em>Secrets are safe.</em></p>
   <div class="meta">
-    <span><span class="dot"></span>Version 0.1 · Mai 2026</span>
+    <span><span class="dot"></span>Version 1.0 · Juin 2026</span>
     <span>macOS 13+</span>
-    <span>Phases 0–5 livrées</span>
-    <span>Phases 6–10 en cours</span>
+    <span>Signé Developer ID + notarisé</span>
   </div>
 </section>
 
@@ -463,15 +464,16 @@ les clés. Concrètement&nbsp;:
 <ul>
   <li><strong>Partie I</strong> — comprendre le modèle (concepts, architecture, flux, menace).</li>
   <li><strong>Partie II</strong> — installer et configurer IRIS sur une machine.</li>
-  <li><strong>Partie III</strong> — utiliser IRIS au quotidien (CLI, futur app menu bar, MCP).</li>
-  <li><strong>Partie IV</strong> — exploitation : LaunchAgent, packaging, dépannage.</li>
+  <li><strong>Partie III</strong> — la ligne de commande <code>iris</code>.</li>
+  <li><strong>Partie IV</strong> — l'application menu-bar.</li>
+  <li><strong>Partie V</strong> — exploitation : démarrage automatique, distribution, désinstallation, dépannage.</li>
 </ul>
 
 <p>
-Certains chapitres décrivent des fonctionnalités <strong>non encore livrées</strong> (app menu bar,
-LaunchAgent automatisé, .pkg signé). Ils sont signalés par un badge <span class="badge badge-soon">à venir</span>
-et un encart explicite. Tous les chapitres marqués <span class="badge badge-ok">livré</span> sont
-exploitables dès aujourd'hui.
+IRIS 1.0 est complet : daemon, CLI, application menu-bar, installeur signé et notarisé, démarrage
+automatique et désinstallation propre sont tous livrés et exploitables dès aujourd'hui. La Partie III
+couvre l'usage en ligne de commande, la Partie IV l'application menu-bar — les deux pilotent le même
+daemon.
 </p>
 
 <!-- ============================================================ -->
@@ -593,8 +595,8 @@ pour les trois binaires CLI/daemon, plus un projet Xcode pour la cible app (cont
   <tbody>
     <tr><td><code>irisd</code></td><td>Daemon</td><td>Proxy MITM, IPC admin, événements SSE, accès Keychain</td><td><span class="badge badge-ok">livré</span></td></tr>
     <tr><td><code>iris</code></td><td>CLI</td><td>Frontale opérateur : secrets, rules, status, logs, doctor, mcp wrap</td><td><span class="badge badge-ok">livré</span></td></tr>
-    <tr><td><code>Iris.app</code></td><td>Menu bar app</td><td>Monitoring temps réel, CRUD secrets, alertes, settings</td><td><span class="badge badge-soon">à venir</span></td></tr>
-    <tr><td><code>IrisKit</code></td><td>Library</td><td>Modèles, config TOML, abstraction Keychain, CA, IPC, placeholder engine</td><td><span class="badge badge-ok">livré</span></td></tr>
+    <tr><td><code>Iris.app</code></td><td>Menu bar app</td><td>Monitoring temps réel, CRUD secrets, alertes, settings</td><td><span class="badge badge-ok">livré</span></td></tr>
+    <tr><td><code>IrisKit</code></td><td>Library</td><td>Modèles, config JSON, abstraction Keychain, CA, IPC, placeholder engine</td><td><span class="badge badge-ok">livré</span></td></tr>
   </tbody>
 </table>
 
@@ -626,7 +628,7 @@ pour les trois binaires CLI/daemon, plus un projet Xcode pour la cible app (cont
       <text x="400" y="110" text-anchor="middle" fill="var(--fg-muted)" font-size="10">127.0.0.1:8888 · scan · scope · substitute</text>
       <rect x="280" y="128" width="240" height="42" rx="6" fill="var(--bg-elev)" stroke="var(--border)" />
       <text x="400" y="148" text-anchor="middle" fill="var(--fg)" font-size="12" font-weight="600">Events SSE</text>
-      <text x="400" y="162" text-anchor="middle" fill="var(--fg-muted)" font-size="10">127.0.0.1:8889/events</text>
+      <text x="400" y="162" text-anchor="middle" fill="var(--fg-muted)" font-size="10">127.0.0.1:8899/events</text>
       <rect x="280" y="180" width="240" height="42" rx="6" fill="var(--bg-elev)" stroke="var(--border)" />
       <text x="400" y="200" text-anchor="middle" fill="var(--fg)" font-size="12" font-weight="600">Admin RPC</text>
       <text x="400" y="214" text-anchor="middle" fill="var(--fg-muted)" font-size="10">unix socket 0600 · JSON-RPC 2.0</text>
@@ -645,7 +647,7 @@ pour les trois binaires CLI/daemon, plus un projet Xcode pour la cible app (cont
       <rect x="30" y="170" width="170" height="80" rx="8" fill="var(--bg-elev)" stroke="var(--border-strong)" stroke-dasharray="4 4" />
       <text x="115" y="198" text-anchor="middle" fill="var(--fg-muted)" font-weight="600">Iris.app</text>
       <text x="115" y="216" text-anchor="middle" fill="var(--fg-faint)" font-size="10">menu bar</text>
-      <text x="115" y="232" text-anchor="middle" fill="var(--soon)" font-size="10" font-weight="700">à venir (phase 6)</text>
+      <text x="115" y="232" text-anchor="middle" fill="var(--ok)" font-size="10" font-weight="700">livré</text>
     </g>
 
     <g class="svg-node" data-arch="cli">
@@ -681,7 +683,7 @@ pour les trois binaires CLI/daemon, plus un projet Xcode pour la cible app (cont
   <div class="diagram-caption">Cliquez sur un composant pour le détail.</div>
   <div class="node-detail" id="archDetail">
     <h5>Cliquez sur un composant</h5>
-    <p>L'architecture est volontairement simple : un daemon central, deux clients (CLI livrée, app à venir), un trousseau pour la persistance, et les API upstream classiques.</p>
+    <p>L'architecture est volontairement simple : un daemon central, deux clients (la CLI et l'app menu-bar), un trousseau pour la persistance, et les API upstream classiques.</p>
   </div>
 </div>
 
@@ -693,7 +695,7 @@ pour les trois binaires CLI/daemon, plus un projet Xcode pour la cible app (cont
   },
   "daemon": {
     "title": "Daemon irisd",
-    "body": "Process unique par session utilisateur. Trois listeners : proxy MITM (8888), SSE events (8889), Unix socket admin (0600). I/O 100% async via swift-nio. État en mémoire : map des secrets + LRU des valeurs (TTL 5min, 32 entrées max) + ring buffer 10k events. Persistance : SQLite pour l'historique (métadonnées uniquement)."
+    "body": "Process unique par session utilisateur. Trois listeners : proxy MITM (8888), SSE events (8899), Unix socket admin (0600). I/O 100% async via swift-nio. État en mémoire : map des secrets + LRU des valeurs (TTL 5min, 32 entrées max) + ring buffer 10k events. Persistance : SQLite pour l'historique (métadonnées uniquement)."
   },
   "keychain": {
     "title": "Trousseau macOS",
@@ -701,7 +703,7 @@ pour les trois binaires CLI/daemon, plus un projet Xcode pour la cible app (cont
   },
   "app": {
     "title": "Iris.app (menu bar)",
-    "body": "<strong>Non encore livrée</strong> (phase 6). NSStatusItem + popover SwiftUI. Source de vérité = daemon, l'app est un thin client : RPC pour les mutations, SSE pour le flux live. Aucune valeur de secret ne transitera par son process — elle utilisera les mêmes endpoints que la CLI."
+    "body": "<strong>Livrée.</strong> Application de barre de menus (NSStatusItem + panneau SwiftUI déplaçable). Source de vérité = daemon, l'app est un thin client : RPC pour les mutations, SSE pour le flux live. Aucune valeur de secret ne transite par son process — elle utilise les mêmes endpoints que la CLI."
   },
   "cli": {
     "title": "iris (CLI)",
@@ -778,7 +780,7 @@ Host: api.anthropic.com:443</code></pre>
     <div class="stepper-text">
       <h4>Étape 3 — Vérification whitelist MITM</h4>
       <p>Le daemon reçoit le CONNECT. Il vérifie <code>api.anthropic.com</code> contre la liste
-      <code>mitm_host</code> de <code>config.toml</code>. Match trouvé → réponse <code>200 Connection Established</code>.</p>
+      <code>hosts</code> de <code>config.json</code>. Match trouvé → réponse <code>200 Connection Established</code>.</p>
       <p>Si pas de match, le daemon aurait fait un splice TCP brut sans déchiffrer (event <code>passThrough</code>).</p>
     </div>
 <pre><code>HTTP/1.1 200 Connection Established</code></pre>
@@ -928,7 +930,7 @@ agent ← irisd (verbatim, no scan)</code></pre>
     <tr><td><strong>I1</strong></td><td>La valeur en clair d'un secret n'est jamais écrite sur disque ailleurs que dans le Keychain.</td></tr>
     <tr><td><strong>I2</strong></td><td>La valeur en clair n'apparaît jamais dans les logs, events, stream SSE, ou UI. <em>Vérifié par tests unitaires de redaction.</em></td></tr>
     <tr><td><strong>I3</strong></td><td>Un placeholder n'est résolu que si l'host de destination ∈ <code>allowed_hosts</code> du secret.</td></tr>
-    <tr><td><strong>I4</strong></td><td>La clé privée de la CA n'est accessible qu'au binaire <code>irisd</code> signé (ACL Keychain). <span class="badge badge-soon">phase 8</span></td></tr>
+    <tr><td><strong>I4</strong></td><td>La clé privée de la CA n'est accessible qu'au binaire <code>irisd</code> signé (ACL Keychain).</td></tr>
     <tr><td><strong>I5</strong></td><td>La socket admin Unix a mode <code>0600</code> et appartient à l'utilisateur courant.</td></tr>
   </tbody>
 </table>
@@ -1013,7 +1015,7 @@ est le maximum des sévérités déclenchées.
   <thead><tr><th>Mode</th><th>Effet</th></tr></thead>
   <tbody>
     <tr><td><code>block_only</code></td><td>Log de l'event, pas de notification, daemon continue.</td></tr>
-    <tr><td><code>block_and_notify</code> <span class="badge badge-info">défaut</span></td><td>+ notification macOS <code>UNUserNotificationCenter</code>, badge rouge sur l'icône menu bar (Phase 6).</td></tr>
+    <tr><td><code>block_and_notify</code> <span class="badge badge-info">défaut</span></td><td>+ notification macOS <code>UNUserNotificationCenter</code> et entrée dans l'onglet <em>Security</em> de l'app.</td></tr>
     <tr><td><code>block_notify_pause</code></td><td>+ pause complète du daemon : refus de toute nouvelle substitution jusqu'à <code>iris resume</code>.</td></tr>
   </tbody>
 </table>
@@ -1238,7 +1240,7 @@ export NODE_EXTRA_CA_CERTS=$HOME/Library/Application\ Support/iris/ca.pem
 <!-- ============================================================ -->
 
 <!-- 8. INSTALLATION -->
-<h2 id="install"><span class="chapnum">8</span>Installation <span class="badge badge-soon">.pkg à venir</span><a class="anchor" href="#install">¶</a></h2>
+<h2 id="install"><span class="chapnum">8</span>Installation<a class="anchor" href="#install">¶</a></h2>
 
 <h3>Prérequis</h3>
 <ul>
@@ -1249,13 +1251,28 @@ export NODE_EXTRA_CA_CERTS=$HOME/Library/Application\ Support/iris/ca.pem
 
 <h3>Méthode 1 — Package signé (recommandée)</h3>
 
-<div class="coming-soon">
-  <h3>Bientôt disponible</h3>
-  <p>L'installeur <code>.pkg</code> signé Developer ID + notarisé Apple est en cours de préparation
-  (phases 9–10). Il automatisera : copie de <code>Iris.app</code>, déploiement du LaunchAgent,
-  création du dossier de support, prompt admin pour le trust store.</p>
-  <p>En attendant, utilisez la méthode build-from-source ci-dessous.</p>
-  <span class="phase-tag">Phase 9 — packaging</span>
+<p>
+Téléchargez <code>Iris.pkg</code> depuis la
+<a href="https://github.com/Sandjab/Iris/releases">page des releases</a> et double-cliquez.
+L'installeur est signé <strong>Developer ID</strong> et <strong>notarisé par Apple</strong> — aucun
+avertissement Gatekeeper. L'assistant guidé installe :
+</p>
+<ul>
+  <li><code>/Applications/Iris.app</code> — l'application menu-bar, avec le daemon
+  <code>irisd</code> embarqué dans le bundle (cf. chapitre 18) ;</li>
+  <li><code>/usr/local/bin/iris</code> — la ligne de commande ;</li>
+  <li>au premier lancement, l'app s'enregistre pour le démarrage automatique
+  (<code>SMAppService</code>, cf. chapitre 19) et installe la CA dans le trust store de l'utilisateur.
+  La configuration du terminal et la CA restent pilotables depuis l'onglet <em>Settings</em> de l'app.</li>
+</ul>
+
+<div class="callout callout-info">
+  <div class="icon">i</div>
+  <div class="body">
+    <p>Pour vérifier la notarisation avant d'installer&nbsp;:
+    <code>spctl --assess --type install -vv Iris.pkg</code> doit répondre
+    <code>accepted source=Notarized Developer ID</code>.</p>
+  </div>
 </div>
 
 <div class="screenshot">
@@ -1302,10 +1319,30 @@ swift build -c release
 <h2 id="setup-shell"><span class="chapnum">9</span>Configuration shell<a class="anchor" href="#setup-shell">¶</a></h2>
 
 <p>
-IRIS s'active par injection de trois variables d'environnement dans votre profil shell. Les outils
-qui en héritent passeront par le proxy.
+IRIS s'active par injection de deux variables d'environnement dans votre profil shell : le proxy
+(<code>HTTPS_PROXY</code>) et le certificat de la CA pour Node.js
+(<code>NODE_EXTRA_CA_CERTS</code>). Les outils qui en héritent passeront par le proxy.
 </p>
 
+<h3>Méthode recommandée (zsh)</h3>
+<p>
+La CLI gère le bloc pour vous : un bloc balisé et idempotent ajouté à <code>~/.zshrc</code> entre
+des marqueurs <code># &gt;&gt;&gt; iris &gt;&gt;&gt;</code> … <code># &lt;&lt;&lt; iris &lt;&lt;&lt;</code>.
+</p>
+<pre><code># Affiche le bloc puis demande confirmation
+iris shell install
+
+# Sans confirmation (scripting)
+iris shell install --yes
+
+# État / retrait propre du bloc
+iris shell status
+iris shell uninstall</code></pre>
+<p>L'application expose la même action dans l'onglet <em>Settings</em> → <em>Terminal</em>
+(<em>Configure…</em> / <em>Remove…</em>).</p>
+
+<h3>Configuration manuelle</h3>
+<p>Si vous gérez votre profil à la main, ajoutez exactement ces deux variables (plus vos placeholders) :</p>
 <div class="tabs" id="shellTabs">
   <div class="tab-buttons">
     <button class="active" data-tab="zsh">zsh (défaut macOS)</button>
@@ -1315,7 +1352,6 @@ qui en héritent passeront par le proxy.
   <div class="tab-content active" data-tab="zsh">
 <pre><code># Ajouter à ~/.zshrc
 export HTTPS_PROXY="http://127.0.0.1:8888"
-export HTTP_PROXY="http://127.0.0.1:8888"
 export NODE_EXTRA_CA_CERTS="$HOME/Library/Application Support/iris/ca.pem"
 
 # Vos placeholders
@@ -1328,7 +1364,6 @@ source ~/.zshrc</code></pre>
   <div class="tab-content" data-tab="bash">
 <pre><code># Ajouter à ~/.bashrc ou ~/.bash_profile
 export HTTPS_PROXY="http://127.0.0.1:8888"
-export HTTP_PROXY="http://127.0.0.1:8888"
 export NODE_EXTRA_CA_CERTS="$HOME/Library/Application Support/iris/ca.pem"
 
 export ANTHROPIC_API_KEY="{{kc:anthropic_api_key}}"
@@ -1339,7 +1374,6 @@ source ~/.bashrc</code></pre>
   <div class="tab-content" data-tab="fish">
 <pre><code># Ajouter à ~/.config/fish/config.fish
 set -gx HTTPS_PROXY "http://127.0.0.1:8888"
-set -gx HTTP_PROXY "http://127.0.0.1:8888"
 set -gx NODE_EXTRA_CA_CERTS "$HOME/Library/Application Support/iris/ca.pem"
 
 set -gx ANTHROPIC_API_KEY "{{kc:anthropic_api_key}}"
@@ -1371,45 +1405,48 @@ source ~/.config/fish/config.fish</code></pre>
   </div>
 </div>
 
-<!-- 9. CONFIG TOML -->
-<h2 id="config-toml"><span class="chapnum">10</span>Fichier <code>config.toml</code><a class="anchor" href="#config-toml">¶</a></h2>
+<!-- 9. CONFIG JSON -->
+<h2 id="config-toml"><span class="chapnum">10</span>Fichier <code>config.json</code><a class="anchor" href="#config-toml">¶</a></h2>
 
 <p>
-Le daemon lit sa configuration depuis <code>~/Library/Application Support/iris/config.toml</code> au
-démarrage, et recharge sur <code>SIGHUP</code> (ou <code>iris config reload</code>). Aucun secret
-n'est stocké dans ce fichier — uniquement la configuration opérationnelle et la whitelist MITM.
+Le daemon lit sa configuration depuis <code>~/Library/Application Support/iris/config.json</code> au
+démarrage, et recharge sur <code>SIGHUP</code> (ou <code>iris config reload</code>). Aucun secret n'est
+stocké dans ce fichier — uniquement la configuration opérationnelle et la whitelist MITM. Il est créé
+automatiquement au premier démarrage et fait foi. Modifiez-le de préférence via
+<code>iris config set</code> ou l'onglet <em>Settings</em> de l'app (qui valident la saisie et gardent
+des sauvegardes), plutôt qu'à la main.
 </p>
 
-<pre><code>[broker]
-listen        = "127.0.0.1:8888"
-events_listen = "127.0.0.1:8889"
-admin_socket  = "~/Library/Application Support/iris/admin.sock"
-log_level     = "info"             # trace | debug | info | warn | error
-event_retention_days = 7
-event_ring_size = 10000
-
-[security]
-# block_only | block_and_notify | block_notify_pause
-on_exfil_attempt = "block_and_notify"
-max_substitutions_per_minute = 60
-
-[[mitm_host]]
-host = "api.anthropic.com"
-
-[[mitm_host]]
-host = "api.github.com"
-
-[[mitm_host]]
-host = "api.openai.com"</code></pre>
+<pre><code>{
+  "version": 1,
+  "broker": {
+    "listen": "127.0.0.1:8888",
+    "events_listen": "127.0.0.1:8899",
+    "admin_socket": "~/Library/Application Support/iris/admin.sock",
+    "log_level": "info",
+    "event_retention_days": 7,
+    "event_ring_size": 10000
+  },
+  "security": {
+    "on_exfil_attempt": "block_and_notify",
+    "max_substitutions_per_minute": 60
+  },
+  "backups": {
+    "max_count": 10
+  },
+  "hosts": [
+    { "host": "api.anthropic.com", "origin": "default" }
+  ]
+}</code></pre>
 
 <h3>Sections</h3>
 
-<h4>[broker]</h4>
+<h4>broker</h4>
 <table>
   <thead><tr><th>Clé</th><th>Type</th><th>Défaut</th><th>Effet</th></tr></thead>
   <tbody>
     <tr><td><code>listen</code></td><td>string</td><td>127.0.0.1:8888</td><td>Adresse:port du proxy MITM. Toujours sur localhost.</td></tr>
-    <tr><td><code>events_listen</code></td><td>string</td><td>127.0.0.1:8889</td><td>Adresse:port du serveur SSE d'events.</td></tr>
+    <tr><td><code>events_listen</code></td><td>string</td><td>127.0.0.1:8899</td><td>Adresse:port du serveur SSE d'events.</td></tr>
     <tr><td><code>admin_socket</code></td><td>path</td><td>~/.../admin.sock</td><td>Socket Unix admin. Mode 0600 enforcé au bind.</td></tr>
     <tr><td><code>log_level</code></td><td>enum</td><td>info</td><td>trace, debug, info, warn, error.</td></tr>
     <tr><td><code>event_retention_days</code></td><td>int</td><td>7</td><td>TTL des events dans SQLite. Compaction quotidienne.</td></tr>
@@ -1417,26 +1454,37 @@ host = "api.openai.com"</code></pre>
   </tbody>
 </table>
 
-<h4>[security]</h4>
+<h4>security</h4>
 <table>
   <thead><tr><th>Clé</th><th>Type</th><th>Défaut</th><th>Effet</th></tr></thead>
   <tbody>
-    <tr><td><code>on_exfil_attempt</code></td><td>enum</td><td>block_and_notify</td><td>Voir chapitre 6.</td></tr>
+    <tr><td><code>on_exfil_attempt</code></td><td>enum</td><td>block_and_notify</td><td>block_only, block_and_notify, block_notify_pause. Voir chapitre 6.</td></tr>
     <tr><td><code>max_substitutions_per_minute</code></td><td>int</td><td>60</td><td>Seuil R5 par secret.</td></tr>
   </tbody>
 </table>
 
-<h4>[[mitm_host]]</h4>
-<p>Liste répétable. Chaque entrée déclare un host pour lequel IRIS accepte de jouer le MITM.
-Match exact, case-insensitive, pas de wildcard en MVP.</p>
+<h4>backups</h4>
+<table>
+  <thead><tr><th>Clé</th><th>Type</th><th>Défaut</th><th>Effet</th></tr></thead>
+  <tbody>
+    <tr><td><code>max_count</code></td><td>int</td><td>10</td><td>Nombre de sauvegardes horodatées de <code>config.json</code> conservées à chaque écriture.</td></tr>
+  </tbody>
+</table>
+
+<h4>hosts</h4>
+<p>Tableau de la whitelist MITM. Chaque entrée déclare un host qu'IRIS accepte de déchiffrer, avec son
+<code>origin</code> : <code>default</code> (host protégé fourni par IRIS, non supprimable via CLI) ou
+<code>user</code> (ajouté par l'utilisateur). Match exact, case-insensitive, pas de wildcard. Gérez la
+whitelist via <code>iris rule</code> ou l'onglet <em>Rules</em> de l'app plutôt qu'à la main.</p>
 
 <!-- 10. CA TRUST -->
 <h2 id="ca-trust"><span class="chapnum">11</span>CA &amp; trust store<a class="anchor" href="#ca-trust">¶</a></h2>
 
 <p>
 La CA locale est générée automatiquement au premier démarrage du daemon : paire ECDSA P-256, clé
-privée dans le Keychain système avec label <code>io.iris.ca.privatekey</code>, cert public exporté
-en PEM sur <code>~/Library/Application Support/iris/ca.pem</code>.
+privée dans le Keychain (service <code>io.iris.ca</code>, compte <code>privatekey</code>, protégée par
+une ACL liée au binaire <code>irisd</code> signé — cf. chapitre 5), cert public exporté en PEM sur
+<code>~/Library/Application Support/iris/ca.pem</code>.
 </p>
 
 <h3>Vérifier la CA</h3>
@@ -1444,17 +1492,20 @@ en PEM sur <code>~/Library/Application Support/iris/ca.pem</code>.
 <pre><code># Empreinte SHA-256 de la CA
 iris ca fingerprint
 
-# Chemin du PEM exporté
+# Chemin du PEM (--print pour le contenu, --path &lt;dest&gt; pour le copier)
 iris ca export
 
-# Vérifier que la CA est trusted par le système
-iris ca status</code></pre>
+# Vérifier que la CA est dans le trust store de l'utilisateur
+iris ca is-trusted</code></pre>
 
-<h3>Installer la CA dans le trust store système</h3>
+<h3>Installer la CA dans le trust store</h3>
 
-<pre><code>iris ca install
-# → invoque /usr/bin/security add-trusted-cert avec un prompt admin
-# → couvre OpenSSL, LibreSSL, Safari, gh, git, curl…</code></pre>
+<pre><code># Ajoute la CA au trust store de l'utilisateur (prompt admin une seule fois).
+# Couvre OpenSSL, LibreSSL, Safari, gh, git, curl…
+iris ca install
+
+# La retirer du trust store
+iris ca uninstall</code></pre>
 
 <div class="callout callout-info">
   <div class="icon">i</div>
@@ -1502,13 +1553,14 @@ les permissions FS.
 <table>
   <thead><tr><th>Groupe</th><th>Sous-commandes</th><th>Couverture</th></tr></thead>
   <tbody>
-    <tr><td><code>iris secret</code></td><td><code>add</code>, <code>list</code>, <code>show</code>, <code>edit</code>, <code>rotate</code>, <code>rm</code></td><td>Gestion CRUD des secrets</td></tr>
+    <tr><td><code>iris secret</code></td><td><code>add</code>, <code>list</code>, <code>show</code>, <code>edit</code>, <code>rotate</code>, <code>rm</code>, <code>quarantine</code>, <code>unquarantine</code></td><td>Gestion des secrets</td></tr>
     <tr><td><code>iris rule</code></td><td><code>add</code>, <code>list</code>, <code>rm</code></td><td>Whitelist des hosts MITM</td></tr>
-    <tr><td><code>iris ca</code></td><td><code>export</code>, <code>install</code>, <code>fingerprint</code>, <code>status</code></td><td>Gestion de la CA locale</td></tr>
-    <tr><td><code>iris config</code></td><td><code>reload</code>, <code>get</code></td><td>Inspection / rechargement de config.toml</td></tr>
+    <tr><td><code>iris ca</code></td><td><code>export</code>, <code>fingerprint</code>, <code>is-trusted</code>, <code>install</code>, <code>uninstall</code></td><td>Gestion de la CA locale</td></tr>
+    <tr><td><code>iris config</code></td><td><code>get</code>, <code>set</code>, <code>reload</code></td><td>Inspection / modification de config.json</td></tr>
+    <tr><td><code>iris shell</code></td><td><code>install</code>, <code>uninstall</code>, <code>status</code></td><td>Bloc d'environnement dans ~/.zshrc</td></tr>
     <tr><td><code>iris mcp</code></td><td><code>wrap</code>, <code>unwrap</code></td><td>Patch automatique des fichiers MCP</td></tr>
     <tr><td><code>iris status</code></td><td>—</td><td>État du daemon, stats temps réel</td></tr>
-    <tr><td><code>iris logs</code></td><td><code>--follow</code>, <code>--filter</code></td><td>Events historiques ou stream live</td></tr>
+    <tr><td><code>iris logs</code></td><td><code>--follow</code>, <code>--kind</code>, <code>--host</code>, <code>--since</code></td><td>Events historiques ou stream live</td></tr>
     <tr><td><code>iris doctor</code></td><td>—</td><td>Diagnostic complet de l'installation</td></tr>
     <tr><td><code>iris pause</code> / <code>resume</code></td><td>—</td><td>Pause temporaire des substitutions</td></tr>
   </tbody>
@@ -1564,10 +1616,10 @@ iris secret add github_token \
 <h3>Lister</h3>
 
 <pre><code>iris secret list
-# NAME                ALLOWED HOSTS                       LAST USED
-# anthropic_api_key   api.anthropic.com                   2 min ago
-# github_token        api.github.com,uploads.github.com   1 day ago
-# openai_api_key      api.openai.com                      never
+# NAME               STATUS  CREATED     LAST_USED   USES  HOSTS
+# anthropic_api_key  active  2 days ago  2 min ago   1247  api.anthropic.com
+# github_token       active  2 days ago  1 day ago   18    api.github.com,uploads.github.com
+# openai_api_key     active  5 days ago  -           0     api.openai.com
 
 iris secret list --json
 # [
@@ -1601,12 +1653,23 @@ iris secret list --json
 <h3>Rotation</h3>
 
 <pre><code>iris secret rotate anthropic_api_key
-# Prompte pour la nouvelle valeur. Préserve l'ACL Keychain existante.</code></pre>
+# Prompte pour la nouvelle valeur (ou lit stdin). Préserve l'ACL Keychain existante.</code></pre>
+
+<h3>Quarantaine</h3>
+
+<pre><code># Désactive la substitution d'un secret sans le supprimer (réversible). Le secret
+# reste en Keychain ; ses placeholders passent littéralement jusqu'à réactivation.
+iris secret quarantine anthropic_api_key
+
+# Réactiver la substitution
+iris secret unquarantine anthropic_api_key</code></pre>
 
 <h3>Suppression</h3>
 
 <pre><code>iris secret rm openai_api_key
-# Demande confirmation explicite. Évicte aussi du cache LRU.</code></pre>
+# Demande une confirmation interactive (y/N). En contexte non-interactif (script),
+# ajoutez --yes — sinon la commande attend une réponse et se bloque.
+iris secret rm openai_api_key --yes</code></pre>
 
 <div class="screenshot">
   <div class="screenshot-frame">[Capture : terminal — sortie de `iris secret list` avec 4 secrets]</div>
@@ -1645,10 +1708,9 @@ CONNECT-tunnel transparent, donc aucune substitution n'est possible — sécurit
 <h3>Lister</h3>
 
 <pre><code>iris rule list
-# HOST                ADDED
-# api.anthropic.com   2026-04-01
-# api.github.com      2026-04-01
-# api.openai.com      2026-04-15</code></pre>
+# HOST                ORIGIN   CREATED
+# api.anthropic.com   default  2026-06-10T19:34:42Z
+# api.stripe.com      user     2026-06-11T08:12:55Z</code></pre>
 
 <h3>Ajouter</h3>
 
@@ -1661,8 +1723,9 @@ CONNECT-tunnel transparent, donc aucune substitution n'est possible — sécurit
 <div class="callout callout-info">
   <div class="icon">i</div>
   <div class="body">
-    <p>Les modifications de whitelist via CLI mettent à jour <code>config.toml</code> et déclenchent
-    un reload du daemon. Vous pouvez aussi éditer le TOML à la main puis <code>iris config reload</code>.</p>
+    <p>Les modifications de whitelist via CLI mettent à jour <code>config.json</code> et sont prises en
+    compte immédiatement. Les hosts <code>default</code> ne sont pas supprimables via la CLI ; seuls les
+    hosts <code>user</code> le sont.</p>
   </div>
 </div>
 
@@ -1672,29 +1735,31 @@ CONNECT-tunnel transparent, donc aucune substitution n'est possible — sécurit
 <h3>État du daemon</h3>
 
 <pre><code>iris status
-# irisd up (pid 1234, uptime 4h 12m)
-# Proxy:   127.0.0.1:8888  → 3 active connections
-# Events:  127.0.0.1:8889  → 2 SSE subscribers
-# Admin:   ~/Library/Application Support/iris/admin.sock
-# Secrets: 5 registered
-# Today:   142 requests · 138 substituted · 3 noMatch · 1 exfilBlocked</code></pre>
+# pid=62305 uptime=19m1s version=1.0.0 req=142 sub=138 exfil=1 err=0
+
+iris status --json
+# {"pid":62305,"uptime_s":1141,"version":"1.0.0","paused":false,"stats":{…}}</code></pre>
+
+<p>Les compteurs (<code>req</code>, <code>sub</code>, <code>exfil</code>, <code>err</code>) sont cumulés
+depuis le démarrage du daemon. <code>paused=true</code> indique une pause active
+(<code>iris pause</code>).</p>
 
 <h3>Logs historiques</h3>
 
-<pre><code># Derniers 50 events
+<pre><code># Derniers events
 iris logs
 
-# Filtre par kind
-iris logs --filter "kind=exfilBlocked"
+# Filtre par kind (substituted, passThrough, noMatch, exfilBlocked, error, systemAlert)
+iris logs --kind exfilBlocked
 
-# Filtre par host
-iris logs --filter "host=api.anthropic.com"
+# Plusieurs kinds + host
+iris logs --kind substituted,exfilBlocked --host api.anthropic.com
 
-# Plage de temps
-iris logs --since "1h" --until "now"
+# Plage de temps (ISO 8601 ou relatif : 5m, 1h, 1d) et nombre max
+iris logs --since 1h --limit 100
 
 # JSON pour piper
-iris logs --json --filter "kind=substituted" | jq '.[].duration_ms'</code></pre>
+iris logs --json --kind substituted | jq '.[].dur_ms'</code></pre>
 
 <h3>Stream temps réel</h3>
 
@@ -1843,24 +1908,23 @@ iris resume
 
 <p>Vérifications effectuées :</p>
 <ol>
-  <li>Socket admin présente et joignable ; PID du daemon vivant.</li>
-  <li>CA PEM présent au chemin attendu.</li>
-  <li>CA trustée par le système (<code>security verify-cert</code>).</li>
-  <li>Variables d'environnement attendues présentes dans le shell courant.</li>
-  <li>Endpoint interne <code>/__iris_ping</code> joignable sur le port proxy.</li>
-  <li>Absence de <code>apiKeyHelper</code> dans <code>~/.claude/settings.json</code> (incompatible — voir A.11 SPECS).</li>
+  <li><code>admin-socket-present</code> — socket admin présente au chemin attendu.</li>
+  <li><code>daemon-alive</code> — daemon joignable (PID, uptime).</li>
+  <li><code>ca-cert-present</code> — PEM de la CA présent.</li>
+  <li><code>ca-trusted-system</code> — CA dans le trust store de l'utilisateur.</li>
+  <li><code>shell-env-vars</code> — <code>HTTPS_PROXY</code> et <code>NODE_EXTRA_CA_CERTS</code> présents dans le shell courant.</li>
+  <li><code>proxy-ping</code> — ping interne sur le port proxy.</li>
+  <li><code>claude-apikeyhelper-absent</code> — pas d'<code>apiKeyHelper</code> dans <code>~/.claude/settings.json</code> (incompatible).</li>
 </ol>
 
 <pre><code># Sortie nominale
-✓ Daemon up (pid 1234, uptime 4h12m)
-✓ CA cert present at ~/Library/Application Support/iris/ca.pem
-✓ CA cert trusted by system trust store
-✓ Env: HTTPS_PROXY=http://127.0.0.1:8888
-✓ Env: NODE_EXTRA_CA_CERTS=~/Library/.../ca.pem
-✓ Internal ping 127.0.0.1:8888/__iris_ping → 200 ok
-✓ No apiKeyHelper detected in ~/.claude/settings.json
-
-Healthy.</code></pre>
+[ok]  admin-socket-present  — ~/Library/Application Support/iris/admin.sock
+[ok]  daemon-alive  — pid=62305 uptime=19m
+[ok]  ca-cert-present  — ~/Library/Application Support/iris/ca.pem
+[ok]  ca-trusted-system  — in user trust store
+[ok]  shell-env-vars  — HTTPS_PROXY, NODE_EXTRA_CA_CERTS
+[ok]  proxy-ping  — 200 ok
+[ok]  claude-apikeyhelper-absent  — not set</code></pre>
 
 <div class="screenshot">
   <div class="screenshot-frame">[Capture : terminal — sortie iris doctor tout vert]</div>
@@ -1871,73 +1935,82 @@ Healthy.</code></pre>
 </div>
 
 <!-- 17. MENU BAR APP -->
-<h2 id="menubar"><span class="chapnum">18</span>App menu bar <span class="badge badge-soon">à venir</span><a class="anchor" href="#menubar">¶</a></h2>
+<h2 id="menubar"><span class="chapnum">18</span>L'application menu-bar<a class="anchor" href="#menubar">¶</a></h2>
 
-<div class="coming-soon">
-  <h3>Phase 6 — En cours de développement</h3>
-  <p>L'application menu bar <code>Iris.app</code> n'est pas encore livrée. Elle exposera
-  graphiquement les fonctionnalités déjà disponibles en CLI : monitoring temps réel, CRUD des secrets,
-  gestion de la whitelist, alertes d'exfiltration, settings.</p>
-  <span class="phase-tag">Phase 6 — menu bar app</span>
-</div>
+<p>
+<code>Iris.app</code> est une application de <strong>barre de menus</strong> (pas d'icône dans le Dock).
+Elle pilote le même daemon que la CLI via la socket admin — tout ce qui suit a un équivalent en ligne
+de commande (Partie III). Un clic sur l'icône ouvre un <strong>panneau flottant, déplaçable et
+redimensionnable</strong> : vous pouvez le détacher et le laisser ouvert pendant que vous travaillez.
+</p>
 
-<p>Spec de référence : <code>SPECS.md §15</code>. Ce chapitre sera complété au moment de la livraison.
-En attendant, voici l'esquisse de ce qui est prévu — utile pour anticiper l'expérience cible et donner
-du contexte aux écrans CLI actuels.</p>
+<h3>En-tête du panneau</h3>
+<p>
+En permanence en haut du panneau : une <strong>pastille d'état</strong> du daemon (verte = actif,
+orange = en pause, rouge = arrêté, grise = connexion en cours), l'uptime, et un bouton
+<em>Pause</em> / <em>Resume</em>. Des bandeaux apparaissent au besoin : daemon injoignable, ou
+notifications système désactivées.
+</p>
 
-<h3>Icône menu bar — états prévus</h3>
+<h3>Les six onglets</h3>
 
 <table>
-  <thead><tr><th>État</th><th>Icône</th><th>Signification</th></tr></thead>
+  <thead><tr><th>Onglet</th><th>Rôle</th><th>Équivalent CLI</th></tr></thead>
   <tbody>
-    <tr><td>Idle</td><td>Clé grise</td><td>Daemon up, pas d'activité récente</td></tr>
-    <tr><td>Active</td><td>Clé animée subtilement</td><td>Substitution dans les 5 dernières secondes</td></tr>
-    <tr><td>Paused</td><td>Clé en outline</td><td>Daemon en pause (substitutions désactivées)</td></tr>
-    <tr><td>Alert</td><td>Badge rouge avec compteur</td><td>Un ou plusieurs <code>exfilBlocked</code> non acquittés</td></tr>
-    <tr><td>Down</td><td>Clé barrée</td><td>Daemon injoignable</td></tr>
+    <tr><td><strong>Overview</strong></td><td>Compteurs depuis le démarrage du daemon (Requests, Substituted, Blocked, Errors) et les 5 derniers events.</td><td><code>iris status</code></td></tr>
+    <tr><td><strong>Logs</strong></td><td>Flux d'events en direct avec recherche, filtre par host, filtre par type, et bouton pour figer le flux.</td><td><code>iris logs --follow</code></td></tr>
+    <tr><td><strong>Security</strong></td><td>Alertes (exfiltration + alertes système) triées par sévérité, compteur de non-lues, « Mark all read », action « quarantaine » sur le secret concerné.</td><td><code>iris logs --kind exfilBlocked</code></td></tr>
+    <tr><td><strong>Secrets</strong></td><td>Liste des secrets avec hosts et métadonnées ; ajout, édition des hosts, rotation, quarantaine, suppression.</td><td><code>iris secret …</code></td></tr>
+    <tr><td><strong>Rules</strong></td><td>Whitelist MITM : ajout d'un host, suppression des hosts <code>user</code> (les <code>default</code> sont protégés).</td><td><code>iris rule …</code></td></tr>
+    <tr><td><strong>Settings</strong></td><td>Configuration, CA, terminal, démarrage automatique, désinstallation (ci-dessous).</td><td><code>iris config …</code></td></tr>
   </tbody>
 </table>
 
-<h3>Onglets prévus dans le popover</h3>
+<h3>Onglet Secrets</h3>
+<p>
+Chaque secret affiche son nom, ses <code>allowed_hosts</code> (sous forme de puces) et la ligne
+« créé · dernière utilisation · N usages ». Un secret en quarantaine apparaît en rouge italique avec un
+badge <code>QUARANTINED</code>. Les actions par secret : quarantaine, édition des hosts, rotation,
+suppression (avec confirmation). Le bouton <em>Add</em> ouvre un formulaire en place — nom, valeur
+(champ masqué), hosts autorisés avec suggestions cliquables tirées des règles MITM existantes. La
+valeur n'est jamais affichée, même en édition (invariant I2).
+</p>
 
+<h3>Onglet Settings</h3>
+<p>L'onglet <em>Settings</em> regroupe, en sections :</p>
 <ul>
-  <li><strong>Overview</strong> — compteurs 24h, sparkline, derniers 5 events.</li>
-  <li><strong>Logs</strong> — stream SSE live, filtres, recherche, export CSV/JSON.</li>
-  <li><strong>Security</strong> — liste des <code>exfilBlocked</code> par sévérité, action "quarantaine secret".</li>
-  <li><strong>Secrets</strong> — table CRUD, sheet d'ajout avec validation live.</li>
-  <li><strong>Rules</strong> — whitelist MITM avec confirmation à la suppression.</li>
-  <li><strong>Settings</strong> — log level, retention, on_exfil_attempt, install CA, uninstall.</li>
+  <li><strong>Security</strong> — politique <code>on_exfil_attempt</code> et plafond de substitutions par minute.</li>
+  <li><strong>Backups</strong> — nombre de sauvegardes de <code>config.json</code> conservées.</li>
+  <li><strong>Certificate Authority</strong> — statut <em>Trusted / Not trusted</em>, boutons <em>Install…</em> / <em>Uninstall…</em>.</li>
+  <li><strong>Terminal</strong> — statut <em>Configured / Not configured</em>, boutons <em>Configure…</em> / <em>Remove…</em> (le bloc <code>~/.zshrc</code>).</li>
+  <li><strong>Launch at login</strong> — deux interrupteurs : le service d'arrière-plan (<code>irisd</code>) et l'app menu-bar (cf. chapitre 19).</li>
+  <li><strong>Uninstall</strong> — bouton <em>Quit &amp; Uninstall…</em> (cf. chapitre 20).</li>
+  <li><strong>Connection</strong> (lecture seule) — proxy, events, socket admin, log level, rétention, taille du ring.</li>
+  <li>En pied : <em>Reveal config.json</em> (ouvre le Finder sur le fichier) et <em>Reload</em>.</li>
 </ul>
 
+<div class="callout callout-info">
+  <div class="icon">i</div>
+  <div class="body">
+    <p>L'app et la CLI agissent sur le <strong>même daemon</strong> : un secret ajouté en CLI apparaît
+    dans l'onglet <em>Secrets</em> au rafraîchissement, et inversement. Une tentative d'exfiltration
+    déclenche une notification macOS et alimente l'onglet <em>Security</em>.</p>
+  </div>
+</div>
+
 <div class="screenshot">
-  <div class="screenshot-frame">[Capture : menu bar macOS avec icône Iris active, popover ouvert sur l'onglet Overview]</div>
+  <div class="screenshot-frame">[Capture : panneau Iris ouvert sur l'onglet Overview — compteurs et events récents]</div>
   <div class="screenshot-caption">
-    <span>Popover menu bar — onglet Overview (mockup futur)</span>
+    <span>Panneau menu-bar — onglet Overview</span>
     <span class="filename">screenshots/13-app-popover.png</span>
   </div>
 </div>
 
 <div class="screenshot">
-  <div class="screenshot-frame">[Capture : popover — onglet Secrets avec table et boutons Add/Edit/Rotate/Delete]</div>
+  <div class="screenshot-frame">[Capture : onglet Secrets — liste avec hosts, badges et actions par secret]</div>
   <div class="screenshot-caption">
-    <span>Onglet Secrets (mockup futur)</span>
+    <span>Onglet Secrets</span>
     <span class="filename">screenshots/10-app-secrets-tab.png</span>
-  </div>
-</div>
-
-<div class="screenshot">
-  <div class="screenshot-frame">[Capture : sheet "Add Secret" avec champs name, value (SecureField), allowed_hosts (token field)]</div>
-  <div class="screenshot-caption">
-    <span>Sheet d'ajout de secret (mockup futur)</span>
-    <span class="filename">screenshots/11-app-add-secret-sheet.png</span>
-  </div>
-</div>
-
-<div class="screenshot">
-  <div class="screenshot-frame">[Capture : notification macOS "Exfiltration attempt blocked — anthropic_api_key → api.github.com"]</div>
-  <div class="screenshot-caption">
-    <span>Notification d'exfiltration (mockup futur)</span>
-    <span class="filename">screenshots/15-app-exfil-notification.png</span>
   </div>
 </div>
 
@@ -1945,65 +2018,65 @@ du contexte aux écrans CLI actuels.</p>
 <!-- PARTIE IV — EXPLOITATION -->
 <!-- ============================================================ -->
 
-<h2 id="launchagent"><span class="chapnum">19</span>LaunchAgent <span class="badge badge-soon">à venir</span><a class="anchor" href="#launchagent">¶</a></h2>
+<h2 id="launchagent"><span class="chapnum">19</span>Démarrage automatique<a class="anchor" href="#launchagent">¶</a></h2>
 
-<div class="coming-soon">
-  <h3>Phase 7 — Non implémenté</h3>
-  <p>L'enregistrement automatique du daemon comme LaunchAgent via <code>SMAppService.agent(…).register()</code>
-  fait partie de la cible <code>Iris.app</code> (phase 6) et de l'installeur <code>.pkg</code> (phase 9).
-  En attendant, lancez <code>irisd</code> manuellement avec <code>--foreground</code> ou via votre
-  propre plist.</p>
-  <span class="phase-tag">Phase 7 — LaunchAgent / SMAppService</span>
+<p>
+IRIS s'enregistre auprès de macOS via <code>SMAppService</code> pour démarrer à l'ouverture de session.
+Deux éléments distincts&nbsp;:
+</p>
+<ul>
+  <li>le <strong>service d'arrière-plan</strong> <code>irisd</code> — un LaunchAgent enregistré depuis le
+  bundle, relancé par <code>launchd</code> au login et après un redémarrage ;</li>
+  <li>l'<strong>application menu-bar</strong> — un élément d'ouverture de session
+  (<code>SMAppService.mainApp</code>).</li>
+</ul>
+
+<p>
+Les deux sont activés au premier lancement de l'app, puis pilotés depuis l'onglet <em>Settings</em> →
+<em>Launch at login</em> (deux interrupteurs indépendants) ou via <em>Réglages Système → Général →
+Ouverture</em>. Si macOS exige une approbation, l'app l'indique et propose d'ouvrir le panneau concerné.
+</p>
+
+<div class="callout callout-info">
+  <div class="icon">i</div>
+  <div class="body">
+    <p>Le daemon tourne avec <code>RunAtLoad</code> + <code>KeepAlive</code> : s'il s'arrête,
+    <code>launchd</code> le relance. Le plist est embarqué dans le bundle
+    (<code>Iris.app/Contents/Library/LaunchAgents/io.iris.daemon.plist</code>) — rien à installer à la
+    main.</p>
+  </div>
 </div>
 
-<h3>Lancement manuel pour le développement</h3>
+<h3>Lancement manuel (développement)</h3>
+<p>Pour un build depuis les sources, sans bundle ni <code>SMAppService</code> :</p>
 
-<pre><code># Foreground (utile pour debug, voir les logs en direct)
-.build/release/irisd --foreground
+<pre><code># Foreground — voir les logs en direct
+.build/release/irisd --foreground</code></pre>
 
-# Background via nohup
-nohup .build/release/irisd > ~/Library/Logs/iris/irisd.log 2>&1 &</code></pre>
+<h2 id="packaging"><span class="chapnum">20</span>Distribution &amp; désinstallation<a class="anchor" href="#packaging">¶</a></h2>
 
-<h3>Plist prévu (phase 7)</h3>
+<h3>Distribution</h3>
+<p>
+IRIS est distribué sous forme d'un <code>Iris.pkg</code> unique, signé <strong>Developer ID</strong> et
+<strong>notarisé par Apple</strong>, produit par <code>packaging/build-pkg.sh</code> puis
+<code>packaging/notarize.sh</code> (pipeline <em>archive → codesign → productbuild → notarytool →
+stapler</em>). Le ticket de notarisation est agrafé au pkg : l'installation fonctionne hors-ligne et
+sans avertissement Gatekeeper. Les binaires (<code>irisd</code>, <code>iris</code>) sont signés en
+hardened runtime ; l'ACL Keychain est liée à la signature d'<code>irisd</code> (chapitre 5).
+</p>
 
-<pre><code>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
-&lt;plist version="1.0"&gt;
-&lt;dict&gt;
-    &lt;key&gt;Label&lt;/key&gt;
-    &lt;string&gt;io.iris.daemon&lt;/string&gt;
-    &lt;key&gt;BundleProgram&lt;/key&gt;
-    &lt;string&gt;Contents/MacOS/irisd&lt;/string&gt;
-    &lt;key&gt;RunAtLoad&lt;/key&gt;
-    &lt;true/&gt;
-    &lt;key&gt;KeepAlive&lt;/key&gt;
-    &lt;true/&gt;
-    &lt;key&gt;ProcessType&lt;/key&gt;
-    &lt;string&gt;Interactive&lt;/string&gt;
-    &lt;key&gt;ThrottleInterval&lt;/key&gt;
-    &lt;integer&gt;30&lt;/integer&gt;
-&lt;/dict&gt;
-&lt;/plist&gt;</code></pre>
-
-<h2 id="packaging"><span class="chapnum">20</span>Distribution <span class="badge badge-soon">à venir</span><a class="anchor" href="#packaging">¶</a></h2>
-
-<div class="coming-soon">
-  <h3>Phases 9–10 — En préparation</h3>
-  <p>Le pipeline complet <em>archive → codesign Developer ID → productbuild → notarytool → stapler</em>
-  est documenté dans <code>docs/phase-9-notarization-prep.md</code>. La cible : un <code>Iris.pkg</code>
-  unique, signé et notarisé, qui s'installe en double-clic et configure tout (LaunchAgent, CA,
-  trust store, app dans /Applications).</p>
-  <span class="phase-tag">Phase 9 — packaging / Phase 10 — hardening</span>
-</div>
-
-<h3>Désinstallation (cible)</h3>
-
-<p>Via l'app, menu Settings → Quit &amp; Uninstall :</p>
+<h3>Désinstallation</h3>
+<p>Deux chemins, tous deux sans suppression silencieuse des secrets :</p>
 <ol>
-  <li>Confirmation explicite.</li>
-  <li><code>SMAppService.agent(…).unregister()</code>.</li>
-  <li><code>security delete-certificate</code> de la CA (prompt admin).</li>
-  <li>Case à cocher "Also delete my secrets from Keychain". Si cochée, suppression des items <code>io.iris.secret.*</code>.</li>
-  <li>Ouverture de /Applications pour drag-to-Trash de l'app.</li>
+  <li><strong>Depuis l'app</strong> — onglet <em>Settings</em> → <em>Quit &amp; Uninstall…</em>. Un dialogue
+  propose « garder mes secrets » ou « supprimer mes secrets ». Le daemon (seul à posséder l'ACL Keychain)
+  retire la clé CA et, si demandé, les secrets ; l'app retire la CA du trust store, restaure les fichiers
+  MCP wrappés, enlève le bloc <code>~/.zshrc</code>, désenregistre le démarrage automatique, puis affiche
+  un récapitulatif.</li>
+  <li><strong>Script autonome</strong> — <code>uninstall.sh</code>, déposé dans
+  <code>~/Library/Application Support/iris/</code> par l'installeur (il survit au glisser-corbeille de
+  l'app). Utile si l'app a déjà été jetée. Demande le mot de passe ; les secrets ne sont supprimés
+  qu'avec l'option explicite.</li>
 </ol>
 
 <div class="callout callout-warn">
@@ -2019,14 +2092,17 @@ nohup .build/release/irisd > ~/Library/Logs/iris/irisd.log 2>&1 &</code></pre>
 
 <h3><code>iris doctor</code> rapporte "Daemon down"</h3>
 
-<pre><code># Vérifier que le binaire est lancé
-ps aux | grep irisd
+<pre><code># Le daemon est-il lancé ?
+pgrep -lf irisd
 
-# Si absent, le relancer (mode dev)
-.build/release/irisd --foreground
+# Avec le .pkg : le relancer via launchd (ou relancez simplement Iris.app)
+launchctl kickstart -k gui/$(id -u)/io.iris.daemon
 
-# Si présent mais en erreur, vérifier les logs
-tail -f ~/Library/Logs/iris/irisd.log</code></pre>
+# Logs du daemon (redirigés par le LaunchAgent)
+tail -f /tmp/irisd.err.log
+
+# Build depuis les sources (mode dev) :
+.build/release/irisd --foreground</code></pre>
 
 <h3><code>curl: (60) SSL certificate problem</code></h3>
 
@@ -2055,9 +2131,10 @@ echo $NODE_EXTRA_CA_CERTS        # doit pointer sur ca.pem</code></pre>
 
 <h3>Prompt Keychain à chaque accès</h3>
 
-<p>L'ACL signed-binary n'est pas en place — soit le binaire n'est pas signé (build local), soit la
-phase 8 n'est pas encore livrée. Workaround : cliquez "Always Allow" la première fois pour chaque
-secret. Solution définitive : utiliser le <code>.pkg</code> signé une fois disponible.</p>
+<p>L'ACL signed-binary n'est pas en place — typiquement parce que le binaire n'est pas signé (build
+local) ou a été re-signé après l'enregistrement du secret. Workaround : cliquez "Always Allow" la
+première fois pour chaque secret. Solution propre : installer le <code>.pkg</code> signé et notarisé,
+dont l'ACL cible l'<code>irisd</code> signé.</p>
 
 <h3>Un serveur MCP n'utilise pas le proxy</h3>
 
@@ -2137,7 +2214,7 @@ en revanche fonctionne dès aujourd'hui — REST + token plat dans <code>x-goog-
   <thead><tr><th>Composant</th><th>Phase</th><th>Statut</th></tr></thead>
   <tbody>
     <tr><td>Setup repo, Package.swift, CI minimale</td><td class="phase">Phase 0</td><td><span class="badge badge-ok">livré</span></td></tr>
-    <tr><td>IrisKit : modèles, config TOML, Keychain abstrait, CA</td><td class="phase">Phase 1</td><td><span class="badge badge-ok">livré</span></td></tr>
+    <tr><td>IrisKit : modèles, config JSON, Keychain abstrait, CA</td><td class="phase">Phase 1</td><td><span class="badge badge-ok">livré</span></td></tr>
     <tr><td>irisd : proxy MITM monothread + substitution naïve</td><td class="phase">Phase 2</td><td><span class="badge badge-ok">livré</span></td></tr>
     <tr><td>CONNECT-tunnel passthrough non-whitelist</td><td class="phase">Phase 2.1</td><td><span class="badge badge-ok">livré</span></td></tr>
     <tr><td>IPC admin Unix socket + SSE events</td><td class="phase">Phase 3</td><td><span class="badge badge-ok">livré</span></td></tr>
@@ -2145,11 +2222,13 @@ en revanche fonctionne dès aujourd'hui — REST + token plat dans <code>x-goog-
     <tr><td>CLI iris (secret, status, ca, config, rule, pause/resume)</td><td class="phase">Phase 5.1</td><td><span class="badge badge-ok">livré</span></td></tr>
     <tr><td>CLI iris logs + doctor + /__iris_ping</td><td class="phase">Phase 5.2</td><td><span class="badge badge-ok">livré</span></td></tr>
     <tr><td>CLI iris mcp wrap/unwrap (JSON + JSONC + watch)</td><td class="phase">Phase 5.3</td><td><span class="badge badge-ok">livré</span></td></tr>
-    <tr><td>Menu bar app Iris.app</td><td class="phase">Phase 6</td><td><span class="badge badge-soon">à venir</span></td></tr>
-    <tr><td>LaunchAgent + SMAppService integration</td><td class="phase">Phase 7</td><td><span class="badge badge-soon">à venir</span></td></tr>
-    <tr><td>Trust store install + ACL Keychain signed-binary</td><td class="phase">Phase 8</td><td><span class="badge badge-soon">à venir</span></td></tr>
-    <tr><td>.pkg signé Developer ID + notarisé</td><td class="phase">Phase 9</td><td><span class="badge badge-soon">à venir</span></td></tr>
-    <tr><td>Hardening, fuzzing, tests d'intégration</td><td class="phase">Phase 10</td><td><span class="badge badge-soon">à venir</span></td></tr>
+    <tr><td>Menu bar app Iris.app (6 onglets, dont Settings)</td><td class="phase">Phase 6</td><td><span class="badge badge-ok">livré</span></td></tr>
+    <tr><td>LaunchAgent + SMAppService integration</td><td class="phase">Phase 7</td><td><span class="badge badge-ok">livré</span></td></tr>
+    <tr><td>Trust store install + ACL Keychain signed-binary</td><td class="phase">Phase 8</td><td><span class="badge badge-ok">livré</span></td></tr>
+    <tr><td>.pkg signé Developer ID + notarisé</td><td class="phase">Phase 9</td><td><span class="badge badge-ok">livré</span></td></tr>
+    <tr><td>Hardening, fuzzing, tests d'intégration</td><td class="phase">Phase 10</td><td><span class="badge badge-ok">livré</span></td></tr>
+    <tr><td>Streaming de la réponse au fil de l'eau</td><td class="phase">Phase 2.x</td><td><span class="badge badge-ok">livré</span></td></tr>
+    <tr><td>Installation complète (CLI distribuée, terminal) + désinstallation</td><td class="phase">v1.0</td><td><span class="badge badge-ok">livré</span></td></tr>
   </tbody>
 </table>
 

@@ -36,14 +36,15 @@
 | IPC admin Unix socket + flux SSE d'events | Phase 3 ✅ | Disponible |
 | Scoping `allowed_hosts` + exfil rules (R1-R5) | Phase 4 ✅ | Disponible |
 | CLI `iris` (secret / status / logs / doctor / mcp) | Phase 5 ✅ | Disponible |
-| Menu bar app `Iris.app` | Phase 6 ✅ | Disponible (Overview / Logs / Security + CRUD secrets & rules ; onglet Settings = Phase 6.3b, à venir) |
+| Menu bar app `Iris.app` | Phase 6 ✅ | Disponible (6 onglets : Overview / Logs / Security / Secrets / Rules / Settings) |
 | Modèle de config unifié (`config.json` app-first, `iris config set`) | Phase 6.3a ✅ | Disponible |
-| LaunchAgent + `SMAppService` (auto-start) | Phase 7 ⏳ | À venir |
+| LaunchAgent + `SMAppService` (auto-start) | Phase 7 ✅ | Disponible |
+| Installation complète (CLI distribuée + terminal) & désinstallation | v1.0 ✅ | Disponible |
 | ACL Keychain signed-binary | Phase 8 ✅ | Disponible |
 | `.pkg` signé + notarisé | Phase 9 ✅ | Disponible |
 | Hardening + fuzz tests | Phase 10 ✅ | Disponible |
 
-**Aujourd'hui** : le broker est utilisable de bout en bout — secrets en Keychain via la CLI `iris` ou l'app menu bar, proxy MITM avec substitution scopée par `allowed_hosts`, détection d'exfiltration, streaming des réponses, ACL Keychain liée au binaire signé, config unifiée `config.json` (seedée au 1er boot, éditable via `iris config set`), et `.pkg` signé + notarisé. Reste à venir : le démarrage automatique (LaunchAgent/`SMAppService`, Phase 7) et l'onglet Settings / « Install CA » de l'app (Phase 6.3b). Le mode `--in-memory-secrets` (secrets via `IRIS_SECRET_<NAME>`) reste disponible pour le debug.
+**Aujourd'hui** : le broker est utilisable de bout en bout — secrets en Keychain via la CLI `iris` ou l'app menu bar, proxy MITM avec substitution scopée par `allowed_hosts`, détection d'exfiltration, streaming des réponses, ACL Keychain liée au binaire signé, config unifiée `config.json` (seedée au 1er boot, éditable via `iris config set`), et `.pkg` signé + notarisé. Le démarrage automatique (LaunchAgent/`SMAppService`) et l'onglet Settings de l'app sont eux aussi livrés — l'installeur configure le tout au premier lancement. Le mode `--in-memory-secrets` (secrets via `IRIS_SECRET_<NAME>`) reste disponible pour le debug.
 
 ---
 
@@ -96,7 +97,7 @@ La vraie clé vit dans le trousseau, ACL-protégée pour le seul binaire `irisd`
    - L'app `Iris.app` est dans `/Applications/`
    - La CLI `iris` est dans `/usr/local/bin/`
    - `irisd` est embarqué dans `Iris.app` (`Contents/MacOS/irisd`), géré par **SMAppService**
-4. Le démarrage automatique est géré via **SMAppService** — configurable dans Réglages système → Général → Ouverture de session, ou via les toggles de l'onglet Settings de l'app (Phase 7).
+4. Le démarrage automatique est géré via **SMAppService** — configurable dans Réglages système → Général → Ouverture de session, ou via les toggles de l'onglet Settings de l'app.
 
 ![Installation .pkg étape 1](screenshots/02-pkg-installer-welcome.png "Écran d'accueil de l'installeur")
 
@@ -428,15 +429,17 @@ L'icône d'IRIS dans la barre de menus indique l'état d'un coup d'œil :
 | 🟡 | Daemon up, alert(s) récent(s) à inspecter |
 | 🔴 | Daemon down ou erreur |
 
-Cliquez sur l'icône pour ouvrir le popover SwiftUI :
+Cliquez sur l'icône pour ouvrir le panneau (déplaçable et redimensionnable) :
 
-![Menu bar popover](screenshots/13-app-popover.png "Popover de la menu bar app")
+![Panneau menu-bar](screenshots/13-app-popover.png "Panneau de l'app menu-bar")
 
-Onglets disponibles :
-- **Activity** : flux SSE des events temps réel (substitutions, no-match, exfil_blocked)
-- **Secrets** : CRUD secrets (cf §5.7)
-- **Rules** : whitelist MITM (Phase 6+)
-- **Settings** : log level, pause/resume, export config
+Les six onglets :
+- **Overview** : compteurs depuis le démarrage (requests / substituted / blocked / errors) et derniers events
+- **Logs** : flux d'events en direct, avec recherche, filtre par host/type et mise en pause
+- **Security** : alertes d'exfiltration et alertes système, triées par sévérité, avec action quarantaine
+- **Secrets** : CRUD secrets, rotation, quarantaine (cf §5.7)
+- **Rules** : whitelist MITM
+- **Settings** : config, CA, terminal, démarrage automatique, désinstallation
 
 ### 8.4 Pause temporaire
 
@@ -448,7 +451,7 @@ iris pause
 iris resume
 ```
 
-L'app expose la même bascule via un toggle dans le popover.
+L'app expose la même bascule via le bouton Pause/Resume en haut du panneau.
 
 ---
 
@@ -493,7 +496,7 @@ Si absent, relancez `Iris.app` — le démarrage automatique est géré par **SM
 
 Si présent mais en erreur, consultez les logs :
 ```bash
-tail -f ~/Library/Logs/iris/irisd.log
+tail -f /tmp/irisd.err.log
 ```
 
 ### `curl: (60) SSL certificate problem`
