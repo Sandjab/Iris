@@ -64,7 +64,7 @@ func withAdminClient<T: Sendable>(
     do {
         return try await withAdminClientOrThrow(options, body: body)
     } catch let unreachable as DaemonUnreachable {
-        FileHandle.standardError.write(Data("\(unreachable.description)\n".utf8))
+        try? FileHandle.standardError.write(contentsOf: Data("\(unreachable.description)\n".utf8))
         throw ExitCode(IrisExitCode.daemonUnreachable)
     }
 }
