@@ -1390,7 +1390,7 @@ source ~/.config/fish/config.fish</code></pre>
     Ces variables <em>remplacent</em> tout le bundle CA pour OpenSSL/LibreSSL au lieu d'<em>ajouter</em>
     le cert IRIS. Les pointer sur le seul <code>ca.pem</code> casserait la validation TLS pour tous
     les domaines non-whitelistés. Préférez <code>iris ca install</code> qui ajoute le CA au trust
-    store système — toutes les libs OpenSSL le respectent automatiquement.</p>
+    store de l'utilisateur — les outils qui consultent le trust store macOS le respectent automatiquement.</p>
   </div>
 </div>
 
@@ -1510,10 +1510,10 @@ iris ca uninstall</code></pre>
 <div class="callout callout-info">
   <div class="icon">i</div>
   <div class="body">
-    <p>L'installation au trust store système nécessite une élévation admin <strong>une seule fois</strong>.
+    <p>L'installation au trust store de l'utilisateur nécessite une authentification <strong>une seule fois</strong>.
     Après ça, tous les outils utilisant le trust store macOS acceptent silencieusement les certs leaf
     mintés par IRIS pour les hosts whitelistés.</p>
-    <p><strong>Node.js</strong> ne lit pas le trust store système — d'où la nécessité de
+    <p><strong>Node.js</strong> ne lit pas le trust store macOS — d'où la nécessité de
     <code>NODE_EXTRA_CA_CERTS</code> dans le shell.</p>
   </div>
 </div>
@@ -2107,7 +2107,7 @@ tail -f /tmp/irisd.err.log
 <h3><code>curl: (60) SSL certificate problem</code></h3>
 
 <p>Le CA d'IRIS n'est pas dans le trust store ou pas dans <code>NODE_EXTRA_CA_CERTS</code> :</p>
-<pre><code>iris ca install                  # trust store système
+<pre><code>iris ca install                  # trust store de l'utilisateur
 echo $NODE_EXTRA_CA_CERTS        # doit pointer sur ca.pem</code></pre>
 
 <h3><code>401 invalid api key</code> malgré le placeholder</h3>

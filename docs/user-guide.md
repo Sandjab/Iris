@@ -116,7 +116,7 @@ Cf. README.md du repo. Cette méthode ne signe pas le binaire et **désactive do
 Au premier lancement d'`Iris.app`, un assistant vous accompagne :
 
 1. Création de la CA locale (clé privée → trousseau, cert public → `~/Library/Application Support/iris/ca.pem`)
-2. Ajout du CA au trust store système (prompt admin)
+2. Ajout du CA au trust store de l'utilisateur (authentification requise)
 3. Configuration du terminal **avec votre consentement** : lancez `iris shell install` (affiche les lignes, demande confirmation avant d'écrire) ou cliquez sur « Configurer… » dans l'onglet Settings → Terminal de l'app. Variables exportées : `HTTPS_PROXY` (`http://127.0.0.1:8888`), `NODE_EXTRA_CA_CERTS` (`$HOME/Library/Application Support/iris/ca.pem`).
 
 ![Assistant setup — étape CA](screenshots/04-app-setup-ca.png "Création de la CA")
@@ -134,7 +134,7 @@ Si vous préférez la CLI :
 iris ca export
 # → écrit ~/Library/Application Support/iris/ca.pem
 
-# 2. Ajouter le CA au trust store système (prompt admin)
+# 2. Ajouter le CA au trust store de l'utilisateur (authentification requise)
 iris ca install
 
 # 3. Patcher votre shell profile manuellement
@@ -149,7 +149,7 @@ EOF
 source ~/.zshrc
 ```
 
-> ℹ️ **Pourquoi pas de `SSL_CERT_FILE`** : contrairement à `NODE_EXTRA_CA_CERTS` qui *ajoute* le cert IRIS au bundle Node.js, `SSL_CERT_FILE` **remplace** tout le bundle CA pour les outils OpenSSL/LibreSSL (Python, Ruby, curl…). Le pointer sur le seul `ca.pem` d'IRIS casserait la validation TLS pour tous les domaines non whitelistés. Pour couvrir ces outils, faites `iris ca install` à l'étape 2 ci-dessus : le CA est ajouté au trust store système et toutes les libs OpenSSL le respectent automatiquement.
+> ℹ️ **Pourquoi pas de `SSL_CERT_FILE`** : contrairement à `NODE_EXTRA_CA_CERTS` qui *ajoute* le cert IRIS au bundle Node.js, `SSL_CERT_FILE` **remplace** tout le bundle CA pour les outils OpenSSL/LibreSSL (Python, Ruby, curl…). Le pointer sur le seul `ca.pem` d'IRIS casserait la validation TLS pour tous les domaines non whitelistés. Pour couvrir ces outils, faites `iris ca install` à l'étape 2 ci-dessus : le CA est ajouté au trust store de l'utilisateur, respecté par les outils qui consultent le trust store macOS (curl système, Safari, gh, git…).
 
 > ⚠️ `HTTPS_PROXY` ne s'applique qu'aux processus lancés depuis un shell (terminal, scripts). Les apps GUI lancées depuis le Finder/Dock/Spotlight ne sont **pas** interceptées — c'est intentionnel.
 
