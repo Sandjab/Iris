@@ -4,10 +4,9 @@
 
 # Guide utilisateur IRIS
 
-> Ce guide décrit l'usage **cible** d'IRIS une fois toutes les phases livrées.
-> Au moment où vous le lisez, certaines commandes peuvent ne pas encore
-> être implémentées (voir [§ État d'implémentation](#état-dimplémentation-juin-2026)
-> en tête de document).
+> IRIS 1.0 est **entièrement livré** : tout ce que décrit ce guide est disponible.
+> Le tableau [§ État d'implémentation](#état-dimplémentation-juin-2026) en tête de
+> document récapitule chaque composant et sa phase.
 
 ---
 
