@@ -241,6 +241,13 @@ tbody tr:hover { background: var(--bg-soft); }
 }
 .screenshot-caption .filename { font-family: var(--mono); font-size: 11px; opacity: 0.7; }
 
+/* Menu-bar state icons — monochrome glyphs; swap with the manual's light/dark theme */
+td.mb-icon-cell { text-align: center; white-space: nowrap; }
+img.mb-icon { width: 24px; height: 24px; vertical-align: middle; }
+img.mb-icon.dark { display: none; }
+[data-theme="dark"] img.mb-icon.light { display: none; }
+[data-theme="dark"] img.mb-icon.dark { display: inline; }
+
 /* Coming soon card */
 .coming-soon {
   margin: 24px 0; padding: 32px 28px; border-radius: 12px;
@@ -1944,11 +1951,46 @@ de commande (Partie III). Un clic sur l'icône ouvre un <strong>panneau flottant
 redimensionnable</strong> : vous pouvez le détacher et le laisser ouvert pendant que vous travaillez.
 </p>
 
+<h3>L'icône dans la barre de menus</h3>
+<p>
+L'icône signale l'état du daemon d'un coup d'œil. Conformément aux règles macOS pour les
+<em>menu bar extras</em> (monochrome, noir + transparent), c'est la <strong>forme</strong> qui porte
+l'information — jamais la couleur ; macOS la teinte automatiquement selon le thème clair ou sombre.
+</p>
+
+<table>
+  <thead><tr><th>Icône</th><th>État</th><th>Signification</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-active.png" alt="clé pleine"><img class="mb-icon dark" src="../../assets/menubar-active-dark.png" alt="clé pleine"></td>
+      <td><strong>active</strong></td><td>Daemon actif, substitution en cours.</td>
+    </tr>
+    <tr>
+      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-paused.png" alt="clé creuse"><img class="mb-icon dark" src="../../assets/menubar-paused-dark.png" alt="clé creuse"></td>
+      <td><strong>en pause</strong></td><td>Substitution suspendue (<code>iris pause</code>).</td>
+    </tr>
+    <tr>
+      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-stopped.png" alt="clé barrée"><img class="mb-icon dark" src="../../assets/menubar-stopped-dark.png" alt="clé barrée"></td>
+      <td><strong>arrêté</strong></td><td>Daemon arrêté ou en erreur.</td>
+    </tr>
+    <tr>
+      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-connecting.png" alt="clé atténuée"><img class="mb-icon dark" src="../../assets/menubar-connecting-dark.png" alt="clé atténuée"></td>
+      <td><strong>connexion</strong></td><td>Connexion au daemon en cours — icône atténuée.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+Un <strong>badge</strong> (compteur) s'ajoute à côté de l'icône lorsqu'une ou plusieurs alertes de
+sécurité non lues attendent dans l'onglet <em>Security</em>.
+</p>
+
 <h3>En-tête du panneau</h3>
 <p>
 En permanence en haut du panneau : une <strong>pastille d'état</strong> du daemon (verte = actif,
-orange = en pause, rouge = arrêté, grise = connexion en cours), l'uptime, et un bouton
-<em>Pause</em> / <em>Resume</em>. Des bandeaux apparaissent au besoin : daemon injoignable, ou
+orange = en pause, rouge = arrêté, grise = connexion en cours) — c'est sur cette pastille que vit la
+<em>couleur</em> de l'état, distincte de l'icône monochrome de la barre de menus. À côté : l'uptime et un
+bouton <em>Pause</em> / <em>Resume</em>. Des bandeaux apparaissent au besoin : daemon injoignable, ou
 notifications système désactivées.
 </p>
 
