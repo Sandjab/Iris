@@ -426,7 +426,6 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         return ProcessedRequest(head: newHead, body: body, outcome: .bypassed)
     }
 
-
     /// Logs the request outcome and applies the exfil-attempt policy (pause).
     /// Runs before the response stream is wired; emits no `Event` (that happens
     /// at `.end`). Secret values never appear — only names (CLAUDE.md §6.1).
