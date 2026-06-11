@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../assets/iris-icon-256.png" alt="" aria-hidden="true" width="96" height="96">
+</p>
+
 # Guide utilisateur IRIS
 
 > Ce guide décrit l'usage **cible** d'IRIS une fois toutes les phases livrées.
