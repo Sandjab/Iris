@@ -428,7 +428,7 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
 <p class="lead">
 IRIS est un broker de credentials local pour macOS. Il s'interpose entre vos outils en ligne de commande
 (Claude Code, <code>gh</code>, <code>curl</code>, scripts Python, serveurs MCP…) et les API distantes,
-et substitue à la volée des placeholders inertes par les vraies valeurs tirées du trousseau système.
+et substitue à la volée des placeholders inertes par les vraies valeurs tirées du trousseau macOS.
 </p>
 
 <h3>Le problème</h3>
@@ -514,7 +514,7 @@ l'agent essaie de la mettre dans un POST <code>/issues</code>.
 <h3>CA locale</h3>
 <p>
 Pour pouvoir déchiffrer le trafic vers les hosts whitelistés, IRIS génère un certificat racine ECDSA
-P-256 local. La clé privée vit dans le trousseau système, ACL-protégée pour le seul binaire signé
+P-256 local. La clé privée vit dans le trousseau de session (login Keychain), ACL-protégée pour le seul binaire signé
 <code>irisd</code>. Le cert public est exporté en PEM sur disque (matériel public, accessible) et
 ajouté au trust store macOS.
 </p>
@@ -699,7 +699,7 @@ pour les trois binaires CLI/daemon, plus un projet Xcode pour la cible app (cont
   },
   "keychain": {
     "title": "Trousseau macOS",
-    "body": "Source de vérité unique pour : (1) la clé privée de la CA (System Keychain, ACL signed-binary <code>io.iris.ca.privatekey</code>), (2) les valeurs de secrets et leurs métadonnées (login Keychain, <code>kSecClassGenericPassword</code>, service <code>io.iris.secret</code>). Aucune valeur n'est jamais écrite sur disque ailleurs que dans le trousseau."
+    "body": "Source de vérité unique pour : (1) la clé privée de la CA (login Keychain, ACL signed-binary <code>io.iris.ca</code> / <code>privatekey</code>), (2) les valeurs de secrets et leurs métadonnées (login Keychain, <code>kSecClassGenericPassword</code>, service <code>io.iris.secret</code>). Aucune valeur n'est jamais écrite sur disque ailleurs que dans le trousseau."
   },
   "app": {
     "title": "Iris.app (menu bar)",

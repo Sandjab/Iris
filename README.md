@@ -36,7 +36,7 @@ IRIS is a single-user, single-machine implementation of that pattern. No cloud, 
 - Local HTTPS MITM proxy with per-host whitelist (anything not whitelisted is CONNECT pass-through, no decryption).
 - Per-secret `allowed_hosts` scoping: each secret can only be substituted into requests going to its authorized destinations. Anthropic key cannot leak to GitHub even if the agent tries.
 - Exfiltration attempt detection with five distinct heuristics, surfaced as alerts in the menu bar app.
-- Secrets stored in the macOS System Keychain with an ACL that grants silent access only to the signed `irisd` binary.
+- Secrets stored in the macOS login Keychain with an ACL that grants silent access only to the signed `irisd` binary.
 - Menu bar app for live monitoring, secret management, and alerts.
 - CLI for scripting and headless usage.
 - Single signed and notarized `.pkg` installer.
@@ -112,7 +112,7 @@ After install, the daemon and the menu bar app both start on their own — and r
              │ HTTPS (TLS via local CA)
              ▼
 ┌──────────────────────────────────┐         ┌─────────────────────┐
-│  irisd (LaunchAgent)             │         │  System Keychain    │
+│  irisd (LaunchAgent)             │         │  login Keychain     │
 │  ├─ MITM proxy   :8888           │◄────────┤  (secrets + CA key) │
 │  ├─ Events SSE   :8899           │         └─────────────────────┘
 │  └─ Admin RPC    unix socket     │
