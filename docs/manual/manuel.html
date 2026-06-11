@@ -80,9 +80,7 @@ main {
   border-bottom: 1px solid var(--border); margin-bottom: 12px;
 }
 .brand-logo {
-  width: 32px; height: 32px; border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent), #9d6cff);
-  display: grid; place-items: center; color: white; font-weight: 700; font-size: 13px; letter-spacing: 0.5px;
+  width: 32px; height: 32px; border-radius: 8px; object-fit: cover; display: block;
 }
 .brand-name { font-weight: 700; font-size: 15px; letter-spacing: 0.2px; }
 .brand-sub { color: var(--fg-muted); font-size: 11px; letter-spacing: 0.4px; text-transform: uppercase; margin-top: 1px; }
@@ -364,7 +362,7 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
 <nav class="sidebar">
   <button class="theme-toggle" id="themeToggle" aria-label="Bascule thème">☾</button>
   <div class="brand">
-    <div class="brand-logo">IR</div>
+    <img class="brand-logo" src="../../assets/iris-icon-256.png" alt="Icône IRIS — tête ailée" width="32" height="32">
     <div>
       <div class="brand-name">IRIS</div>
       <div class="brand-sub">Manuel · v1.0</div>
