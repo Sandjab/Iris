@@ -246,10 +246,7 @@ final class AdminConnectionHandler: ChannelInboundHandler {
         let channel = context.channel
         let resp = JSONRPCResponse.failure(
             id: .null,
-            error: JSONRPCError(
-                code: JSONRPCError.parseError.code,
-                message: "\(error)"
-            )
+            error: .parseError(message: "\(error)")
         )
         if let data = try? JSONRPCCoder.makeEncoder().encode(resp) {
             var out = channel.allocator.buffer(capacity: data.count)
@@ -271,10 +268,7 @@ final class AdminConnectionHandler: ChannelInboundHandler {
         } catch {
             return JSONRPCResponse.failure(
                 id: .null,
-                error: JSONRPCError(
-                    code: JSONRPCError.parseError.code,
-                    message: "Malformed JSON-RPC request: \(error)"
-                )
+                error: .parseError(message: "Malformed JSON-RPC request: \(error)")
             )
         }
         return await handler(request)

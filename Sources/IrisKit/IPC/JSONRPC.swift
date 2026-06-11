@@ -117,6 +117,19 @@ extension JSONRPCError {
     // swift-format-ignore: DontRepeatTypeInStaticProperties
     public static let internalError = JSONRPCError(code: -32603, message: "Internal error")
 
+    // Standard-code variants carrying a specific message.
+    public static func parseError(message: String) -> JSONRPCError {
+        JSONRPCError(code: Self.parseError.code, message: message)
+    }
+
+    public static func invalidParams(message: String) -> JSONRPCError {
+        JSONRPCError(code: Self.invalidParams.code, message: message)
+    }
+
+    public static func internalError(message: String) -> JSONRPCError {
+        JSONRPCError(code: Self.internalError.code, message: message)
+    }
+
     // IRIS custom codes (SPECS §13.2).
     public static func unknownSecret(_ name: String) -> JSONRPCError {
         JSONRPCError(code: -32001, message: "Unknown secret: \(name)")

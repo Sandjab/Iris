@@ -44,8 +44,8 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
         case .head(let head):
             // Reserved diagnostic endpoint: respond immediately without CONNECT
             // semantics, substitution, scoping, or event emission.
-            if head.uri == "/__iris_ping" && head.method == .GET {
-                respondWithPing(context: context)
+            if PingResponder.matches(head) {
+                PingResponder.respond(on: context.channel, closeAfter: true)
                 return
             }
             guard head.method == .CONNECT else {
@@ -307,30 +307,6 @@ final class ConnectHandler: ChannelInboundHandler, RemovableChannelHandler, @unc
             }
         }
         return promise.futureResult
-    }
-
-    /// Respond to `GET /__iris_ping` with `200 ok\n` and close.
-    /// No event is emitted; this path is invisible to the EventRing.
-    private func respondWithPing(context: ChannelHandlerContext) {
-        let channel = context.channel
-        let responseHead = HTTPResponseHead(
-            version: .init(major: 1, minor: 1),
-            status: .ok,
-            headers: HTTPHeaders([
-                ("Content-Type", "text/plain"),
-                ("Content-Length", "3"),
-                ("Cache-Control", "no-store"),
-            ])
-        )
-        channel.write(HTTPServerResponsePart.head(responseHead), promise: nil)
-        var buf = channel.allocator.buffer(capacity: 3)
-        buf.writeString("ok\n")
-        channel.write(HTTPServerResponsePart.body(.byteBuffer(buf)), promise: nil)
-        let p = context.eventLoop.makePromise(of: Void.self)
-        channel.writeAndFlush(HTTPServerResponsePart.end(nil), promise: p)
-        p.futureResult.whenComplete { _ in
-            channel.close(promise: nil)
-        }
     }
 
     private func respondAndClose(context: ChannelHandlerContext, status: HTTPResponseStatus) {
