@@ -82,10 +82,7 @@ struct LogsCommand: AsyncParsableCommand {
         }
 
         if json {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-            encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(events)
+            let data = try Output.makeEncoder().encode(events)
             print(String(data: data, encoding: .utf8) ?? "[]")
         } else {
             if events.isEmpty {
@@ -133,9 +130,8 @@ struct LogsCommand: AsyncParsableCommand {
 
     private func streamEvents(from client: EventsClient, kinds: [Event.Kind]) async throws {
         let kindSet = Set(kinds)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        encoder.dateEncodingStrategy = .iso8601
+        // ndjson: one event per line — no pretty-printing.
+        let encoder = Output.makeEncoder(pretty: false)
 
         let stream = try await client.subscribe(
             since: nil,

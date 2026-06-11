@@ -219,7 +219,28 @@ struct SecretCommand: AsyncParsableCommand {
         }
     }
 
-    // MARK: - secret quarantine
+    // MARK: - secret quarantine / unquarantine
+
+    /// Shared body of `quarantine` / `unquarantine` (same RPC, boolean flipped).
+    private static func setQuarantined(
+        _ quarantined: Bool,
+        name: String,
+        connection: ConnectionOptions,
+        json: Bool
+    ) async throws {
+        let secret = try await withAdminClient(connection) { client in
+            try await client.call(
+                .secretSetQuarantined,
+                params: SecretQuarantineParams(name: name, quarantined: quarantined),
+                returning: Secret.self
+            )
+        }
+        try Output.print(
+            humanText: "\(quarantined ? "quarantined" : "unquarantined") \(secret.name)",
+            jsonValue: secret,
+            json: json
+        )
+    }
 
     struct Quarantine: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
@@ -232,18 +253,9 @@ struct SecretCommand: AsyncParsableCommand {
         @Flag(name: .customLong("json")) var json: Bool = false
 
         mutating func run() async throws {
-            let secret = try await withAdminClient(connection) { client in
-                try await client.call(
-                    .secretSetQuarantined,
-                    params: SecretQuarantineParams(name: name, quarantined: true),
-                    returning: Secret.self
-                )
-            }
-            try Output.print(humanText: "quarantined \(secret.name)", jsonValue: secret, json: json)
+            try await SecretCommand.setQuarantined(true, name: name, connection: connection, json: json)
         }
     }
-
-    // MARK: - secret unquarantine
 
     struct Unquarantine: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
@@ -256,14 +268,7 @@ struct SecretCommand: AsyncParsableCommand {
         @Flag(name: .customLong("json")) var json: Bool = false
 
         mutating func run() async throws {
-            let secret = try await withAdminClient(connection) { client in
-                try await client.call(
-                    .secretSetQuarantined,
-                    params: SecretQuarantineParams(name: name, quarantined: false),
-                    returning: Secret.self
-                )
-            }
-            try Output.print(humanText: "unquarantined \(secret.name)", jsonValue: secret, json: json)
+            try await SecretCommand.setQuarantined(false, name: name, connection: connection, json: json)
         }
     }
 
