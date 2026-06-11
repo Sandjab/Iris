@@ -421,15 +421,18 @@ iris logs --follow --filter "host=api.anthropic.com"
 
 ### 8.3 Menu bar app
 
-L'icône d'IRIS dans la barre de menus indique l'état d'un coup d'œil :
+L'icône d'IRIS dans la barre de menus indique l'état d'un coup d'œil. C'est la **forme** qui porte l'information — l'icône est monochrome (règle macOS pour les *menu bar extras* : noir + transparent, teinté automatiquement selon le thème clair/sombre) :
 
-| Icône | Signification |
-|---|---|
-| 🟢 | Daemon up, pas d'alert récent |
-| 🟡 | Daemon up, alert(s) récent(s) à inspecter |
-| 🔴 | Daemon down ou erreur |
+| Icône | État | Signification |
+|:---:|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-active-dark.png"><img src="../assets/menubar-active.png" alt="clé pleine" width="22" height="22"></picture> | **active** | Daemon actif, substitution en cours |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-paused-dark.png"><img src="../assets/menubar-paused.png" alt="clé creuse" width="22" height="22"></picture> | **en pause** | Substitution suspendue (`iris pause`) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-stopped-dark.png"><img src="../assets/menubar-stopped.png" alt="clé barrée" width="22" height="22"></picture> | **arrêté** | Daemon arrêté ou en erreur |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-connecting-dark.png"><img src="../assets/menubar-connecting.png" alt="clé atténuée" width="22" height="22"></picture> | **connexion** | Connexion au daemon en cours (icône atténuée) |
 
-Cliquez sur l'icône pour ouvrir le panneau (déplaçable et redimensionnable) :
+Un **badge** (compteur) apparaît à côté de l'icône lorsqu'une ou plusieurs alertes de sécurité non lues attendent dans l'onglet **Security**.
+
+Cliquez sur l'icône pour ouvrir le panneau (déplaçable et redimensionnable). Son en-tête porte une **pastille d'état colorée** (verte = actif, orange = en pause, rouge = arrêté, grise = connexion) — c'est là que vit la couleur, pas sur l'icône de la barre de menus :
 
 ![Panneau menu-bar](screenshots/13-app-popover.png "Panneau de l'app menu-bar")
 
