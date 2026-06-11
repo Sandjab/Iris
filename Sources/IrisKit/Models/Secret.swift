@@ -45,6 +45,27 @@ public struct Secret: Codable, Sendable, Hashable {
 }
 
 extension Secret {
+    /// Copy of `self` overriding only the provided fields (nil = keep the
+    /// current value). `name` and `createdAt` are identity fields and never
+    /// change after creation.
+    func with(
+        allowedHosts: [String]? = nil,
+        lastUsedAt: Date? = nil,
+        usageCount: UInt64? = nil,
+        quarantined: Bool? = nil
+    ) -> Secret {
+        Secret(
+            name: name,
+            allowedHosts: allowedHosts ?? self.allowedHosts,
+            createdAt: createdAt,
+            lastUsedAt: lastUsedAt ?? self.lastUsedAt,
+            usageCount: usageCount ?? self.usageCount,
+            quarantined: quarantined ?? self.quarantined
+        )
+    }
+}
+
+extension Secret {
     public static let nameValidationRegex = #"^[a-zA-Z0-9_-]{1,64}$"#
 
     public static func validateName(_ name: String) throws {

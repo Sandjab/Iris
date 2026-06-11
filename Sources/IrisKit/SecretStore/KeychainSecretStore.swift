@@ -61,22 +61,9 @@ public actor KeychainSecretStore: SecretStore {
     public func update(named name: String, allowedHosts: [String]) async throws -> Secret {
         try Secret.validateAllowedHosts(allowedHosts)
         let current = try fetchSecret(named: name)
-        let metadata = StoredMetadata(
-            allowedHosts: allowedHosts,
-            createdAt: current.createdAt,
-            lastUsedAt: current.lastUsedAt,
-            usageCount: current.usageCount,
-            quarantined: current.quarantined
-        )
-        try updateMetadata(name: name, metadata: metadata)
-        return Secret(
-            name: name,
-            allowedHosts: allowedHosts,
-            createdAt: current.createdAt,
-            lastUsedAt: current.lastUsedAt,
-            usageCount: current.usageCount,
-            quarantined: current.quarantined
-        )
+        let updated = current.with(allowedHosts: allowedHosts)
+        try updateMetadata(name: name, metadata: StoredMetadata(of: updated))
+        return updated
     }
 
     public func rotate(named name: String, newValue: Data) async throws -> Secret {
@@ -153,14 +140,7 @@ public actor KeychainSecretStore: SecretStore {
                     let blob = item[kSecAttrGeneric as String] as? Data
                 else { return nil }
                 let metadata = try decode(blob)
-                return Secret(
-                    name: name,
-                    allowedHosts: metadata.allowedHosts,
-                    createdAt: metadata.createdAt,
-                    lastUsedAt: metadata.lastUsedAt,
-                    usageCount: metadata.usageCount,
-                    quarantined: metadata.quarantined
-                )
+                return metadata.secret(named: name)
             }.sorted { $0.name < $1.name }
         case errSecItemNotFound:
             return []
@@ -171,42 +151,16 @@ public actor KeychainSecretStore: SecretStore {
 
     public func recordUsage(of name: String, at date: Date) async throws -> Secret {
         let current = try fetchSecret(named: name)
-        let metadata = StoredMetadata(
-            allowedHosts: current.allowedHosts,
-            createdAt: current.createdAt,
-            lastUsedAt: date,
-            usageCount: current.usageCount &+ 1,
-            quarantined: current.quarantined
-        )
-        try updateMetadata(name: name, metadata: metadata)
-        return Secret(
-            name: name,
-            allowedHosts: current.allowedHosts,
-            createdAt: current.createdAt,
-            lastUsedAt: date,
-            usageCount: current.usageCount &+ 1,
-            quarantined: current.quarantined
-        )
+        let updated = current.with(lastUsedAt: date, usageCount: current.usageCount &+ 1)
+        try updateMetadata(name: name, metadata: StoredMetadata(of: updated))
+        return updated
     }
 
     public func setQuarantined(_ quarantined: Bool, named name: String) async throws -> Secret {
         let current = try fetchSecret(named: name)
-        let metadata = StoredMetadata(
-            allowedHosts: current.allowedHosts,
-            createdAt: current.createdAt,
-            lastUsedAt: current.lastUsedAt,
-            usageCount: current.usageCount,
-            quarantined: quarantined
-        )
-        try updateMetadata(name: name, metadata: metadata)
-        return Secret(
-            name: name,
-            allowedHosts: current.allowedHosts,
-            createdAt: current.createdAt,
-            lastUsedAt: current.lastUsedAt,
-            usageCount: current.usageCount,
-            quarantined: quarantined
-        )
+        let updated = current.with(quarantined: quarantined)
+        try updateMetadata(name: name, metadata: StoredMetadata(of: updated))
+        return updated
     }
 
     // MARK: - Internals
@@ -244,6 +198,27 @@ public actor KeychainSecretStore: SecretStore {
             self.usageCount = try c.decode(UInt64.self, forKey: .usageCount)
             self.quarantined = try c.decodeIfPresent(Bool.self, forKey: .quarantined) ?? false
         }
+
+        init(of secret: Secret) {
+            self.init(
+                allowedHosts: secret.allowedHosts,
+                createdAt: secret.createdAt,
+                lastUsedAt: secret.lastUsedAt,
+                usageCount: secret.usageCount,
+                quarantined: secret.quarantined
+            )
+        }
+
+        func secret(named name: String) -> Secret {
+            Secret(
+                name: name,
+                allowedHosts: allowedHosts,
+                createdAt: createdAt,
+                lastUsedAt: lastUsedAt,
+                usageCount: usageCount,
+                quarantined: quarantined
+            )
+        }
     }
 
     private func baseQuery(for name: String) -> [String: Any] {
@@ -269,14 +244,7 @@ public actor KeychainSecretStore: SecretStore {
                 throw SecretStoreError.dataCorruption("missing metadata blob for \(name)")
             }
             let metadata = try decode(blob)
-            return Secret(
-                name: name,
-                allowedHosts: metadata.allowedHosts,
-                createdAt: metadata.createdAt,
-                lastUsedAt: metadata.lastUsedAt,
-                usageCount: metadata.usageCount,
-                quarantined: metadata.quarantined
-            )
+            return metadata.secret(named: name)
         case errSecItemNotFound:
             throw SecretStoreError.unknownSecret(name)
         default:

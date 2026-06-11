@@ -32,14 +32,7 @@ public actor InMemorySecretStore: SecretStore {
         guard var entry = items[name] else {
             throw SecretStoreError.unknownSecret(name)
         }
-        let updated = Secret(
-            name: entry.metadata.name,
-            allowedHosts: allowedHosts,
-            createdAt: entry.metadata.createdAt,
-            lastUsedAt: entry.metadata.lastUsedAt,
-            usageCount: entry.metadata.usageCount,
-            quarantined: entry.metadata.quarantined
-        )
+        let updated = entry.metadata.with(allowedHosts: allowedHosts)
         entry.metadata = updated
         items[name] = entry
         return updated
@@ -84,13 +77,9 @@ public actor InMemorySecretStore: SecretStore {
         guard var entry = items[name] else {
             throw SecretStoreError.unknownSecret(name)
         }
-        let updated = Secret(
-            name: entry.metadata.name,
-            allowedHosts: entry.metadata.allowedHosts,
-            createdAt: entry.metadata.createdAt,
+        let updated = entry.metadata.with(
             lastUsedAt: date,
-            usageCount: entry.metadata.usageCount &+ 1,
-            quarantined: entry.metadata.quarantined
+            usageCount: entry.metadata.usageCount &+ 1
         )
         entry.metadata = updated
         items[name] = entry
@@ -101,14 +90,7 @@ public actor InMemorySecretStore: SecretStore {
         guard var entry = items[name] else {
             throw SecretStoreError.unknownSecret(name)
         }
-        let updated = Secret(
-            name: entry.metadata.name,
-            allowedHosts: entry.metadata.allowedHosts,
-            createdAt: entry.metadata.createdAt,
-            lastUsedAt: entry.metadata.lastUsedAt,
-            usageCount: entry.metadata.usageCount,
-            quarantined: quarantined
-        )
+        let updated = entry.metadata.with(quarantined: quarantined)
         entry.metadata = updated
         items[name] = entry
         return updated

@@ -125,19 +125,19 @@ public actor ConfigStore {
                 guard let l = LogLevel(rawValue: u.value) else {
                     throw Error.invalidValue(field: u.key, value: u.value)
                 }
-                broker = Self.broker(broker, settingLogLevel: l)
+                broker = Self.broker(broker, logLevel: l)
             case "broker.listen":
-                broker = Self.broker(broker, settingListen: u.value)
+                broker = Self.broker(broker, listen: u.value)
             case "broker.events_listen":
-                broker = Self.broker(broker, settingEventsListen: u.value)
+                broker = Self.broker(broker, eventsListen: u.value)
             case "broker.admin_socket":
-                broker = Self.broker(broker, settingAdminSocket: u.value)
+                broker = Self.broker(broker, adminSocket: u.value)
             case "broker.event_retention_days":
                 guard let n = Int(u.value) else { throw Error.invalidValue(field: u.key, value: u.value) }
-                broker = Self.broker(broker, settingRetentionDays: n)
+                broker = Self.broker(broker, eventRetentionDays: n)
             case "broker.event_ring_size":
                 guard let n = Int(u.value) else { throw Error.invalidValue(field: u.key, value: u.value) }
-                broker = Self.broker(broker, settingRingSize: n)
+                broker = Self.broker(broker, eventRingSize: n)
             default:
                 throw Error.unknownKey(u.key)
             }
@@ -155,65 +155,24 @@ public actor ConfigStore {
         return ConfigSetResult(applied: applied, requiresRestart: requiresRestart)
     }
 
-    // BrokerConfig has immutable lets; these helpers rebuild it field-by-field.
-    private static func broker(_ b: BrokerConfig, settingLogLevel v: LogLevel) -> BrokerConfig {
+    // BrokerConfig has immutable lets; this helper rebuilds it overriding only
+    // the provided fields (nil = keep the current value).
+    private static func broker(
+        _ b: BrokerConfig,
+        listen: String? = nil,
+        eventsListen: String? = nil,
+        adminSocket: String? = nil,
+        logLevel: LogLevel? = nil,
+        eventRetentionDays: Int? = nil,
+        eventRingSize: Int? = nil
+    ) -> BrokerConfig {
         BrokerConfig(
-            listen: b.listen,
-            eventsListen: b.eventsListen,
-            adminSocket: b.adminSocket,
-            logLevel: v,
-            eventRetentionDays: b.eventRetentionDays,
-            eventRingSize: b.eventRingSize
-        )
-    }
-    private static func broker(_ b: BrokerConfig, settingListen v: String) -> BrokerConfig {
-        BrokerConfig(
-            listen: v,
-            eventsListen: b.eventsListen,
-            adminSocket: b.adminSocket,
-            logLevel: b.logLevel,
-            eventRetentionDays: b.eventRetentionDays,
-            eventRingSize: b.eventRingSize
-        )
-    }
-    private static func broker(_ b: BrokerConfig, settingEventsListen v: String) -> BrokerConfig {
-        BrokerConfig(
-            listen: b.listen,
-            eventsListen: v,
-            adminSocket: b.adminSocket,
-            logLevel: b.logLevel,
-            eventRetentionDays: b.eventRetentionDays,
-            eventRingSize: b.eventRingSize
-        )
-    }
-    private static func broker(_ b: BrokerConfig, settingAdminSocket v: String) -> BrokerConfig {
-        BrokerConfig(
-            listen: b.listen,
-            eventsListen: b.eventsListen,
-            adminSocket: v,
-            logLevel: b.logLevel,
-            eventRetentionDays: b.eventRetentionDays,
-            eventRingSize: b.eventRingSize
-        )
-    }
-    private static func broker(_ b: BrokerConfig, settingRetentionDays v: Int) -> BrokerConfig {
-        BrokerConfig(
-            listen: b.listen,
-            eventsListen: b.eventsListen,
-            adminSocket: b.adminSocket,
-            logLevel: b.logLevel,
-            eventRetentionDays: v,
-            eventRingSize: b.eventRingSize
-        )
-    }
-    private static func broker(_ b: BrokerConfig, settingRingSize v: Int) -> BrokerConfig {
-        BrokerConfig(
-            listen: b.listen,
-            eventsListen: b.eventsListen,
-            adminSocket: b.adminSocket,
-            logLevel: b.logLevel,
-            eventRetentionDays: b.eventRetentionDays,
-            eventRingSize: v
+            listen: listen ?? b.listen,
+            eventsListen: eventsListen ?? b.eventsListen,
+            adminSocket: adminSocket ?? b.adminSocket,
+            logLevel: logLevel ?? b.logLevel,
+            eventRetentionDays: eventRetentionDays ?? b.eventRetentionDays,
+            eventRingSize: eventRingSize ?? b.eventRingSize
         )
     }
 
