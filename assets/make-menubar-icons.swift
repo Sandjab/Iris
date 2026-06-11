@@ -97,7 +97,7 @@ for state in states {
         do {
             try render(symbol: state.symbol, color: variant.color, alpha: state.alpha, to: url)
         } catch {
-            FileHandle.standardError.write(Data("error: \(error.localizedDescription)\n".utf8))
+            try? FileHandle.standardError.write(contentsOf: Data("error: \(error.localizedDescription)\n".utf8))
             exit(1)
         }
     }
