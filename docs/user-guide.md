@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../assets/iris-icon-256.png" alt="Icône IRIS — tête ailée" width="96" height="96">
+  <img src="../assets/iris-icon-256.png" alt="" aria-hidden="true" width="96" height="96">
 </p>
 
 # Guide utilisateur IRIS
