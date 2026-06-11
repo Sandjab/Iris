@@ -57,13 +57,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            button.image = NSImage(named: "StatusIcon")
-            button.image?.isTemplate = true
             button.target = self
             button.action = #selector(handleClick(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         statusItem = item
+        updateStatusIcon(appModel.daemonStatus)
 
         // Badge: mirror unreadAlertCount onto the status item title.
         appModel.$unreadAlertCount
@@ -80,6 +79,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .eraseToAnyPublisher()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.pulseIcon() }
+            .store(in: &cancellables)
+
+        // Menu-bar icon shape mirrors the daemon state. Template SF Symbols keep
+        // it legible on light/dark menu bars and when the menu is open — the
+        // *shape* carries the state (HIG: menu bar extras use black + clear only).
+        appModel.$daemonStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in self?.updateStatusIcon(status) }
             .store(in: &cancellables)
 
         // One daemon client for the whole app: admin RPC over UDS + loopback SSE.
@@ -148,6 +155,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // status item. Avoids the recursion risk of synthesising a click via performClick
         // (which would re-enter handleClick and could re-trigger showQuitMenu).
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+    }
+
+    /// Swaps the status-item image to reflect the daemon state, as a monochrome
+    /// template image (macOS handles light/dark + selection tinting). The form
+    /// conveys the state, never colour:
+    ///   up (active) = `key.fill` · paused = `key` (hollow) ·
+    ///   down/error = `key.slash` · connecting = `key`, dimmed.
+    private func updateStatusIcon(_ status: IrisAppCore.DaemonStatus) {
+        guard let button = statusItem?.button else { return }
+        let symbol: String
+        let dimmed: Bool
+        let label: String
+        switch status {
+        case .up(_, _, let paused):
+            symbol = paused ? "key" : "key.fill"
+            dimmed = false
+            label = paused ? "paused" : "active"
+        case .down:
+            symbol = "key.slash"
+            dimmed = false
+            label = "stopped"
+        case .connecting:
+            symbol = "key"
+            dimmed = true
+            label = "connecting"
+        }
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "IRIS daemon \(label)")
+        image?.isTemplate = true
+        button.image = image
+        // Cancel any pending pulse reset so it can't clobber the dimmed
+        // connecting state; restore full opacity when leaving connecting.
+        pulseWorkItem?.cancel()
+        button.alphaValue = dimmed ? 0.45 : 1.0
     }
 
     private func updateBadge(_ count: Int) {
