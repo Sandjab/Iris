@@ -91,23 +91,10 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         head: HTTPRequestHead,
         body: ByteBuffer?
     ) {
-        // Reserved diagnostic endpoint: bypass all proxy logic, emit no event.
-        // Used by `iris doctor` check #6 to verify the proxy is alive.
-        if head.uri == "/__iris_ping" && head.method == .GET {
-            let responseHead = HTTPResponseHead(
-                version: .init(major: 1, minor: 1),
-                status: .ok,
-                headers: HTTPHeaders([
-                    ("Content-Type", "text/plain"),
-                    ("Content-Length", "3"),
-                    ("Cache-Control", "no-store"),
-                ])
-            )
-            context.write(self.wrapOutboundOut(.head(responseHead)), promise: nil)
-            var buf = context.channel.allocator.buffer(capacity: 3)
-            buf.writeString("ok\n")
-            context.write(self.wrapOutboundOut(.body(.byteBuffer(buf))), promise: nil)
-            context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
+        // Reserved diagnostic endpoint, used by `iris doctor` check #6 to
+        // verify the proxy is alive.
+        if PingResponder.matches(head) {
+            PingResponder.respond(on: context.channel, closeAfter: false)
             return
         }
 
@@ -310,7 +297,7 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         }
 
         // Build evaluator context.
-        let (path, _) = splitURI(preparedHead.uri)
+        let (path, _) = PlaceholderScanner.splitURI(preparedHead.uri)
         let normalizedHost = host.lowercased()
         let contentType = preparedHeaders.first(name: "content-type")?.lowercased()
         let context = RequestContext(
@@ -437,11 +424,6 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         )
         newHead.version = .http1_1
         return ProcessedRequest(head: newHead, body: body, outcome: .bypassed)
-    }
-
-    private static func splitURI(_ uri: String) -> (path: String, query: String?) {
-        guard let q = uri.firstIndex(of: "?") else { return (uri, nil) }
-        return (String(uri[..<q]), String(uri[uri.index(after: q)...]))
     }
 
     /// Logs the request outcome and applies the exfil-attempt policy (pause).

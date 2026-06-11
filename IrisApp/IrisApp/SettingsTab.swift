@@ -45,8 +45,28 @@ struct SettingsTab: View {
 
     // MARK: - Sections
 
+    /// GroupBox with the shared left-aligned, full-width content layout of
+    /// every Settings section.
+    private struct SettingSection<Content: View>: View {
+        let title: String
+        let content: Content
+
+        init(_ title: String, @ViewBuilder content: () -> Content) {
+            self.title = title
+            self.content = content()
+        }
+
+        var body: some View {
+            GroupBox(title) {
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(4)
+            }
+        }
+    }
+
     @ViewBuilder private func securityBox(_ cfg: Config) -> some View {
-        GroupBox("Security") {
+        SettingSection("Security") {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("On exfil attempt")
@@ -74,13 +94,11 @@ struct SettingsTab: View {
                         .onSubmit { apply(key: "security.max_substitutions_per_minute", value: maxSubsText) }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(4)
         }
     }
 
     @ViewBuilder private func backupsBox() -> some View {
-        GroupBox("Backups") {
+        SettingSection("Backups") {
             HStack {
                 Text("Keep backups")
                 Spacer()
@@ -89,13 +107,11 @@ struct SettingsTab: View {
                     .multilineTextAlignment(.trailing)
                     .onSubmit { apply(key: "backups.max_count", value: maxBackupsText) }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(4)
         }
     }
 
     @ViewBuilder private func caBox() -> some View {
-        GroupBox("Certificate Authority") {
+        SettingSection("Certificate Authority") {
             HStack {
                 switch model.caTrusted {
                 case .some(true):
@@ -112,13 +128,11 @@ struct SettingsTab: View {
                     Button("Install…") { caAction(install: true) }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(4)
         }
     }
 
     @ViewBuilder private func shellBox() -> some View {
-        GroupBox("Terminal") {
+        SettingSection("Terminal") {
             HStack {
                 switch model.shellConfigured {
                 case .some(true):
@@ -135,20 +149,16 @@ struct SettingsTab: View {
                     Button("Configure…") { shellAction(install: true) }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(4)
         }
     }
 
     @ViewBuilder private func autoStartBox() -> some View {
-        GroupBox("Launch at login") {
+        SettingSection("Launch at login") {
             VStack(alignment: .leading, spacing: 8) {
                 autoStartRow("Background service (irisd)", status: model.daemonAutoStart, target: .daemon)
                 Divider()
                 autoStartRow("Menu bar app (Iris)", status: model.appAutoStart, target: .app)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(4)
         }
     }
 
@@ -182,7 +192,7 @@ struct SettingsTab: View {
     }
 
     @ViewBuilder private func uninstallBox() -> some View {
-        GroupBox("Uninstall") {
+        SettingSection("Uninstall") {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Stops irisd, removes auto-start, the CA certificate and the terminal configuration.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -191,8 +201,6 @@ struct SettingsTab: View {
                     Button("Quit & Uninstall…", role: .destructive) { showUninstallConfirm = true }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(4)
         }
         .confirmationDialog(
             "Uninstall IRIS?",
@@ -223,7 +231,7 @@ struct SettingsTab: View {
     }
 
     @ViewBuilder private func connectionBox(_ cfg: Config) -> some View {
-        GroupBox("Connection (read-only)") {
+        SettingSection("Connection (read-only)") {
             VStack(alignment: .leading, spacing: 4) {
                 roRow("Proxy", cfg.broker.listen)
                 roRow("Events", cfg.broker.eventsListen)
@@ -232,8 +240,6 @@ struct SettingsTab: View {
                 roRow("Event retention", "\(cfg.broker.eventRetentionDays) days")
                 roRow("Event ring size", "\(cfg.broker.eventRingSize)")
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(4)
         }
     }
 

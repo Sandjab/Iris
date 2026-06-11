@@ -56,32 +56,24 @@ struct ConnectionOptions: ParsableArguments {
 /// Wraps the lifecycle of an `AdminClient`. On connect failure, prints the
 /// canonical "irisd not running" message to stderr and throws
 /// `ExitCode(IrisExitCode.daemonUnreachable)` so every subcommand exits 2
-/// without any local catch. Single outer do-catch: success path shuts down
-/// then returns; error path shuts down (best-effort) then maps errors.
+/// without any local catch.
 func withAdminClient<T: Sendable>(
     _ options: ConnectionOptions,
     body: (AdminClient) async throws -> T
 ) async throws -> T {
-    let path = try options.resolvedSocketPath()
-    let client = AdminClient(socketPath: path)
     do {
-        let result = try await body(client)
-        try await client.shutdown()
-        return result
-    } catch {
-        try? await client.shutdown()
-        if let adminErr = error as? AdminClientError, case .connectFailed = adminErr {
-            let unreachable = DaemonUnreachable(socketPath: path)
-            FileHandle.standardError.write(Data("\(unreachable.description)\n".utf8))
-            throw ExitCode(IrisExitCode.daemonUnreachable)
-        }
-        throw error
+        return try await withAdminClientOrThrow(options, body: body)
+    } catch let unreachable as DaemonUnreachable {
+        try? FileHandle.standardError.write(contentsOf: Data("\(unreachable.description)\n".utf8))
+        throw ExitCode(IrisExitCode.daemonUnreachable)
     }
 }
 
 /// Variant of `withAdminClient` that throws `DaemonUnreachable` instead of
 /// `ExitCode(2)`. Used by the watch loop so callers can distinguish a
 /// daemon-down condition from other errors without catching `ExitCode`.
+/// Single outer do-catch: success path shuts down then returns; error path
+/// shuts down (best-effort) then maps errors.
 func withAdminClientOrThrow<T: Sendable>(
     _ options: ConnectionOptions,
     body: (AdminClient) async throws -> T

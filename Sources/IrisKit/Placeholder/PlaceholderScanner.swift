@@ -80,7 +80,7 @@ public enum PlaceholderScanner {
         }
     }
 
-    private static func splitURI(_ uri: String) -> (path: String, query: String?) {
+    static func splitURI(_ uri: String) -> (path: String, query: String?) {
         guard let qIdx = uri.firstIndex(of: "?") else { return (uri, nil) }
         let path = String(uri[..<qIdx])
         let query = String(uri[uri.index(after: qIdx)...])

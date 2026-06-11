@@ -70,32 +70,20 @@ public struct AdminDispatcher: Sendable {
         } catch let error as ConfigStore.Error {
             switch error {
             case .invalidHost(let h):
-                return .failure(
-                    id: request.id,
-                    error: JSONRPCError(code: JSONRPCError.invalidParams.code, message: "invalid host: \(h)")
-                )
+                return .failure(id: request.id, error: .invalidParams(message: "invalid host: \(h)"))
             case .hostProtected:
                 // Reuse the existing protected-rule error (stable wire code); the CLI
                 // already renders it (`rule rm`). A built-in host can't be deleted.
                 return .failure(id: request.id, error: .ruleProtected)
             case .unknownKey(let k):
-                return .failure(
-                    id: request.id,
-                    error: JSONRPCError(code: JSONRPCError.invalidParams.code, message: "unknown key: \(k)")
-                )
+                return .failure(id: request.id, error: .invalidParams(message: "unknown key: \(k)"))
             case .invalidValue(let field, let value):
                 return .failure(
                     id: request.id,
-                    error: JSONRPCError(
-                        code: JSONRPCError.invalidParams.code,
-                        message: "invalid value '\(value)' for '\(field)'"
-                    )
+                    error: .invalidParams(message: "invalid value '\(value)' for '\(field)'")
                 )
             case .corrupted(let msg), .ioError(let msg):
-                return .failure(
-                    id: request.id,
-                    error: JSONRPCError(code: JSONRPCError.internalError.code, message: msg)
-                )
+                return .failure(id: request.id, error: .internalError(message: msg))
             }
         } catch let error as ConfigError {
             // A candidate that parses but fails Config.validate() (e.g. config.set
@@ -103,31 +91,19 @@ public struct AdminDispatcher: Sendable {
             if case .invalidValue(let field, let value) = error {
                 return .failure(
                     id: request.id,
-                    error: JSONRPCError(
-                        code: JSONRPCError.invalidParams.code,
-                        message: "invalid value '\(value)' for '\(field)'"
-                    )
+                    error: .invalidParams(message: "invalid value '\(value)' for '\(field)'")
                 )
             }
             return .failure(
                 id: request.id,
-                error: JSONRPCError(
-                    code: JSONRPCError.internalError.code,
-                    message: error.errorDescription ?? "\(error)"
-                )
+                error: .internalError(message: error.errorDescription ?? "\(error)")
             )
         } catch {
             logger.error(
                 "admin call unexpected error",
                 metadata: ["method": "\(method.rawValue)", "error": "\(error)"]
             )
-            return .failure(
-                id: request.id,
-                error: JSONRPCError(
-                    code: JSONRPCError.internalError.code,
-                    message: "\(error)"
-                )
-            )
+            return .failure(id: request.id, error: .internalError(message: "\(error)"))
         }
     }
 
@@ -313,27 +289,16 @@ public struct AdminDispatcher: Sendable {
     }
 
     /// Log the incoming call without leaking secret values. SPECS §6 / CLAUDE.md §6.1.
+    /// For secret.add / secret.rotate the `params` carry a binary secret value;
+    /// log only the method + id, never the params — true for every method here.
     private func logCall(method: AdminMethod, id: JSONRPCID) {
-        // For secret.add / secret.rotate the `params` carry a binary secret
-        // value; log only the method + id, never the params.
-        switch method {
-        case .secretAdd, .secretRotate:
-            logger.info(
-                "admin call",
-                metadata: [
-                    "method": "\(method.rawValue)",
-                    "id": "\(Self.describe(id))",
-                ]
-            )
-        default:
-            logger.info(
-                "admin call",
-                metadata: [
-                    "method": "\(method.rawValue)",
-                    "id": "\(Self.describe(id))",
-                ]
-            )
-        }
+        logger.info(
+            "admin call",
+            metadata: [
+                "method": "\(method.rawValue)",
+                "id": "\(Self.describe(id))",
+            ]
+        )
     }
 
     private static func describe(_ id: JSONRPCID) -> String {
