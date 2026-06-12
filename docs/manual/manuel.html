@@ -123,6 +123,13 @@ main {
 .hero {
   margin-bottom: 56px; padding-bottom: 28px; border-bottom: 1px solid var(--border);
 }
+.hero-banner {
+  display: block; width: 100%; max-width: 600px; height: auto;
+  margin: 0 0 28px; border: 1px solid var(--border); border-radius: 12px;
+}
+.hero-banner.dark { display: none; }
+[data-theme="dark"] .hero-banner.light { display: none; }
+[data-theme="dark"] .hero-banner.dark { display: block; }
 .hero h1 {
   font-family: var(--serif); font-size: 44px; line-height: 1.1; font-weight: 700;
   margin: 0 0 8px; letter-spacing: -0.5px;
@@ -409,13 +416,14 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
       <li><a href="#annex-status"><span class="num">A.</span>État d'implémentation</a></li>
       <li><a href="#annex-usage-limits"><span class="num">B.</span>Limites d'usage</a></li>
       <li><a href="#annex-glossary"><span class="num">C.</span>Glossaire</a></li>
-      <li><a href="#annex-refs"><span class="num">D.</span>Références</a></li>
     </ol>
   </div>
 </nav>
 
 <main>
 <section class="hero">
+  <img class="hero-banner light" src="../../assets/banner.png" alt="" aria-hidden="true" width="1280" height="640">
+  <img class="hero-banner dark" src="../../assets/banner-dark.png" alt="" aria-hidden="true" width="1280" height="640">
   <h1>IRIS — Manuel utilisateur</h1>
   <p class="tagline">Interception · Resolution · Injection · Substitution. <em>Secrets are safe.</em></p>
   <div class="meta">
@@ -432,7 +440,7 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
 
 <p class="lead">
 IRIS est un broker de credentials local pour macOS. Il s'interpose entre vos outils en ligne de commande
-(Claude Code, <code>gh</code>, <code>curl</code>, scripts Python, serveurs MCP…) et les API distantes,
+(agents CLI, <code>gh</code>, <code>curl</code>, scripts Python, serveurs MCP…) et les API distantes,
 et substitue à la volée des placeholders inertes par les vraies valeurs tirées du trousseau macOS.
 </p>
 
@@ -460,7 +468,7 @@ les clés. Concrètement&nbsp;:
   <div class="icon">i</div>
   <div class="body">
     <p><strong>À qui s'adresse ce manuel.</strong> Développeurs et power-users macOS qui utilisent
-    quotidiennement des agents CLI (Claude Code en particulier) et veulent durcir la posture sécurité
+    quotidiennement des agents CLI et veulent durcir la posture sécurité
     autour de leurs clés API sans changer leur workflow.</p>
   </div>
 </div>
@@ -569,7 +577,7 @@ ajouté au trust store macOS.
 {
   "placeholder": {
     "title": "Outil hôte",
-    "body": "Claude Code, <code>gh</code>, <code>curl</code>, scripts maison… Le seul changement par rapport à un setup classique : les variables d'environnement contiennent des <code>{{kc:NAME}}</code> au lieu de vraies clés. La requête HTTPS sort vers <code>127.0.0.1:8888</code> à cause de <code>HTTPS_PROXY</code>."
+    "body": "Agents CLI, <code>gh</code>, <code>curl</code>, scripts maison… Le seul changement par rapport à un setup classique : les variables d'environnement contiennent des <code>{{kc:NAME}}</code> au lieu de vraies clés. La requête HTTPS sort vers <code>127.0.0.1:8888</code> à cause de <code>HTTPS_PROXY</code>."
   },
   "proxy": {
     "title": "Daemon irisd",
@@ -620,7 +628,7 @@ pour les trois binaires CLI/daemon, plus un projet Xcode pour la cible app (cont
     <g class="svg-node" data-arch="agent">
       <rect x="30" y="50" width="170" height="90" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" />
       <text x="115" y="78" text-anchor="middle" fill="var(--fg)" font-weight="700">Agent / outil</text>
-      <text x="115" y="98" text-anchor="middle" fill="var(--fg-muted)" font-size="11">claude, gh, curl…</text>
+      <text x="115" y="98" text-anchor="middle" fill="var(--fg-muted)" font-size="11">agents, gh, curl…</text>
       <text x="115" y="116" text-anchor="middle" fill="var(--fg-faint)" font-size="10">HTTPS_PROXY=127.0.0.1:8888</text>
       <text x="115" y="130" text-anchor="middle" fill="var(--fg-faint)" font-size="10">*_API_KEY={{kc:…}}</text>
     </g>
@@ -696,7 +704,7 @@ pour les trois binaires CLI/daemon, plus un projet Xcode pour la cible app (cont
 {
   "agent": {
     "title": "Outil hôte",
-    "body": "N'importe quel processus enfant d'un shell où <code>HTTPS_PROXY</code> et les placeholders sont exportés. Inclut les outils CLI (Claude Code, gh, curl, npm, pip, aws) et leurs sous-processus (serveurs MCP en stdio, scripts de build). Les apps GUI lancées depuis Finder/Dock <strong>ne sont pas</strong> interceptées — c'est intentionnel (G8 SPECS)."
+    "body": "N'importe quel processus enfant d'un shell où <code>HTTPS_PROXY</code> et les placeholders sont exportés. Inclut les outils CLI (gh, curl, npm, pip, aws) et leurs sous-processus (serveurs MCP en stdio, scripts de build). Les apps GUI lancées depuis Finder/Dock <strong>ne sont pas</strong> interceptées — c'est intentionnel (G8 SPECS)."
   },
   "daemon": {
     "title": "Daemon irisd",
@@ -740,7 +748,7 @@ pour les trois binaires CLI/daemon, plus un projet Xcode pour la cible app (cont
 <h2 id="flow"><span class="chapnum">4</span>Flux d'une requête<a class="anchor" href="#flow">¶</a></h2>
 
 <p>
-Trace pas-à-pas d'une requête depuis Claude Code vers <code>api.anthropic.com</code>, avec
+Trace pas-à-pas d'une requête depuis un agent CLI vers <code>api.anthropic.com</code>, avec
 substitution réussie. Naviguez entre les étapes pour suivre la mécanique.
 </p>
 
@@ -761,7 +769,7 @@ substitution réussie. Naviguez entre les étapes pour suivre la mécanique.
   <div class="stepper-step active" data-step="1">
     <div class="stepper-text">
       <h4>Étape 1 — L'agent construit sa requête</h4>
-      <p>Claude Code lit <code>ANTHROPIC_API_KEY</code> dans son env. Cette valeur est un placeholder, pas la vraie clé.
+      <p>L'agent lit <code>ANTHROPIC_API_KEY</code> dans son env. Cette valeur est un placeholder, pas la vraie clé.
       Il construit son <code>POST /v1/messages</code> normalement.</p>
     </div>
 <pre><code>POST https://api.anthropic.com/v1/messages
@@ -1070,7 +1078,7 @@ Si l'un des trois manque, IRIS ne peut pas s'interposer proprement — quel que 
   "pinning": {
     "title": "F1 — Cert pinning (risque faible aujourd'hui)",
     "body": "Si le client (CLI, SDK) refuse tout cert non signé par une chaîne précise codée en dur, IRIS ne peut plus terminer TLS : son cert leaf émis par la CA locale est rejeté. Le pinning est massif côté apps mobiles (iOS/Android signés) mais quasi-inexistant dans les SDK serveur des fournisseurs IA : ils casseraient tous les proxies d'inspection TLS d'entreprise. Aucun pinning observé aujourd'hui chez les fournisseurs listés ci-dessous.",
-    "example": "# Sonde : si un cert custom dans le trust store passe,\n# le client ne pinne pas.\nexport NODE_EXTRA_CA_CERTS=$HOME/.../ca.pem\nclaude --version    # OK = pas de pinning Node\ncurl https://api.x.com/  # OK si curl honore le trust store"
+    "example": "# Sonde : si un cert custom dans le trust store passe,\n# le client ne pinne pas.\nexport NODE_EXTRA_CA_CERTS=$HOME/.../ca.pem\nvotre-agent --version    # OK = pas de pinning Node\ncurl https://api.x.com/  # OK si curl honore le trust store"
   },
   "http2": {
     "title": "F2 — HTTP/2 / gRPC mandatory (risque réel)",
@@ -2123,7 +2131,7 @@ hardened runtime ; l'ACL Keychain est liée à la signature d'<code>irisd</code>
   <div class="icon">!</div>
   <div class="body">
     <p>L'uninstall <strong>ne supprime jamais les secrets sans confirmation explicite</strong>. C'est
-    une règle non-négociable du modèle (cf. CLAUDE.md §10).</p>
+    une règle non-négociable du modèle.</p>
   </div>
 </div>
 
@@ -2292,7 +2300,7 @@ Pendant côté usages du tableau §7 (côté fournisseurs). Inventaire honnête 
   <tbody>
     <tr>
       <td>1</td>
-      <td><strong>Apps GUI avec IA intégrée</strong><br><span style="color: var(--fg-muted); font-size: 12.5px;">Cursor, Claude Desktop, Continue, Cody, Zed</span></td>
+      <td><strong>Apps GUI avec IA intégrée</strong><br><span style="color: var(--fg-muted); font-size: 12.5px;">Cursor, Continue, Cody, Zed</span></td>
       <td>Lancées depuis Dock / Spotlight → n'héritent pas de <code>HTTPS_PROXY</code> (objectif G8 SPECS)</td>
       <td><span class="badge" style="background: rgba(192,57,43,0.15); color: var(--err);">élevée</span></td>
       <td>Lancer l'app depuis un terminal (mais <code>open -a</code> ne suffit pas, il faut le binaire direct). Pénible au quotidien.</td>
@@ -2353,16 +2361,16 @@ Pendant côté usages du tableau §7 (côté fournisseurs). Inventaire honnête 
 
 <p><strong>Sweet spot 100% couvert</strong> — le workflow CLI agentique standard :</p>
 <ul>
-  <li><code>claude</code> (Claude Code CLI)</li>
+  <li>Les agents IA en ligne de commande (auto-pilotés)</li>
   <li><code>gh</code>, <code>git</code>, <code>curl</code>, <code>wget</code></li>
   <li>Scripts Python / Node utilisant les SDK Anthropic / OpenAI</li>
-  <li>Serveurs MCP en stdio spawnés par <code>claude</code></li>
+  <li>Serveurs MCP en stdio spawnés par ces agents</li>
   <li><code>npm install</code> avec token registry privé (npm honore <code>HTTPS_PROXY</code>)</li>
   <li>Tout binaire qui hérite honnêtement de l'env shell et respecte les conventions proxy</li>
 </ul>
 
 <p><strong>Le vrai blocker en pratique : ligne 1 (GUI editors avec IA)</strong>. Si vous utilisez
-Cursor, Claude Desktop, Continue ou Zed en parallèle de Claude Code, ces outils ne passent pas
+Cursor, Continue ou Zed en parallèle de votre agent CLI, ces outils ne passent pas
 par IRIS. Vu l'adoption massive de Cursor chez les devs solos, c'est probablement le scénario qui
 vous concerne en premier — et la raison pour laquelle des outils comme Cordon ou le sandbox Docker
 existent en parallèle.</p>
@@ -2379,11 +2387,11 @@ sont du territoire enterprise. Bun à client HTTP custom et pinning sont des cas
     <p><strong>La bonne question à se poser</strong> n'est pas « IRIS couvre-t-il 100% de mes usages ? »
     (réponse&nbsp;: non, ligne 1 garantit que non si vous utilisez Cursor), mais
     <em>« IRIS couvre-t-il les usages les plus risqués ? »</em>. Et là oui&nbsp;: ce sont précisément
-    les agents CLI auto-pilotés (Claude Code en mode <code>--dangerously-skip-permissions</code>,
+    les agents CLI auto-pilotés (un agent en mode <code>--dangerously-skip-permissions</code>,
     agents MCP avec tools sensibles) qui sont les plus exposés au prompt injection. Cursor en mode
     "ask-and-apply" supervisé est statistiquement moins risqué — l'humain dans la boucle filtre.</p>
     <p>Donc même sans couvrir Cursor, le ROI sécurité d'IRIS reste élevé si vous mettez votre clé
-    Anthropic la plus sensible côté <code>claude</code> CLI plutôt que côté Cursor. C'est un choix
+    Anthropic la plus sensible côté CLI agentique plutôt que côté Cursor. C'est un choix
     de répartition, pas un défaut binaire.</p>
   </div>
 </div>
@@ -2398,7 +2406,7 @@ sont du territoire enterprise. Bun à client HTTP custom et pinning sont des cas
     <tr><td><strong>CONNECT</strong></td><td>Méthode HTTP utilisée par un client pour demander à un proxy d'ouvrir un tunnel TCP brut (typiquement pour de l'HTTPS).</td></tr>
     <tr><td><strong>JSON-RPC 2.0</strong></td><td>Protocole RPC léger sur JSON. IRIS l'utilise pour son IPC admin sur socket Unix.</td></tr>
     <tr><td><strong>LaunchAgent</strong></td><td>Service géré par <code>launchd</code> dans le contexte d'une session utilisateur (par opposition à LaunchDaemon, system-wide).</td></tr>
-    <tr><td><strong>MCP</strong></td><td>Model Context Protocol. Protocole utilisé par les LLM (notamment Claude) pour invoquer des outils externes.</td></tr>
+    <tr><td><strong>MCP</strong></td><td>Model Context Protocol. Protocole utilisé par les LLM pour invoquer des outils externes.</td></tr>
     <tr><td><strong>MITM</strong></td><td>Man-in-the-Middle. Ici, intentionnel et local : IRIS termine TLS, inspecte, re-encrypte.</td></tr>
     <tr><td><strong>Placeholder</strong></td><td>Chaîne <code>{{kc:NAME}}</code> qui remplace une vraie valeur de credential dans l'env / les fichiers.</td></tr>
     <tr><td><strong>SAN</strong></td><td>Subject Alternative Name. Extension de cert X.509 qui liste les noms DNS supplémentaires couverts.</td></tr>
@@ -2408,21 +2416,10 @@ sont du territoire enterprise. Bun à client HTTP custom et pinning sont des cas
   </tbody>
 </table>
 
-<h2 id="annex-refs"><span class="chapnum">D</span>Références<a class="anchor" href="#annex-refs">¶</a></h2>
-
-<ul>
-  <li><a href="../SPECS.md"><code>SPECS.md</code></a> — spécification technique complète, source de vérité.</li>
-  <li><a href="../README.md"><code>README.md</code></a> — vue d'ensemble produit.</li>
-  <li><a href="../user-guide.md"><code>docs/user-guide.md</code></a> — guide utilisateur narratif.</li>
-  <li><a href="../security-audit-2026-05-25.md"><code>docs/security-audit-2026-05-25.md</code></a> — audit sécurité post-phase 3.</li>
-  <li><a href="../phase-9-notarization-prep.md"><code>docs/phase-9-notarization-prep.md</code></a> — préparation du pipeline de notarisation.</li>
-  <li><a href="https://github.com/Sandjab/iris/issues">Issues GitHub</a></li>
-</ul>
-
 <div class="footer">
   IRIS — Manuel utilisateur, version 0.1 (mai 2026).<br>
-  Ce manuel est généré à partir de <code>SPECS.md</code> et <code>README.md</code>. En cas de divergence,
-  <code>SPECS.md</code> fait foi.
+  Code source, documentation technique et suivi des évolutions :
+  <a href="https://github.com/Sandjab/Iris">github.com/Sandjab/Iris</a>.
 </div>
 </main>
 </div>
