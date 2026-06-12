@@ -464,6 +464,15 @@ les clés. Concrètement&nbsp;:
   <li>Pour les autres hosts, il fait un CONNECT-tunnel transparent — pas de déchiffrement, pas de substitution.</li>
 </ol>
 
+<p>
+Ce mécanisme est <strong>agnostique</strong> : il ne protège pas que la clé d'un LLM. Tout secret que
+vous enregistrez dans le trousseau — PAT GitHub, token npm, clé de registry, identifiants d'API
+fournisseur… — et que vous référencez par <code>{{kc:NAME}}</code> (dans l'environnement <em>ou</em>
+dans un fichier de configuration) est résolu de la même façon, et borné à ses <code>allowed_hosts</code>.
+La vraie valeur ne quitte jamais le trousseau : votre env et vos fichiers ne contiennent que des
+placeholders inertes.
+</p>
+
 <div class="callout callout-info">
   <div class="icon">i</div>
   <div class="body">
@@ -2301,9 +2310,9 @@ Pendant côté usages du tableau §7 (côté fournisseurs). Inventaire honnête 
     <tr>
       <td>1</td>
       <td><strong>Apps GUI avec IA intégrée</strong><br><span style="color: var(--fg-muted); font-size: 12.5px;">Cursor, Continue, Cody, Zed</span></td>
-      <td>Lancées depuis Dock / Spotlight → n'héritent pas de <code>HTTPS_PROXY</code> (objectif G8 SPECS)</td>
+      <td>Lancées depuis Dock / Spotlight → n'héritent pas de l'env IRIS (objectif G8 SPECS) ; et leur IA <em>native</em> passe par le backend du fournisseur (auth propriétaire), donc aucun placeholder à substituer</td>
       <td><span class="badge" style="background: rgba(192,57,43,0.15); color: var(--err);">élevée</span></td>
-      <td>Lancer l'app depuis un terminal (mais <code>open -a</code> ne suffit pas, il faut le binaire direct). Pénible au quotidien.</td>
+      <td>Le <strong>terminal intégré</strong> de l'éditeur hérite de l'env (il source <code>~/.zshrc</code>) : y lancer un agent CLI (<code>claude</code>…) est couvert, tout comme les serveurs MCP via <code>iris mcp wrap</code>. Seule l'IA <em>native</em> de l'éditeur reste hors IRIS.</td>
     </tr>
     <tr>
       <td>2</td>
