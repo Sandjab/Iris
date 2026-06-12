@@ -41,7 +41,7 @@ jobs:
       - name: Assemble site
         run: |
           mkdir -p _site/assets
-          cp assets/iris-icon-256.png assets/menubar-*.png _site/assets/
+          cp assets/iris-icon-256.png assets/banner.png assets/banner-dark.png assets/menubar-*.png _site/assets/
           python3 .github/scripts/build-pages.py docs/manual/manuel.html _site/index.html
 
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa  # v3

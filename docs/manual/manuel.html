@@ -123,6 +123,13 @@ main {
 .hero {
   margin-bottom: 56px; padding-bottom: 28px; border-bottom: 1px solid var(--border);
 }
+.hero-banner {
+  display: block; width: 100%; max-width: 600px; height: auto;
+  margin: 0 0 28px; border: 1px solid var(--border); border-radius: 12px;
+}
+.hero-banner.dark { display: none; }
+[data-theme="dark"] .hero-banner.light { display: none; }
+[data-theme="dark"] .hero-banner.dark { display: block; }
 .hero h1 {
   font-family: var(--serif); font-size: 44px; line-height: 1.1; font-weight: 700;
   margin: 0 0 8px; letter-spacing: -0.5px;
@@ -415,6 +422,8 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
 
 <main>
 <section class="hero">
+  <img class="hero-banner light" src="../../assets/banner.png" alt="" aria-hidden="true" width="1280" height="640">
+  <img class="hero-banner dark" src="../../assets/banner-dark.png" alt="" aria-hidden="true" width="1280" height="640">
   <h1>IRIS — Manuel utilisateur</h1>
   <p class="tagline">Interception · Resolution · Injection · Substitution. <em>Secrets are safe.</em></p>
   <div class="meta">
@@ -2382,7 +2391,7 @@ sont du territoire enterprise. Bun à client HTTP custom et pinning sont des cas
     agents MCP avec tools sensibles) qui sont les plus exposés au prompt injection. Cursor en mode
     "ask-and-apply" supervisé est statistiquement moins risqué — l'humain dans la boucle filtre.</p>
     <p>Donc même sans couvrir Cursor, le ROI sécurité d'IRIS reste élevé si vous mettez votre clé
-    Anthropic la plus sensible côté la CLI agentique plutôt que côté Cursor. C'est un choix
+    Anthropic la plus sensible côté CLI agentique plutôt que côté Cursor. C'est un choix
     de répartition, pas un défaut binaire.</p>
   </div>
 </div>
