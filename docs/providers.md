@@ -35,6 +35,7 @@ export OPENAI_API_KEY={{kc:openai_api_key}}
 |---|---|---|---|---|
 | OpenAI | `OPENAI_API_KEY` | `openai_api_key` | `api.openai.com` | header `Authorization` |
 | Anthropic | `ANTHROPIC_API_KEY` | `anthropic_api_key` | `api.anthropic.com` | header `x-api-key` |
+| Anthropic — Admin API | `ANTHROPIC_ADMIN_KEY` | `anthropic_admin_key` | `api.anthropic.com` | header `x-api-key` |
 | OpenRouter | `OPENROUTER_API_KEY` | `openrouter_api_key` | `openrouter.ai` | header `Authorization` |
 | Google Gemini (AI Studio) | `GEMINI_API_KEY` (ou `GOOGLE_API_KEY`) | `gemini_api_key` | `generativelanguage.googleapis.com` | header `x-goog-api-key` ⚠️ **pas** `?key=` |
 | Groq | `GROQ_API_KEY` | `groq_api_key` | `api.groq.com` | header `Authorization` |
@@ -57,6 +58,7 @@ export OPENAI_API_KEY={{kc:openai_api_key}}
 | Brave Search | `BRAVE_API_KEY` | `brave_api_key` | `api.search.brave.com` | header `X-Subscription-Token` |
 | ElevenLabs | `ELEVENLABS_API_KEY` | `elevenlabs_api_key` | `api.elevenlabs.io` | header `xi-api-key` |
 | Tavily | `TAVILY_API_KEY` | `tavily_api_key` | `api.tavily.com` | ⚠️ historiquement dans le **body** — OK seulement si l'outil envoie le header `Authorization` |
+| Context7 (docs, MCP) | `CONTEXT7_API_KEY` | `context7_api_key` | `mcp.context7.com` | header `CONTEXT7_API_KEY` |
 
 ## Code hosting & registries
 
