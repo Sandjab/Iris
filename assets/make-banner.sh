@@ -23,7 +23,7 @@ magick -size 1280x640 "xc:$BG" \
   -gravity NorthWest -font "$FONT" -kerning 12 \
   -fill "$NAVY" -pointsize 132 -annotate +560+175 'IRIS' \
   -kerning 0 \
-  -fill "$GOLD" -draw 'rectangle 566,338 706,350' \
+  -fill "$GOLD" -draw 'rectangle 569,288 809,300' \
   -fill "$NAVY" -pointsize 42 -annotate +564+372 'Secrets Are Safe.' \
   -fill "$GREY" -pointsize 27 -annotate +566+440 'Local credential broker for macOS' \
   "$OUT"
