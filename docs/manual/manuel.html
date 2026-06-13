@@ -70,13 +70,14 @@ main {
 }
 .nav-toggle { display: none; }
 @media (max-width: 960px) {
+  html { scroll-padding-top: 80px; } /* header sticky mesuré à 73px → ~7px d'air sous lui */
   .layout { grid-template-columns: 1fr; }
   nav.sidebar {
     position: sticky; top: 0; z-index: 20; height: auto; max-height: 100vh;
     border-right: none; border-bottom: 1px solid var(--border);
     padding: 14px 0; overflow-y: auto;
   }
-  .brand { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
+  nav.sidebar .brand { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
   .nav-toggle {
     display: block; position: absolute; top: 14px; right: 52px;
     background: none; border: 1px solid var(--border-strong); border-radius: 6px;
@@ -383,9 +384,9 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
 <body data-theme="light">
 
 <div class="layout">
-<nav class="sidebar">
+<nav class="sidebar" id="sidebar">
   <button class="theme-toggle" id="themeToggle" aria-label="Bascule thème">☾</button>
-  <button class="nav-toggle" id="navToggle" aria-label="Afficher le sommaire" aria-expanded="false">☰</button>
+  <button class="nav-toggle" id="navToggle" aria-label="Afficher le sommaire" aria-expanded="false" aria-controls="sidebar">☰</button>
   <div class="brand">
     <img class="brand-logo" src="../../assets/iris-icon-256.png" alt="" aria-hidden="true" width="32" height="32">
     <div>
