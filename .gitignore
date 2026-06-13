@@ -81,3 +81,6 @@ packaging/installer/sil-mask.png
 packaging/installer/render-bg.tmp.html
 packaging/installer/playground.html
 packaging/installer/_preview.html
+
+# Playgrounds : gros HTML d'exploration auto-suffisants (base64 embarqué) — hors versioning
+playgrounds/
