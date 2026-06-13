@@ -49,8 +49,12 @@ struct SettingsWindow: View {
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 220)
         } detail: {
             detail(for: selection)
-                .navigationTitle(selection.title)
         }
+        // NavigationSplitView n'a pas de taille intrinsèque ; sans frame minimale, le
+        // NSHostingController réduit la fenêtre à une taille dégénérée. Même pattern que
+        // BrokerPanelView. (On ne met PAS de `.navigationTitle` : il écraserait le titre
+        // « Iris Settings » de la NSWindow ; la section active est déjà indiquée par la sidebar.)
+        .frame(minWidth: 560, maxWidth: .infinity, minHeight: 400, maxHeight: .infinity)
         .task {
             // Best-effort : peuple model.config / caTrusted / autoStart / shellConfigured.
             try? await model.loadConfig(via: admin)
