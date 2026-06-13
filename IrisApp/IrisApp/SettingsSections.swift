@@ -175,7 +175,10 @@ struct CertificateSettingsView: View {
                     if model.caTrusted == true {
                         Button("Uninstall…") { caAction(install: false) }
                     } else {
+                        // Désactivé tant que l'état de confiance est inconnu (nil = en cours
+                        // de chargement) : évite une invite d'auth admin avant de savoir.
                         Button("Install…") { caAction(install: true) }
+                            .disabled(model.caTrusted == nil)
                     }
                 }
             }
@@ -221,7 +224,10 @@ struct IntegrationSettingsView: View {
                     if model.shellConfigured == true {
                         Button("Remove…") { shellAction(install: false) }
                     } else {
+                        // Désactivé tant que l'état est inconnu (nil) : évite une écriture
+                        // redondante dans le profil shell avant de connaître l'état réel.
                         Button("Configure…") { shellAction(install: true) }
+                            .disabled(model.shellConfigured == nil)
                     }
                 }
             }
