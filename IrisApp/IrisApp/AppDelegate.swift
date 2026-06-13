@@ -139,21 +139,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             event.type == .rightMouseUp
             || (event.type == .leftMouseUp && event.modifierFlags.contains(.control))
         if isSecondaryClick {
-            showQuitMenu(from: sender)
+            showStatusMenu(from: sender)
         } else {
             panelController?.toggle()
         }
     }
 
-    private func showQuitMenu(from button: NSStatusBarButton) {
+    private func showStatusMenu(from button: NSStatusBarButton) {
         let menu = NSMenu()
-        let quitItem = NSMenuItem(title: "Quit Iris", action: #selector(quit), keyEquivalent: "q")
+
+        let aboutItem = NSMenuItem(
+            title: "About Iris",
+            action: #selector(showAbout),
+            keyEquivalent: ""
+        )
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+
+        let settingsItem = NSMenuItem(
+            title: "Settings…",
+            action: #selector(openSettings),
+            keyEquivalent: ","
+        )
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(
+            title: "Quit Iris",
+            action: #selector(quit),
+            keyEquivalent: "q"
+        )
         quitItem.target = self
         menu.addItem(quitItem)
+
         // NSMenu.popUp(positioning:at:in:) is the modern (non-deprecated) replacement for
         // statusItem.popUpMenu(_:). Anchored to the button so the menu drops down from the
         // status item. Avoids the recursion risk of synthesising a click via performClick
-        // (which would re-enter handleClick and could re-trigger showQuitMenu).
+        // (which would re-enter handleClick and could re-trigger showStatusMenu).
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
     }
 
@@ -207,6 +231,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let work = DispatchWorkItem { [weak button] in button?.alphaValue = 1.0 }
         pulseWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: work)
+    }
+
+    @objc private func openSettings() {
+        appModel.selectedTab = .settings
+        panelController?.show()
+    }
+
+    @objc private func showAbout() {
+        // L'app est LSUIElement non-activante : activer avant pour que le panneau
+        // About standard passe au premier plan.
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(nil)
     }
 
     @objc private func quit() {
