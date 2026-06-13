@@ -17,6 +17,11 @@ traités : **V1, V6, R4, V5, V4, microcopy**. **V3 retiré** (sans objet, cf. §
 **Hors périmètre** : daemon, CLI, fenêtre Réglages dédiée (Lot 2), manuel web. Le `NSPanel`
 non-activant est **conservé** (choix délibéré, cf. diagnostic §1).
 
+**Langue de l'IHM : anglais.** L'app est en anglais (preuves : `SecretsTab` « No secrets. » / « Add »,
+`OverviewTab` « Since daemon start » / « Recent events », `SecurityTab` « Mark all read »). Toute
+nouvelle chaîne user-facing est donc en **anglais** pour rester homogène (Rule 11). Une localisation
+française serait un chantier séparé, hors Lot 3. Les libellés ci-dessous sont en anglais.
+
 ## 2. Décisions arbitrées
 
 | Item | Décision | Note |
@@ -74,35 +79,37 @@ séparée, ex. `LogEventRow`) — Overview garde sa ligne compacte :
 - **Lignes enrichies** avec les champs **déjà présents dans `Event` mais jamais affichés**
   (`Event.swift` : `method`, `statusCode`, `durationMs`) : `time · method · host · path · status · durée`.
   `statusCode` coloré (2xx/3xx vert, 4xx/5xx rouge/orange) ; champs optionnels (`nil`) omis proprement.
-- **Zebra subtil** sur les lignes paires (fond `.quaternary`/léger), pour le rythme.
-- Pas de regroupement temporel (complexité non justifiée ; les timestamps + l'accent suffisent).
+- **Pas de zebra** : la liste préprend les events en live → un zebra basé sur l'index re-colorie
+  toutes les lignes à chaque arrivée (scintillement). La barre d'accent + l'enrichissement portent
+  le rythme. Pas non plus de regroupement temporel (complexité non justifiée).
 
 ### 3.4 SecretsTab + RulesTab — V5 empty states guidés
 
 - **Secrets** (`SecretsTab.swift:52-55`) : remplacer le « No secrets. » centré muet par un empty
-  state **guidé** : icône (`key`) + titre « Aucun secret » + sous-texte « Ajoutez-en un pour
-  substituer vos credentials… » + **CTA central** déclenchant `route = .form(.add)` (même action
-  que le bouton « Add » du haut).
+  state **guidé** : icône (`key`) + titre « No secrets yet » + sous-texte « Add one to substitute
+  your credentials in allowed traffic. » + **CTA central** « Add secret » déclenchant
+  `route = .form(.add)` (même action que le bouton « Add » du haut).
 - **Rules** (`RulesTab.swift:54-57`) : même patron pour « No rules. » (CTA pointant le champ d'ajout
   / focus). Cohérence visuelle avec Secrets.
 
 ### 3.5 SecurityTab — V5 cohérence (`SecurityTab.swift`)
 
 - Entête : remplacer le seul « N unread » (`:13-15`), qui paraît contradictoire avec des alertes
-  listées en dessous, par « **N alertes · M non lues** » (total + non-lues). « Mark all read »
+  listées en dessous, par « **N alerts · M unread** » (total + non-lues). « Mark all read »
   inchangé.
 - Empty state « No alerts. » (`:30-33`) → patron guidé cohérent avec Secrets/Rules
-  (« Aucune alerte. » + courte phrase rassurante).
+  (« No alerts. » + courte phrase rassurante, ex. « Exfiltration attempts will appear here. »).
 
 ### 3.6 Microcopy
 
 - **Vocabulaire d'état unifié** : le tooltip de l'icône (`AppDelegate.swift:200` : `"active"`/
   `"paused"`) s'aligne sur le lexique du header (`"Up"`/`"Paused"`). Un seul vocabulaire dans toute
   l'IHM.
-- **`block_and_notify`** : humaniser le `rawValue` snake_case du Picker de politique d'exfiltration
-  (`SettingsSections.swift:84`, **fenêtre Réglages**) → libellé « Bloquer et notifier » (mapping
-  d'affichage, sans toucher la valeur transmise au daemon). *Léger débordement hors panneau, assumé
-  car item microcopy trivial.*
+- **`block_and_notify`** : humaniser les `rawValue` snake_case du Picker de politique d'exfiltration
+  (`SettingsSections.swift:84`, **fenêtre Réglages** ; enum `ExfilAttemptPolicy` : `block_only` /
+  `block_and_notify` / `block_notify_pause`) → libellés « Block only » / « Block & notify » /
+  « Block, notify & pause » (mapping d'affichage côté app, **sans** toucher le `rawValue` transmis au
+  daemon ni l'usage `rawValue` de la CLI). *Léger débordement hors panneau, assumé car microcopy trivial.*
 
 ## 4. Tests (intention, pas seulement comportement — Rule 9)
 
