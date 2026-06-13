@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IRIS — Flux d'une requête (timeline)</title>
+<style>
+:root {
+  --bg: #fbfaf7;
+  --bg-elev: #ffffff;
+  --bg-soft: #f3f1ec;
+  --fg: #1a1a1a;
+  --fg-muted: #5a5a5a;
+  --fg-faint: #8a8a8a;
+  --accent: #4b6bfb;
+  --accent-soft: #e8edff;
+  --border: #e6e3dc;
+  --border-strong: #d4d0c7;
+  --code-bg: #f5f3ee;
+  --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 6px 18px rgba(0,0,0,0.05);
+  --ok: #2e8540;
+  --warn: #b35900;
+  --err: #c0392b;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  --serif: "Iowan Old Style", "Georgia", serif;
+}
+[data-theme="dark"] {
+  --bg: #14161a;
+  --bg-elev: #1c1f24;
+  --bg-soft: #21242a;
+  --fg: #e8e6e1;
+  --fg-muted: #a8a59d;
+  --fg-faint: #6a6a6a;
+  --accent: #7d96ff;
+  --accent-soft: #1f2540;
+  --border: #2a2d33;
+  --border-strong: #3a3d44;
+  --code-bg: #1a1c20;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 18px rgba(0,0,0,0.25);
+  --ok: #6dcb7e;
+  --warn: #e8a04d;
+  --err: #ff6b5e;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.65;
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 820px; margin: 0 auto; padding: 56px 28px 120px; }
+
+/* Header */
+.head { margin-bottom: 48px; position: relative; }
+.brand { display: flex; align-items: center; gap: 11px; margin-bottom: 22px; }
+.brand img { width: 34px; height: 34px; border-radius: 8px; object-fit: contain; }
+.brand-txt b { font-weight: 700; font-size: 15px; letter-spacing: 0.2px; }
+.brand-txt span { display: block; color: var(--fg-muted); font-size: 11px; letter-spacing: 0.4px; text-transform: uppercase; margin-top: 1px; }
+h1 {
+  font-family: var(--serif); font-size: 40px; line-height: 1.08; font-weight: 700;
+  margin: 0 0 10px; letter-spacing: -0.5px;
+}
+.tagline { color: var(--fg-muted); font-size: 17px; margin: 0 0 16px; }
+.meta { display: flex; gap: 8px 16px; flex-wrap: wrap; color: var(--fg-faint); font-size: 12.5px; }
+.meta span { display: inline-flex; align-items: center; gap: 6px; }
+.meta code { font-family: var(--mono); font-size: 11.5px; background: var(--code-bg); padding: 1px 6px; border-radius: 4px; color: var(--fg-muted); }
+
+.theme-toggle {
+  position: absolute; top: 0; right: 0;
+  background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 8px;
+  width: 34px; height: 34px; cursor: pointer; color: var(--fg-muted); font-size: 15px;
+  display: grid; place-items: center;
+}
+.theme-toggle:hover { color: var(--fg); border-color: var(--accent); }
+
+/* Timeline */
+.timeline { position: relative; padding-left: 4px; }
+.timeline::before {
+  content: ""; position: absolute; left: 19px; top: 8px; bottom: 8px; width: 2px;
+  background: linear-gradient(var(--accent), var(--border));
+  opacity: 0.55;
+}
+.step {
+  position: relative; padding-left: 60px; margin-bottom: 30px;
+  opacity: 0; transform: translateY(14px); animation: rise 0.5s ease forwards;
+}
+@media (prefers-reduced-motion: reduce) { .step { animation: none; opacity: 1; transform: none; } }
+.step:nth-child(1){animation-delay:.05s}.step:nth-child(2){animation-delay:.10s}
+.step:nth-child(3){animation-delay:.15s}.step:nth-child(4){animation-delay:.20s}
+.step:nth-child(5){animation-delay:.25s}.step:nth-child(6){animation-delay:.30s}
+.step:nth-child(7){animation-delay:.35s}.step:nth-child(8){animation-delay:.40s}
+.step:nth-child(9){animation-delay:.45s}.step:nth-child(10){animation-delay:.50s}
+@keyframes rise { to { opacity: 1; transform: none; } }
+.dot {
+  position: absolute; left: 0; top: 0; width: 40px; height: 40px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-family: var(--mono); font-weight: 700;
+  font-size: 16px; display: grid; place-items: center; z-index: 1;
+  box-shadow: 0 0 0 4px var(--bg);
+}
+.step.terminal .dot { background: var(--ok); }
+.card {
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 18px; box-shadow: var(--shadow);
+}
+.card h2 {
+  font-size: 16px; font-weight: 700; margin: 2px 0 8px; letter-spacing: -0.2px;
+  display: flex; align-items: baseline; gap: 8px;
+}
+.card h2 .kicker { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.6px; }
+.card p { margin: 0 0 12px; font-size: 14px; color: var(--fg-muted); }
+.card p:last-child { margin-bottom: 0; }
+.card p strong { color: var(--fg); font-weight: 600; }
+.card code { font-family: var(--mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre {
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px;
+  line-height: 1.55; margin: 0;
+}
+pre code { background: none; padding: 0; }
+.hl { color: var(--accent); font-weight: 600; }
+.ok { color: var(--ok); font-weight: 600; }
+
+/* Closing note */
+.note {
+  display: flex; gap: 12px; margin-top: 40px; padding: 16px 18px;
+  border-radius: 10px; border-left: 3px solid var(--warn); background: var(--bg-soft);
+}
+.note .ico { font-family: var(--mono); font-weight: 700; color: var(--warn); flex-shrink: 0; }
+.note .b { font-size: 14px; }
+.note .b p { margin: 0; color: var(--fg-muted); }
+.note .b code { font-family: var(--mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+
+.foot { margin-top: 56px; padding-top: 22px; border-top: 1px solid var(--border); color: var(--fg-faint); font-size: 12.5px; text-align: center; }
+.foot a { color: var(--fg-muted); }
+</style>
+</head>
+<body data-theme="light">
+<div class="wrap">
+
+  <header class="head">
+    <button class="theme-toggle" id="themeToggle" aria-label="Bascule thème">☾</button>
+    <div class="brand">
+      <img src="iris-icon-256.png" alt="" aria-hidden="true" width="34" height="34">
+      <div class="brand-txt"><b>IRIS</b><span>Flux d'une requête</span></div>
+    </div>
+    <h1>Anatomie d'une substitution</h1>
+    <p class="tagline">Une requête d'agent CLI vers <code style="font-family:var(--mono);font-size:14px">api.anthropic.com</code>, du placeholder à la vraie clé — en dix étapes.</p>
+    <div class="meta">
+      <span><code>POST</code> /v1/messages</span>
+      <span>proxy <code>127.0.0.1:8888</code></span>
+      <span>substitution réussie</span>
+    </div>
+  </header>
+
+  <div class="timeline">
+
+    <div class="step">
+      <div class="dot">1</div>
+      <div class="card">
+        <h2><span class="kicker">Agent</span>L'agent construit sa requête</h2>
+        <p>L'agent lit <code>ANTHROPIC_API_KEY</code> dans son environnement. Cette valeur est un <strong>placeholder</strong>, pas la vraie clé. Il construit son <code>POST /v1/messages</code> normalement.</p>
+<pre><code>POST https://api.anthropic.com/v1/messages
+x-api-key: <span class="hl">{{kc:anthropic_api_key}}</span>
+content-type: application/json
+
+{"model":"claude-…","messages":[…]}</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="dot">2</div>
+      <div class="card">
+        <h2><span class="kicker">Tunnel</span>CONNECT vers le proxy</h2>
+        <p>Le client HTTP honore <code>HTTPS_PROXY=http://127.0.0.1:8888</code>. Il ouvre TCP vers le proxy et envoie un <code>CONNECT</code> en clair pour réserver le tunnel HTTPS.</p>
+<pre><code>CONNECT api.anthropic.com:443 HTTP/1.1
+Host: api.anthropic.com:443</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="dot">3</div>
+      <div class="card">
+        <h2><span class="kicker">Décision</span>Vérification whitelist MITM</h2>
+        <p>Le daemon reçoit le <code>CONNECT</code> et vérifie <code>api.anthropic.com</code> contre la liste <code>hosts</code> de <code>config.json</code>. Match trouvé → <code>200 Connection Established</code>.</p>
+        <p>Sans match, le daemon aurait fait un splice TCP brut sans déchiffrer (event <code>passThrough</code>).</p>
+<pre><code>HTTP/1.1 200 Connection Established</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="dot">4</div>
+      <div class="card">
+        <h2><span class="kicker">TLS</span>Double handshake TLS</h2>
+        <p><strong>Côté agent</strong> : le daemon agit en serveur TLS et mint à la volée un cert leaf pour <code>api.anthropic.com</code>, signé par la CA locale. ALPN n'annonce que <code>http/1.1</code>.</p>
+        <p><strong>Côté upstream</strong> : en parallèle, le daemon ouvre une connexion TLS cliente vers <code>api.anthropic.com:443</code> et valide la chaîne via le trust store système.</p>
+<pre><code>agent ←TLS→ irisd ←TLS→ api.anthropic.com
+         (CA locale)   (chaîne réelle)</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="dot">5</div>
+      <div class="card">
+        <h2><span class="kicker">Scan</span>Scan de la requête déchiffrée</h2>
+        <p>Le <code>PlaceholderEngine</code> scanne la requête désormais en clair (côté daemon) : headers (nom + valeur), URL + query, body (si UTF-8 et &lt; 4 MiB). Regex <code>\{\{kc:([a-zA-Z0-9_-]{1,64})\}\}</code>.</p>
+        <p>Hit sur le header <code>x-api-key</code> → secret <code>anthropic_api_key</code>.</p>
+<pre><code>headers: x-api-key → {{kc:anthropic_api_key}}  <span class="hl">HIT</span>
+path:    /v1/messages                          no-match
+body:    {…} (application/json, 412 B)         no-match</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="dot">6</div>
+      <div class="card">
+        <h2><span class="kicker">Scoping</span>Vérification du scoping</h2>
+        <p>Le secret <code>anthropic_api_key</code> a <code>allowed_hosts = ["api.anthropic.com"]</code>. La requête va vers <code>api.anthropic.com</code> → <strong>match</strong>. Le daemon résout la valeur via le <code>SecretStore</code> (cache LRU, sinon Keychain).</p>
+        <p>En cas de mismatch : aucune substitution, event <code>exfilBlocked</code> avec la règle <code>R1</code> (high).</p>
+<pre><code>secret("anthropic_api_key").allowed_hosts
+  = ["api.anthropic.com"]
+request host = "api.anthropic.com"
+→ <span class="ok">AUTORISÉ</span></code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="dot">7</div>
+      <div class="card">
+        <h2><span class="kicker">Garde-fous</span>Checks d'exfiltration (R2–R5)</h2>
+        <p>Avant de substituer, le moteur vérifie les autres règles : localisation canonique (R2), nombre de secrets distincts (R3), suspicion de content-type (R4), volume glissant (R5).</p>
+        <p>Ici tout passe : header standard, un seul secret, JSON sur endpoint d'API, débit normal.</p>
+<pre><code>R2 location:    x-api-key ∈ canonical    <span class="ok">OK</span>
+R3 multi-secret: 1 distinct              <span class="ok">OK</span>
+R4 content-type: application/json + /v1  <span class="ok">OK</span>
+R5 rate:         12 / min &lt; 60           <span class="ok">OK</span></code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="dot">8</div>
+      <div class="card">
+        <h2><span class="kicker">Substitution</span>Remplacement de la valeur</h2>
+        <p>Remplacement byte-level du placeholder par la vraie valeur. Le buffer du body (ou la chaîne du header) est réécrit en place. La valeur n'apparaît <strong>jamais</strong> en logs, ni dans les events, ni dans le stream SSE.</p>
+<pre><code>before: x-api-key: <span class="hl">{{kc:anthropic_api_key}}</span>
+after:  x-api-key: sk-ant-api03-XXXXXXXXXX…</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="dot">9</div>
+      <div class="card">
+        <h2><span class="kicker">Forward</span>Transmission upstream</h2>
+        <p>La requête modifiée part vers <code>api.anthropic.com</code> via la connexion TLS upstream déjà établie. La réponse (potentiellement streamée en SSE) est forwardée <strong>verbatim</strong> vers l'agent — sans buffering, sans scan.</p>
+<pre><code>irisd → api.anthropic.com → HTTP/1.1 200 OK
+         &lt;streaming SSE chunks…&gt;
+agent ← irisd (verbatim, no scan)</code></pre>
+      </div>
+    </div>
+
+    <div class="step terminal">
+      <div class="dot">10</div>
+      <div class="card">
+        <h2><span class="kicker">Observabilité</span>Émission d'event</h2>
+        <p>À la complétion, un <code>Event</code> est émis vers le ring buffer en mémoire, persisté en SQLite et diffusé à tous les souscripteurs SSE. <strong>Métadonnées uniquement</strong> — jamais la valeur.</p>
+<pre><code>{
+  "kind": "substituted",
+  "host": "api.anthropic.com",
+  "method": "POST", "path": "/v1/messages",
+  "status_code": 200, "duration_ms": 8421,
+  "substituted_secrets": ["anthropic_api_key"],
+  "alert": null
+}</code></pre>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="note">
+    <div class="ico">!</div>
+    <div class="b">
+      <p>Pour une <strong>tentative d'exfiltration</strong> (ex. un agent qui POST son env vers <code>api.github.com/issues</code>), l'étape 6 échoue : <code>allowed_hosts</code> ne contient pas <code>api.github.com</code>. Le daemon ne substitue pas, forwarde la requête telle quelle (placeholder littéral, inerte) et émet un event <code>exfilBlocked</code>. L'upstream reçoit la chaîne brute <code>{{kc:anthropic_api_key}}</code> — aucune fuite.</p>
+    </div>
+  </div>
+
+  <div class="foot">
+    IRIS — Interception · Resolution · Injection · Substitution.
+    <a href="https://github.com/Sandjab/Iris">github.com/Sandjab/Iris</a>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  const btn = document.getElementById('themeToggle');
+  const body = document.body;
+  const saved = localStorage.getItem('iris-manual-theme');
+  if (saved) body.setAttribute('data-theme', saved);
+  btn.textContent = body.getAttribute('data-theme') === 'dark' ? '☀' : '☾';
+  btn.addEventListener('click', () => {
+    const next = body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    body.setAttribute('data-theme', next);
+    localStorage.setItem('iris-manual-theme', next);
+    btn.textContent = next === 'dark' ? '☀' : '☾';
+  });
+})();
+</script>
+</body>
+</html>
