@@ -49,8 +49,9 @@ Quit Iris            ⌘Q
 ### 3.3 Action « About Iris »
 Panneau About **standard** : `NSApp.orderFrontStandardAboutPanel(nil)`. Il lit
 `CFBundleName` / `CFBundleShortVersionString` / `NSHumanReadableCopyright` depuis `Info.plist`.
-Comme l'app est `LSUIElement` non-activante, appeler `NSApp.activate(ignoringOtherApps: true)`
-**juste avant** pour que le panneau passe au premier plan.
+Comme l'app est `LSUIElement` non-activante, activer l'app **juste avant** pour que le panneau
+passe au premier plan : `NSApp.activate()` sur macOS 14+ (`activate(ignoringOtherApps:)` y est
+déprécié), `NSApp.activate(ignoringOtherApps: true)` sur la cible 13 — via `#available(macOS 14.0, *)`.
 - *À vérifier à l'implémentation* : présence des clés `Info.plist` ci-dessus (sinon le panneau
   affiche des valeurs vides) ; comportement réel d'activation (smoke).
 

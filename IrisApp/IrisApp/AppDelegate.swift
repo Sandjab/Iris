@@ -240,8 +240,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showAbout() {
         // L'app est LSUIElement non-activante : activer avant pour que le panneau
-        // About standard passe au premier plan.
-        NSApp.activate(ignoringOtherApps: true)
+        // About standard passe au premier plan. `activate(ignoringOtherApps:)` est
+        // déprécié en macOS 14 → `activate()` sur 14+, l'ancien sur la cible 13.
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         NSApp.orderFrontStandardAboutPanel(nil)
     }
 
