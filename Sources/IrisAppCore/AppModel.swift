@@ -5,7 +5,7 @@ import IrisKit
 @MainActor
 public final class AppModel: ObservableObject {
     public enum Tab: String, Sendable, CaseIterable, Codable {
-        case overview, logs, security, secrets, rules, settings
+        case overview, logs, security, secrets, rules
     }
 
     @Published public var daemonStatus: DaemonStatus = .connecting
