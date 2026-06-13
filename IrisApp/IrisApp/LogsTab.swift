@@ -39,7 +39,7 @@ struct LogsTab: View {
             }
             .menuStyle(.borderlessButton)
             .frame(width: 100)
-            Toggle("Pause", isOn: pauseBinding).toggleStyle(.button)
+            Toggle("Freeze", isOn: pauseBinding).toggleStyle(.button)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
