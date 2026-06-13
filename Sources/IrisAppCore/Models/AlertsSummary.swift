@@ -4,5 +4,5 @@ import Foundation
 /// of (read) alerts never looks empty behind a bare "0 unread" (V5).
 public func alertsSummary(total: Int, unread: Int) -> String {
     let noun = total == 1 ? "alert" : "alerts"
-    return "\(total) \(noun) · \(unread) unread"
+    return "\(total) \(noun) • \(unread) unread"
 }
