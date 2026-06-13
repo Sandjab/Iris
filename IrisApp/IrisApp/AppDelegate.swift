@@ -197,11 +197,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .up(_, _, let paused):
             symbol = paused ? "key" : "key.fill"
             dimmed = false
-            label = paused ? "paused" : "active"
+            label = paused ? "paused" : "up"
         case .down:
             symbol = "key.slash"
             dimmed = false
-            label = "stopped"
+            label = "down"
         case .connecting:
             symbol = "key"
             dimmed = true
