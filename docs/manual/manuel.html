@@ -68,9 +68,26 @@ nav.sidebar {
 main {
   max-width: 880px; padding: 48px 56px 120px; margin: 0 auto;
 }
+.nav-toggle { display: none; }
 @media (max-width: 960px) {
   .layout { grid-template-columns: 1fr; }
-  nav.sidebar { position: relative; height: auto; max-height: none; border-right: none; border-bottom: 1px solid var(--border); }
+  nav.sidebar {
+    position: sticky; top: 0; z-index: 20; height: auto; max-height: 100vh;
+    border-right: none; border-bottom: 1px solid var(--border);
+    padding: 14px 0; overflow-y: auto;
+  }
+  .brand { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
+  .nav-toggle {
+    display: block; position: absolute; top: 14px; right: 52px;
+    background: none; border: 1px solid var(--border-strong); border-radius: 6px;
+    padding: 4px 10px; cursor: pointer; color: var(--fg-muted);
+    font-size: 14px; line-height: 1;
+  }
+  .nav-toggle:hover { color: var(--fg); }
+  nav.sidebar .search,
+  nav.sidebar .toc { display: none; }
+  nav.sidebar.open .search { display: block; padding-top: 14px; }
+  nav.sidebar.open .toc { display: block; }
   main { padding: 32px 24px 80px; }
 }
 
@@ -368,6 +385,7 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
 <div class="layout">
 <nav class="sidebar">
   <button class="theme-toggle" id="themeToggle" aria-label="Bascule thème">☾</button>
+  <button class="nav-toggle" id="navToggle" aria-label="Afficher le sommaire" aria-expanded="false">☰</button>
   <div class="brand">
     <img class="brand-logo" src="../../assets/iris-icon-256.png" alt="" aria-hidden="true" width="32" height="32">
     <div>
@@ -392,7 +410,7 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
       <li class="group">Partie II — Installer & configurer</li>
       <li><a href="#install"><span class="num">8.</span>Installation</a></li>
       <li><a href="#setup-shell"><span class="num">9.</span>Configuration shell</a></li>
-      <li><a href="#config-toml"><span class="num">10.</span>Fichier config.json</a></li>
+      <li><a href="#config-json"><span class="num">10.</span>Fichier config.json</a></li>
       <li><a href="#ca-trust"><span class="num">11.</span>CA &amp; trust store</a></li>
 
       <li class="group">Partie III — La ligne de commande</li>
@@ -1428,7 +1446,7 @@ source ~/.config/fish/config.fish</code></pre>
 </div>
 
 <!-- 9. CONFIG JSON -->
-<h2 id="config-toml"><span class="chapnum">10</span>Fichier <code>config.json</code><a class="anchor" href="#config-toml">¶</a></h2>
+<h2 id="config-json"><span class="chapnum">10</span>Fichier <code>config.json</code><a class="anchor" href="#config-json">¶</a></h2>
 
 <p>
 Le daemon lit sa configuration depuis <code>~/Library/Application Support/iris/config.json</code> au
@@ -2292,8 +2310,9 @@ en revanche fonctionne dès aujourd'hui — REST + token plat dans <code>x-goog-
 <h2 id="annex-usage-limits"><span class="chapnum">B</span>Limites d'usage côté dev solo<a class="anchor" href="#annex-usage-limits">¶</a></h2>
 
 <p class="lead">
-Pendant côté usages du tableau §7 (côté fournisseurs). Inventaire honnête de ce qu'IRIS
-<strong>ne couvre pas</strong>, classé par probabilité qu'un développeur solo croise le mur.
+En miroir du tableau du §7 (compatibilité côté fournisseurs), voici l'inventaire honnête des
+usages qu'IRIS <strong>ne couvre pas</strong>, classés par probabilité qu'un développeur solo
+croise le mur.
 </p>
 
 <table>
@@ -2426,7 +2445,7 @@ sont du territoire enterprise. Bun à client HTTP custom et pinning sont des cas
 </table>
 
 <div class="footer">
-  IRIS — Manuel utilisateur, version 0.1 (mai 2026).<br>
+  IRIS — Manuel utilisateur, version 1.0 (juin 2026).<br>
   Code source, documentation technique et suivi des évolutions :
   <a href="https://github.com/Sandjab/Iris">github.com/Sandjab/Iris</a>.
 </div>
@@ -2446,6 +2465,21 @@ sont du territoire enterprise. Bun à client HTTP custom et pinning sont des cas
     body.setAttribute('data-theme', next);
     localStorage.setItem('iris-manual-theme', next);
     themeBtn.textContent = next === 'dark' ? '☀' : '☾';
+  });
+
+  // ---- Mobile nav toggle ----
+  const navToggle = document.getElementById('navToggle');
+  const sidebar = document.querySelector('nav.sidebar');
+  const isMobile = () => window.matchMedia('(max-width: 960px)').matches;
+  function setNavOpen(open) {
+    sidebar.classList.toggle('open', open);
+    navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    navToggle.textContent = open ? '✕' : '☰';
+  }
+  navToggle.addEventListener('click', () => setNavOpen(!sidebar.classList.contains('open')));
+  // Refermer le sommaire après le choix d'un chapitre (mobile uniquement)
+  document.querySelectorAll('#tocList a').forEach(a => {
+    a.addEventListener('click', () => { if (isMobile()) setNavOpen(false); });
   });
 
   // ---- TOC search ----
