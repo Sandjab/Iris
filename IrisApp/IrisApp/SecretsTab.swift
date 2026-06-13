@@ -50,9 +50,13 @@ struct SecretsTab: View {
             Divider()
 
             if model.secrets.isEmpty {
-                Spacer()
-                Text("No secrets.").foregroundStyle(.secondary)
-                Spacer()
+                GuidedEmptyState(
+                    symbol: "key",
+                    title: "No secrets yet",
+                    message: "Add one to substitute your credentials in allowed traffic.",
+                    actionTitle: "Add secret",
+                    action: { route = .form(.add) }
+                )
             } else {
                 List(model.secrets, id: \.name) { secret in
                     SecretRow(

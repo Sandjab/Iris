@@ -10,7 +10,7 @@ struct SecurityTab: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("\(model.unreadAlertCount) unread")
+                Text(alertsSummary(total: model.alerts.count, unread: model.unreadAlertCount))
                     .font(.callout)
                     .foregroundStyle(model.unreadAlertCount > 0 ? Color.red : Color.secondary)
                 Spacer()
@@ -28,9 +28,11 @@ struct SecurityTab: View {
                     .padding(.vertical, 4)
             }
             if model.alerts.isEmpty {
-                Spacer()
-                Text("No alerts.").foregroundStyle(.secondary)
-                Spacer()
+                GuidedEmptyState(
+                    symbol: "checkmark.shield",
+                    title: "No alerts",
+                    message: "Exfiltration attempts will appear here."
+                )
             } else {
                 List(sortedAlerts) { event in
                     AlertRow(
