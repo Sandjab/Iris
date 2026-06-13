@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notifications: NotificationCoordinator?
     private var statusItem: NSStatusItem?
     private var panelController: MainPanelController?
+    private var settingsWindowController: SettingsWindowController?
     private var cancellables: Set<AnyCancellable> = []
     private var pulseWorkItem: DispatchWorkItem?
 
@@ -100,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // non-activant (créé paresseusement au premier clic). Il réutilise le client `admin`
         // commun à toute l'app et l'`appModel` partagé.
         panelController = MainPanelController(admin: admin, appModel: appModel)
+        settingsWindowController = SettingsWindowController(admin: admin, appModel: appModel)
 
         let sync = SyncCoordinator(model: appModel, admin: admin, events: eventsClient)
         let model = appModel
@@ -234,8 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        appModel.selectedTab = .settings
-        panelController?.show()
+        settingsWindowController?.show()
     }
 
     @objc private func showAbout() {
