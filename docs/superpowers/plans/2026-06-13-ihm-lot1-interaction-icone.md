@@ -173,7 +173,9 @@ xcodebuild -showBuildSettings -scheme IrisApp | grep -iE 'PRODUCT_NAME|MARKETING
 - [ ] **Step 4 : (si Step 3 a modifié quelque chose) Commit**
 
 ```bash
-git add -A
+# Committer UNIQUEMENT le fichier modifié — PAS `git add -A`
+# (le working tree peut contenir des modifs non liées, ex. docs/manual/manuel.html).
+git add IrisApp/IrisApp/Info.plist   # ou le .xcodeproj si la clé est en build setting
 git commit -m "chore(ihm): copyright dans le panneau About"
 ```
 
