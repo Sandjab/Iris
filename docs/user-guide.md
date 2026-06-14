@@ -424,14 +424,16 @@ iris logs --follow --filter "host=api.anthropic.com"
 
 ### 8.3 Menu bar app
 
-L'icône d'IRIS dans la barre de menus indique l'état d'un coup d'œil. C'est la **forme** qui porte l'information — l'icône est monochrome (règle macOS pour les *menu bar extras* : noir + transparent, teinté automatiquement selon le thème clair/sombre) :
+L'icône d'IRIS dans la barre de menus indique l'état d'un coup d'œil. C'est la **forme** qui porte l'information — l'icône est monochrome (règle macOS pour les *menu bar extras* : noir + transparent, teinté automatiquement selon le thème clair/sombre).
+
+IRIS propose **deux jeux d'icônes** interchangeables dans *Settings › Appearance* : la **tête ailée** (*Winged head*, par défaut) et la **clé** (*Key*). Le tableau ci-dessous montre la tête ailée ; la clé équivalente figure entre parenthèses.
 
 | Icône | État | Signification |
 |:---:|---|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-active-dark.png"><img src="../assets/menubar-active.png" alt="clé pleine" width="22" height="22"></picture> | **active** | Daemon actif, substitution en cours |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-paused-dark.png"><img src="../assets/menubar-paused.png" alt="clé creuse" width="22" height="22"></picture> | **en pause** | Substitution suspendue (`iris pause`) |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-stopped-dark.png"><img src="../assets/menubar-stopped.png" alt="clé barrée" width="22" height="22"></picture> | **arrêté** | Daemon arrêté ou en erreur |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-connecting-dark.png"><img src="../assets/menubar-connecting.png" alt="clé atténuée" width="22" height="22"></picture> | **connexion** | Connexion au daemon en cours (icône atténuée) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-bust-active-dark.png"><img src="../assets/menubar-bust-active.png" alt="tête ailée pleine" width="22" height="22"></picture> (<picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-active-dark.png"><img src="../assets/menubar-active.png" alt="clé pleine" width="18" height="18"></picture>) | **active** | Daemon actif, substitution en cours |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-bust-paused-dark.png"><img src="../assets/menubar-bust-paused.png" alt="tête ailée en contour" width="22" height="22"></picture> (<picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-paused-dark.png"><img src="../assets/menubar-paused.png" alt="clé creuse" width="18" height="18"></picture>) | **en pause** | Substitution suspendue (`iris pause`) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-bust-stopped-dark.png"><img src="../assets/menubar-bust-stopped.png" alt="tête ailée barrée" width="22" height="22"></picture> (<picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-stopped-dark.png"><img src="../assets/menubar-stopped.png" alt="clé barrée" width="18" height="18"></picture>) | **arrêté** | Daemon arrêté ou en erreur |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-bust-connecting-dark.png"><img src="../assets/menubar-bust-connecting.png" alt="tête ailée atténuée" width="22" height="22"></picture> (<picture><source media="(prefers-color-scheme: dark)" srcset="../assets/menubar-connecting-dark.png"><img src="../assets/menubar-connecting.png" alt="clé atténuée" width="18" height="18"></picture>) | **connexion** | Connexion au daemon en cours (icône atténuée) |
 
 Un **badge** (compteur) apparaît à côté de l'icône lorsqu'une ou plusieurs alertes de sécurité non lues attendent dans l'onglet **Security**.
 

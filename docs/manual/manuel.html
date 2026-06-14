@@ -263,6 +263,10 @@ tbody tr:hover { background: var(--bg-soft); }
   display: flex; justify-content: space-between; align-items: center;
 }
 .screenshot-caption .filename { font-family: var(--mono); font-size: 11px; opacity: 0.7; }
+/* Filled screenshots — <img> replaces the placeholder frame. */
+.screenshot img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 10px 10px 0 0; }
+.screenshot.narrow { max-width: 360px; margin-left: auto; margin-right: auto; }
+.screenshot.medium { max-width: 520px; margin-left: auto; margin-right: auto; }
 
 /* Menu-bar state icons — monochrome glyphs; swap with the manual's light/dark theme */
 td.mb-icon-cell { text-align: center; white-space: nowrap; }
@@ -270,6 +274,9 @@ img.mb-icon { width: 24px; height: 24px; vertical-align: middle; }
 img.mb-icon.dark { display: none; }
 [data-theme="dark"] img.mb-icon.light { display: none; }
 [data-theme="dark"] img.mb-icon.dark { display: inline; }
+/* Alternative "key" set shown in parentheses next to the default "winged-head". */
+.mb-icon-alt { color: var(--fg-faint); margin-left: 4px; }
+.mb-icon-alt img.mb-icon { width: 19px; height: 19px; }
 
 /* Coming soon card */
 .coming-soon {
@@ -1317,7 +1324,7 @@ avertissement Gatekeeper. L'assistant guidé installe :
 </div>
 
 <div class="screenshot">
-  <div class="screenshot-frame">[Capture : assistant d'installation .pkg — écran d'accueil]</div>
+  <img src="screenshots/02-pkg-installer-welcome.png" alt="Écran d'accueil de l'assistant d'installation Iris.pkg">
   <div class="screenshot-caption">
     <span>Écran d'accueil de l'installeur Iris.pkg</span>
     <span class="filename">screenshots/02-pkg-installer-welcome.png</span>
@@ -1325,7 +1332,15 @@ avertissement Gatekeeper. L'assistant guidé installe :
 </div>
 
 <div class="screenshot">
-  <div class="screenshot-frame">[Capture : assistant — confirmation de fin d'installation avec liste des composants installés]</div>
+  <img src="screenshots/pkg-installer-readme.png" alt="Assistant d'installation — écran des prérequis (macOS 13+)">
+  <div class="screenshot-caption">
+    <span>Prérequis affichés par l'assistant (gate macOS 13 Ventura)</span>
+    <span class="filename">screenshots/pkg-installer-readme.png</span>
+  </div>
+</div>
+
+<div class="screenshot">
+  <img src="screenshots/03-pkg-installer-success.png" alt="Assistant d'installation — confirmation de fin d'installation">
   <div class="screenshot-caption">
     <span>Confirmation post-installation</span>
     <span class="filename">screenshots/03-pkg-installer-success.png</span>
@@ -1576,6 +1591,14 @@ par <code>SecKeyCreateSignature</code> qui garde la clé dans le Keychain.
   </div>
 </div>
 
+<div class="screenshot medium">
+  <img src="screenshots/settings-certificate.png" alt="Fenêtre Réglages — onglet Certificate (état Trusted, bouton Uninstall)">
+  <div class="screenshot-caption">
+    <span>Fenêtre Réglages — onglet Certificate : statut <em>Trusted</em></span>
+    <span class="filename">screenshots/settings-certificate.png</span>
+  </div>
+</div>
+
 <!-- ============================================================ -->
 <!-- PARTIE III — UTILISER -->
 <!-- ============================================================ -->
@@ -1713,7 +1736,7 @@ iris secret unquarantine anthropic_api_key</code></pre>
 iris secret rm openai_api_key --yes</code></pre>
 
 <div class="screenshot">
-  <div class="screenshot-frame">[Capture : terminal — sortie de `iris secret list` avec 4 secrets]</div>
+  <img src="screenshots/09-iris-secret-list.png" alt="Terminal — sortie de iris secret list (table des secrets)">
   <div class="screenshot-caption">
     <span>iris secret list — vue tabulaire</span>
     <span class="filename">screenshots/09-iris-secret-list.png</span>
@@ -1968,7 +1991,7 @@ iris resume
 [ok]  claude-apikeyhelper-absent  — not set</code></pre>
 
 <div class="screenshot">
-  <div class="screenshot-frame">[Capture : terminal — sortie iris doctor tout vert]</div>
+  <img src="screenshots/07-iris-doctor-ok.png" alt="Terminal — sortie de iris doctor, tous les contrôles au vert">
   <div class="screenshot-caption">
     <span>iris doctor — diagnostic complet OK</span>
     <span class="filename">screenshots/07-iris-doctor-ok.png</span>
@@ -1991,24 +2014,29 @@ L'icône signale l'état du daemon d'un coup d'œil. Conformément aux règles m
 <em>menu bar extras</em> (monochrome, noir + transparent), c'est la <strong>forme</strong> qui porte
 l'information — jamais la couleur ; macOS la teinte automatiquement selon le thème clair ou sombre.
 </p>
+<p>
+IRIS propose <strong>deux jeux d'icônes</strong> interchangeables dans <em>Réglages › Appearance</em> :
+la <strong>tête ailée</strong> (par défaut) et la <strong>clé</strong>. Le tableau ci-dessous montre la
+tête ailée ; la clé équivalente figure <span class="mb-icon-alt">entre parenthèses</span>.
+</p>
 
 <table>
   <thead><tr><th>Icône</th><th>État</th><th>Signification</th></tr></thead>
   <tbody>
     <tr>
-      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-active.png" alt="clé pleine"><img class="mb-icon dark" src="../../assets/menubar-active-dark.png" alt="clé pleine"></td>
+      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-bust-active.png" alt="tête ailée pleine"><img class="mb-icon dark" src="../../assets/menubar-bust-active-dark.png" alt="tête ailée pleine"> <span class="mb-icon-alt">(<img class="mb-icon light" src="../../assets/menubar-active.png" alt="clé pleine"><img class="mb-icon dark" src="../../assets/menubar-active-dark.png" alt="clé pleine">)</span></td>
       <td><strong>active</strong></td><td>Daemon actif, substitution en cours.</td>
     </tr>
     <tr>
-      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-paused.png" alt="clé creuse"><img class="mb-icon dark" src="../../assets/menubar-paused-dark.png" alt="clé creuse"></td>
+      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-bust-paused.png" alt="tête ailée en contour"><img class="mb-icon dark" src="../../assets/menubar-bust-paused-dark.png" alt="tête ailée en contour"> <span class="mb-icon-alt">(<img class="mb-icon light" src="../../assets/menubar-paused.png" alt="clé creuse"><img class="mb-icon dark" src="../../assets/menubar-paused-dark.png" alt="clé creuse">)</span></td>
       <td><strong>en pause</strong></td><td>Substitution suspendue (<code>iris pause</code>).</td>
     </tr>
     <tr>
-      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-stopped.png" alt="clé barrée"><img class="mb-icon dark" src="../../assets/menubar-stopped-dark.png" alt="clé barrée"></td>
+      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-bust-stopped.png" alt="tête ailée barrée"><img class="mb-icon dark" src="../../assets/menubar-bust-stopped-dark.png" alt="tête ailée barrée"> <span class="mb-icon-alt">(<img class="mb-icon light" src="../../assets/menubar-stopped.png" alt="clé barrée"><img class="mb-icon dark" src="../../assets/menubar-stopped-dark.png" alt="clé barrée">)</span></td>
       <td><strong>arrêté</strong></td><td>Daemon arrêté ou en erreur.</td>
     </tr>
     <tr>
-      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-connecting.png" alt="clé atténuée"><img class="mb-icon dark" src="../../assets/menubar-connecting-dark.png" alt="clé atténuée"></td>
+      <td class="mb-icon-cell"><img class="mb-icon light" src="../../assets/menubar-bust-connecting.png" alt="tête ailée atténuée"><img class="mb-icon dark" src="../../assets/menubar-bust-connecting-dark.png" alt="tête ailée atténuée"> <span class="mb-icon-alt">(<img class="mb-icon light" src="../../assets/menubar-connecting.png" alt="clé atténuée"><img class="mb-icon dark" src="../../assets/menubar-connecting-dark.png" alt="clé atténuée">)</span></td>
       <td><strong>connexion</strong></td><td>Connexion au daemon en cours — icône atténuée.</td>
     </tr>
   </tbody>
@@ -2055,6 +2083,7 @@ valeur n'est jamais affichée, même en édition (invariant I2).
 <h3>Onglet Settings</h3>
 <p>L'onglet <em>Settings</em> regroupe, en sections :</p>
 <ul>
+  <li><strong>Appearance</strong> — jeu d'icônes de la barre de menus : <em>Winged head</em> (tête ailée, par défaut) ou <em>Key</em> (clé).</li>
   <li><strong>Security</strong> — politique <code>on_exfil_attempt</code> et plafond de substitutions par minute.</li>
   <li><strong>Backups</strong> — nombre de sauvegardes de <code>config.json</code> conservées.</li>
   <li><strong>Certificate Authority</strong> — statut <em>Trusted / Not trusted</em>, boutons <em>Install…</em> / <em>Uninstall…</em>.</li>
@@ -2074,19 +2103,51 @@ valeur n'est jamais affichée, même en édition (invariant I2).
   </div>
 </div>
 
-<div class="screenshot">
-  <div class="screenshot-frame">[Capture : panneau Iris ouvert sur l'onglet Overview — compteurs et events récents]</div>
+<div class="screenshot narrow">
+  <img src="screenshots/13-app-popover.png" alt="Panneau menu-bar — onglet Overview (compteurs et events récents)">
   <div class="screenshot-caption">
     <span>Panneau menu-bar — onglet Overview</span>
     <span class="filename">screenshots/13-app-popover.png</span>
   </div>
 </div>
 
-<div class="screenshot">
-  <div class="screenshot-frame">[Capture : onglet Secrets — liste avec hosts, badges et actions par secret]</div>
+<div class="screenshot narrow">
+  <img src="screenshots/10-app-secrets-tab.png" alt="Panneau menu-bar — onglet Secrets (liste des secrets, hosts, actions)">
   <div class="screenshot-caption">
     <span>Onglet Secrets</span>
     <span class="filename">screenshots/10-app-secrets-tab.png</span>
+  </div>
+</div>
+
+<div class="screenshot narrow">
+  <img src="screenshots/app-logs-tab.png" alt="Panneau menu-bar — onglet Logs (flux d'events, filtres, Freeze)">
+  <div class="screenshot-caption">
+    <span>Onglet Logs — flux d'events en direct</span>
+    <span class="filename">screenshots/app-logs-tab.png</span>
+  </div>
+</div>
+
+<div class="screenshot narrow">
+  <img src="screenshots/app-security-tab.png" alt="Panneau menu-bar — onglet Security (alertes, état vide)">
+  <div class="screenshot-caption">
+    <span>Onglet Security — alertes d'exfiltration</span>
+    <span class="filename">screenshots/app-security-tab.png</span>
+  </div>
+</div>
+
+<div class="screenshot narrow">
+  <img src="screenshots/app-rules-tab.png" alt="Panneau menu-bar — onglet Rules (whitelist MITM)">
+  <div class="screenshot-caption">
+    <span>Onglet Rules — whitelist MITM</span>
+    <span class="filename">screenshots/app-rules-tab.png</span>
+  </div>
+</div>
+
+<div class="screenshot medium">
+  <img src="screenshots/settings-appearance.png" alt="Fenêtre Réglages — onglet General (jeu d'icônes, sécurité, sauvegardes)">
+  <div class="screenshot-caption">
+    <span>Fenêtre Réglages — onglet General (<em>Appearance</em> : jeu d'icônes)</span>
+    <span class="filename">screenshots/settings-appearance.png</span>
   </div>
 </div>
 
@@ -2123,6 +2184,14 @@ Ouverture</em>. Si macOS exige une approbation, l'app l'indique et propose d'ouv
   </div>
 </div>
 
+<div class="screenshot medium">
+  <img src="screenshots/settings-integration.png" alt="Fenêtre Réglages — onglet Integration (Terminal configuré, Launch at login)">
+  <div class="screenshot-caption">
+    <span>Fenêtre Réglages — onglet Integration : terminal + démarrage au login</span>
+    <span class="filename">screenshots/settings-integration.png</span>
+  </div>
+</div>
+
 <h3>Lancement manuel (développement)</h3>
 <p>Pour un build depuis les sources, sans bundle ni <code>SMAppService</code> :</p>
 
@@ -2154,6 +2223,14 @@ hardened runtime ; l'ACL Keychain est liée à la signature d'<code>irisd</code>
   l'app). Utile si l'app a déjà été jetée. Demande le mot de passe ; les secrets ne sont supprimés
   qu'avec l'option explicite.</li>
 </ol>
+
+<div class="screenshot medium">
+  <img src="screenshots/settings-uninstall.png" alt="Dialogue de désinstallation — choix garder ou supprimer les secrets">
+  <div class="screenshot-caption">
+    <span>Dialogue <em>Quit &amp; Uninstall</em> — « garder » ou « supprimer » les secrets</span>
+    <span class="filename">screenshots/settings-uninstall.png</span>
+  </div>
+</div>
 
 <div class="callout callout-warn">
   <div class="icon">!</div>
