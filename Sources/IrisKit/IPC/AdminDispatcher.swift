@@ -157,7 +157,8 @@ public struct AdminDispatcher: Sendable {
                 pid: daemon.processID,
                 uptimeS: uptime,
                 version: daemon.version,
-                stats: stats
+                stats: stats,
+                paused: daemon.isPaused
             )
             return try JSONValue.encoding(status)
         case .daemonStats:

@@ -32,7 +32,8 @@ final class TextFormatterTests: XCTestCase {
             pid: 4242,
             uptimeS: 3661,
             version: "0.5.0-phase5",
-            stats: DaemonStats(reqTotal: 10, subTotal: 7, exfilBlockedTotal: 1, errorsTotal: 0)
+            stats: DaemonStats(reqTotal: 10, subTotal: 7, exfilBlockedTotal: 1, errorsTotal: 0),
+            paused: false
         )
         let line = TextFormatter.status(status)
         XCTAssertTrue(line.contains("pid=4242"))

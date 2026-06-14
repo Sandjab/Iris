@@ -9,7 +9,8 @@ final class FakeAdminCalling: AdminCalling, @unchecked Sendable {
         pid: 1,
         uptimeS: 0,
         version: "test",
-        stats: .zero
+        stats: .zero,
+        paused: false
     )
     var stubStats: DaemonStats = .zero
     var stubEvents: [Event] = []
