@@ -706,7 +706,7 @@ config.reload()                               → { reloaded: true, ignored: [..
 config.get()                                  → Config              (sanitized)
 config.set(updates: [{key, value}])           → { applied: [...], requires_restart: [...] }
 
-daemon.status()                               → { pid, uptime_s, version, stats }
+daemon.status()                               → { pid, uptime_s, version, stats, paused }
 daemon.pause()                                → { paused: true }
 daemon.resume()                               → { paused: false }
 daemon.stats()                                → { req_total, sub_total, exfil_blocked_total, ... }
@@ -851,8 +851,9 @@ Click opens the app's Security tab focused on that event.
 
 App holds an `@MainActor`-isolated `AppModel: ObservableObject`. Source of state:
 
-- Initial snapshot via admin RPC `daemon.stats()`, `secret.list()`, `rule.list()`, recent `events.query()`.
+- Initial snapshot via admin RPC `daemon.status()`, `secret.list()`, `rule.list()`, recent `events.query()`.
 - Live updates via SSE stream.
+- Periodic `daemon.status()` poll (~5 s) refreshes stats and **pause state**, so a pause/resume triggered out-of-band (CLI or another client) propagates to the UI — icon and status indicator — even while the SSE stream stays connected.
 - Mutations always go through admin RPC; UI updates after RPC ack to ensure consistency.
 
 ---

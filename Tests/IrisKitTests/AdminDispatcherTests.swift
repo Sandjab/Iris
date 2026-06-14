@@ -204,6 +204,22 @@ final class AdminDispatcherTests: XCTestCase {
         XCTAssertLessThan(status.uptimeS, 130)
     }
 
+    func testDaemonStatusReflectsPausedState() async throws {
+        // #54 — a pause triggered out-of-band (e.g. `iris pause` from the CLI)
+        // must surface in daemon.status so the UI can mirror it without acting itself.
+        let daemon = FakeDaemon()
+        let (dispatcher, _, _) = try await makeDispatcher(daemon: daemon)
+
+        let before = try unwrapResult(await dispatcher.dispatch(request(.daemonStatus)))
+            .decode(as: DaemonStatus.self)
+        XCTAssertFalse(before.paused, "fresh daemon must report paused=false")
+
+        daemon.setPaused(true)
+        let after = try unwrapResult(await dispatcher.dispatch(request(.daemonStatus)))
+            .decode(as: DaemonStatus.self)
+        XCTAssertTrue(after.paused, "daemon.status must reflect an out-of-band pause")
+    }
+
     func testDaemonStatsReflectsEventRingCounters() async throws {
         let ring = EventRing(capacity: 16)
         for kind in [Event.Kind.substituted, .substituted, .noMatch, .exfilBlocked, .error, .passThrough] {

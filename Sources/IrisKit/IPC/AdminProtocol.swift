@@ -179,19 +179,22 @@ public struct DaemonStatus: Codable, Sendable, Equatable {
     public let uptimeS: UInt64
     public let version: String
     public let stats: DaemonStats
+    public let paused: Bool
 
     enum CodingKeys: String, CodingKey {
         case pid
         case uptimeS = "uptime_s"
         case version
         case stats
+        case paused
     }
 
-    public init(pid: Int32, uptimeS: UInt64, version: String, stats: DaemonStats) {
+    public init(pid: Int32, uptimeS: UInt64, version: String, stats: DaemonStats, paused: Bool) {
         self.pid = pid
         self.uptimeS = uptimeS
         self.version = version
         self.stats = stats
+        self.paused = paused
     }
 }
 

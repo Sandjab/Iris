@@ -24,7 +24,8 @@ final class SyncCoordinatorTests: XCTestCase {
             pid: 42,
             uptimeS: 100,
             version: "test",
-            stats: DaemonStats(reqTotal: 5, subTotal: 3, exfilBlockedTotal: 0, errorsTotal: 0)
+            stats: DaemonStats(reqTotal: 5, subTotal: 3, exfilBlockedTotal: 0, errorsTotal: 0),
+            paused: false
         )
         admin.stubEvents = [
             Event(
@@ -51,6 +52,28 @@ final class SyncCoordinatorTests: XCTestCase {
             XCTAssertEqual(stats.reqTotal, 5)
             XCTAssertEqual(uptime, 100)
             XCTAssertFalse(paused)
+        } else {
+            XCTFail("expected .up, got \(model.daemonStatus)")
+        }
+    }
+
+    func testBootstrapReadsPausedFromStatus() async throws {
+        // #54 — bootstrap must surface the daemon's real pause state, not infer false.
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        admin.stubStatus = IrisKit.DaemonStatus(
+            pid: 1,
+            uptimeS: 0,
+            version: "test",
+            stats: .zero,
+            paused: true
+        )
+        let coord = SyncCoordinator(model: model, admin: admin, events: FakeEventsSubscribing())
+
+        try await coord.bootstrap()
+
+        if case .up(_, _, let paused) = model.daemonStatus {
+            XCTAssertTrue(paused, "bootstrap must surface the daemon's paused state")
         } else {
             XCTFail("expected .up, got \(model.daemonStatus)")
         }
@@ -176,6 +199,34 @@ final class SyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(sleeper.delays, [1, 1, 1, 1, 1])
     }
 
+    func testReconnectAdoptsPausedFromStatus() async throws {
+        // #54 — after an SSE drop, the status refetch must adopt the daemon's
+        // real paused state rather than preserving the stale local value.
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        let events = FakeEventsSubscribing()
+        events.autoFinishCount = 100
+        let sleeper = FakeSleeper()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events, sleeper: sleeper)
+
+        model.daemonStatus = .up(stats: .zero, uptime: 0, paused: false)
+        admin.stubStatus = IrisKit.DaemonStatus(
+            pid: 1,
+            uptimeS: 0,
+            version: "test",
+            stats: .zero,
+            paused: true
+        )
+
+        try await coord.runStreamWithReconnect(maxAttempts: 1)
+
+        if case .up(_, _, let paused) = model.daemonStatus {
+            XCTAssertTrue(paused, "reconnect must adopt the daemon's paused state")
+        } else {
+            XCTFail("expected up, got \(model.daemonStatus)")
+        }
+    }
+
     func testReconnectMarksDaemonDownAfterThreeStatusFailures() async throws {
         let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
         let admin = FakeAdminCalling()
@@ -205,7 +256,13 @@ final class SyncCoordinatorTests: XCTestCase {
         let coord = SyncCoordinator(model: model, admin: admin, events: events, sleeper: sleeper)
 
         model.daemonStatus = .up(stats: .zero, uptime: 0, paused: false)
-        admin.stubStats = DaemonStats(reqTotal: 42, subTotal: 7, exfilBlockedTotal: 1, errorsTotal: 0)
+        admin.stubStatus = IrisKit.DaemonStatus(
+            pid: 1,
+            uptimeS: 0,
+            version: "test",
+            stats: DaemonStats(reqTotal: 42, subTotal: 7, exfilBlockedTotal: 1, errorsTotal: 0),
+            paused: false
+        )
 
         try await coord.runStatsPoll(intervalSeconds: 5, maxTicks: 3)
 
@@ -215,6 +272,56 @@ final class SyncCoordinatorTests: XCTestCase {
         } else {
             XCTFail("expected up")
         }
+    }
+
+    func testStatsPollPropagatesPausedFromDaemon() async throws {
+        // #54 — an out-of-band pause must reach the UI via the periodic poll,
+        // even while the SSE stream stays connected (so no reconnect fires).
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        let events = FakeEventsSubscribing()
+        let sleeper = FakeSleeper()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events, sleeper: sleeper)
+
+        model.daemonStatus = .up(stats: .zero, uptime: 0, paused: false)
+        admin.stubStatus = IrisKit.DaemonStatus(
+            pid: 1,
+            uptimeS: 0,
+            version: "test",
+            stats: .zero,
+            paused: true
+        )
+
+        try await coord.runStatsPoll(intervalSeconds: 5, maxTicks: 1)
+
+        if case .up(_, _, let paused) = model.daemonStatus {
+            XCTAssertTrue(paused, "stats poll must propagate the daemon's paused state")
+        } else {
+            XCTFail("expected up")
+        }
+    }
+
+    func testStatsPollDoesNotOverwriteConcurrentDownTransition() async throws {
+        // Gemini (PR #66) — the `guard case .up` is checked BEFORE `await fetchStatus()`.
+        // If another task (e.g. runStreamWithReconnect) flips the state to .down during
+        // that await, the poll must NOT blindly re-promote it to .up afterwards.
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        let events = FakeEventsSubscribing()
+        let sleeper = FakeSleeper()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events, sleeper: sleeper)
+
+        model.daemonStatus = .up(stats: .zero, uptime: 0, paused: false)
+        // Simulate the race: the daemon goes down while the status fetch is in flight.
+        admin.onFetchStatus = { model.daemonStatus = .down(reason: .notRunning) }
+
+        try await coord.runStatsPoll(intervalSeconds: 5, maxTicks: 1)
+
+        XCTAssertEqual(
+            model.daemonStatus,
+            .down(reason: .notRunning),
+            "poll must not overwrite a concurrent .down transition with a stale .up"
+        )
     }
 
     func testStatsPollSkipsUpdateIfNotUp() async throws {
@@ -229,7 +336,7 @@ final class SyncCoordinatorTests: XCTestCase {
         try await coord.runStatsPoll(intervalSeconds: 5, maxTicks: 2)
 
         XCTAssertEqual(model.daemonStatus, .down(reason: .notRunning))
-        XCTAssertEqual(admin.calls.filter { $0 == "stats" }.count, 0)
+        XCTAssertEqual(admin.calls.filter { $0 == "status" }.count, 0)
     }
 
     func testBootstrapPopulatesSecretsAndRules() async throws {

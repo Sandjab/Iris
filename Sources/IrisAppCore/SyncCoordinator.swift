@@ -36,7 +36,7 @@ public final class SyncCoordinator {
             model.daemonStatus = .up(
                 stats: status.stats,
                 uptime: TimeInterval(status.uptimeS),
-                paused: false  // SPECS §15.4 — pause state isn't in daemon.status; infer false on bootstrap
+                paused: status.paused  // SPECS §15.4 — daemon.status carries the live pause state
             )
             model.ingestBatch(recent.reversed())  // oldest first → newest will end up at head
             model.secrets = secrets.sorted { $0.name < $1.name }
@@ -102,19 +102,11 @@ public final class SyncCoordinator {
                 let status = try await admin.fetchStatus()
                 statusFailures = 0
                 attempt = 0  // Reset backoff so a future drop after stability starts at 1s.
-                if case .up(_, _, let paused) = model.daemonStatus {
-                    model.daemonStatus = .up(
-                        stats: status.stats,
-                        uptime: TimeInterval(status.uptimeS),
-                        paused: paused
-                    )
-                } else {
-                    model.daemonStatus = .up(
-                        stats: status.stats,
-                        uptime: TimeInterval(status.uptimeS),
-                        paused: false
-                    )
-                }
+                model.daemonStatus = .up(
+                    stats: status.stats,
+                    uptime: TimeInterval(status.uptimeS),
+                    paused: status.paused
+                )
             } catch {
                 statusFailures += 1
                 if statusFailures >= 3 {
@@ -134,9 +126,12 @@ public final class SyncCoordinator {
         return backoffs[index]
     }
 
-    /// Periodic stats poll. Sleeps `intervalSeconds`, fetches daemon stats, updates `daemonStatus.stats` if daemon is up.
+    /// Periodic status poll. Sleeps `intervalSeconds`, fetches `daemon.status`, refreshes
+    /// `daemonStatus` (stats, uptime, and pause state) if the daemon is up. Polling the full
+    /// status — not just stats — is what propagates an out-of-band `iris pause`/`resume` to the
+    /// UI while the SSE stream stays connected (SPECS §15.4, #54).
     /// Skips update if daemon is not up (SSE reconnect path manages state transitions).
-    /// Errors are logged at debug level and swallowed; stats poll errors do not promote daemon to down.
+    /// Errors are logged at debug level and swallowed; poll errors do not promote daemon to down.
     /// `maxTicks == nil` runs forever (production). Tests pass a finite cap.
     public func runStatsPoll(intervalSeconds: Double = 5, maxTicks: Int? = nil) async throws {
         var ticks = 0
@@ -144,12 +139,21 @@ public final class SyncCoordinator {
             if let max = maxTicks, ticks >= max { return }
             ticks += 1
             try await sleeper.sleep(seconds: intervalSeconds)
-            guard case .up(_, let uptime, let paused) = model.daemonStatus else { continue }
+            guard case .up = model.daemonStatus else { continue }
             do {
-                let stats = try await admin.fetchStats()
-                model.daemonStatus = .up(stats: stats, uptime: uptime, paused: paused)
+                let status = try await admin.fetchStatus()
+                // Re-check after the await: another task (e.g. runStreamWithReconnect)
+                // may have transitioned the daemon to .down while the fetch was in
+                // flight — don't blindly re-promote it to .up (PR #66 race fix).
+                if case .up = model.daemonStatus {
+                    model.daemonStatus = .up(
+                        stats: status.stats,
+                        uptime: TimeInterval(status.uptimeS),
+                        paused: status.paused
+                    )
+                }
             } catch {
-                logger.debug("stats poll skipped: \(error)")
+                logger.debug("status poll skipped: \(error)")
             }
         }
     }
