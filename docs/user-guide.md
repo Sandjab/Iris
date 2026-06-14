@@ -426,7 +426,7 @@ iris logs --follow --filter "host=api.anthropic.com"
 
 L'icône d'IRIS dans la barre de menus indique l'état d'un coup d'œil. C'est la **forme** qui porte l'information — l'icône est monochrome (règle macOS pour les *menu bar extras* : noir + transparent, teinté automatiquement selon le thème clair/sombre).
 
-IRIS propose **deux jeux d'icônes** interchangeables dans *Settings › Appearance* : la **tête ailée** (*Winged head*, par défaut) et la **clé** (*Key*). Le tableau ci-dessous montre la tête ailée ; la clé équivalente figure entre parenthèses.
+IRIS propose **deux jeux d'icônes** interchangeables dans *Settings › General › Appearance* : la **tête ailée** (*Winged head*, par défaut) et la **clé** (*Key*). Le tableau ci-dessous montre la tête ailée ; la clé équivalente figure entre parenthèses.
 
 | Icône | État | Signification |
 |:---:|---|---|
