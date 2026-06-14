@@ -1583,8 +1583,8 @@ La clé privée de la CA n'est <strong>jamais</strong> extraite : les opération
 par <code>SecKeyCreateSignature</code> qui garde la clé dans le Keychain.
 </p>
 
-<div class="screenshot">
-  <div class="screenshot-frame">[Capture : Keychain Access — entrée "IRIS local CA" avec détails ECDSA P-256]</div>
+<div class="screenshot narrow">
+  <img src="screenshots/14-keychain-ca-entry.png" alt="Keychain Access — certificat IRIS local CA (ECDSA P-256, secp256r1)">
   <div class="screenshot-caption">
     <span>Trousseau d'accès — CA IRIS</span>
     <span class="filename">screenshots/14-keychain-ca-entry.png</span>
@@ -1834,7 +1834,7 @@ iris logs --follow
 iris logs --follow --filter "kind=exfilBlocked"</code></pre>
 
 <div class="screenshot">
-  <div class="screenshot-frame">[Capture : terminal — `iris logs --follow` en cours avec 3 events colorés]</div>
+  <img src="screenshots/12-iris-logs-follow.png" alt="Terminal — iris logs --follow : flux d'events (passThrough, error, substituted)">
   <div class="screenshot-caption">
     <span>iris logs --follow — stream live</span>
     <span class="filename">screenshots/12-iris-logs-follow.png</span>
