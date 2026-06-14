@@ -1,3 +1,4 @@
+import IrisAppCore
 import IrisKit
 import SwiftUI
 
@@ -9,6 +10,7 @@ struct LogEventRow: View {
     let event: Event
 
     var body: some View {
+        let endpoint = eventEndpoint(method: event.method, host: event.host, path: event.path)
         HStack(spacing: 7) {
             RoundedRectangle(cornerRadius: 1.5)
                 .fill(accent)
@@ -18,8 +20,10 @@ struct LogEventRow: View {
             Text(event.method)
                 .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                 .frame(minWidth: 32, alignment: .leading)
-            Text(event.host).font(.callout).fontWeight(.medium)
-            Text(event.path).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            Text(endpoint.primary).font(.callout).fontWeight(.medium)
+            if !endpoint.secondary.isEmpty {
+                Text(endpoint.secondary).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            }
             Spacer(minLength: 6)
             if let code = event.statusCode {
                 Text("\(code)")

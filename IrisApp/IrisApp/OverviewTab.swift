@@ -101,12 +101,15 @@ struct EventRow: View {
     let event: Event
 
     var body: some View {
+        let endpoint = eventEndpoint(method: event.method, host: event.host, path: event.path)
         HStack(spacing: 8) {
             Text(timeString(event.timestamp)).font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             kindBadge
-            Text(event.host).font(.callout)
-            Text(event.path).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            Text(endpoint.primary).font(.callout)
+            if !endpoint.secondary.isEmpty {
+                Text(endpoint.secondary).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            }
             Spacer()
         }
     }
