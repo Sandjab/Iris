@@ -7,6 +7,7 @@
 
 <p align="center">
   <a href="https://github.com/Sandjab/Iris/actions/workflows/ci.yml"><img src="https://github.com/Sandjab/Iris/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://sandjab.github.io/Iris/"><img src="https://img.shields.io/badge/docs-user%20manual-0E2A47" alt="User Manual"></a>
   <img src="https://img.shields.io/badge/platform-macOS%2013%2B-0E2A47" alt="macOS 13+">
   <img src="https://img.shields.io/badge/Swift-5.9%2B-F05138" alt="Swift 5.9+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
@@ -15,15 +16,23 @@
 > **IRIS: Interception · Resolution · Injection · Substitution**
 
 > [!NOTE]
-> **v1.0.0 — first stable release.** IRIS is a young project, but the 1.0 API,
-> configuration formats, and behavior are now stable. Feedback and bug reports
-> are very welcome.
+> **v1.0.1 — latest stable release.** The 1.0 API, configuration formats, and
+> behavior are stable. See the [releases](https://github.com/Sandjab/Iris/releases)
+> and the [changelog](CHANGELOG.md). Feedback and bug reports are very welcome.
 
 A minimal credential broker for macOS that lets local AI agents (like Claude Code CLI) use real credentials without ever seeing them.
 
 Named after the Greek messenger goddess who carried messages between worlds without altering them: IRIS sits between your agent and the upstream APIs, carrying authenticated requests through while keeping the actual credentials on the far side of a trust boundary.
 
-IRIS runs as a background LaunchAgent paired with a menu bar app — both register with `SMAppService` on first launch and relaunch automatically at every login. It exposes a local HTTPS proxy that intercepts outbound traffic, substitutes placeholders like `{{kc:anthropic_api_key}}` with real values pulled from the macOS Keychain, and forwards the request upstream. The agent's process environment only ever contains the placeholders.
+IRIS runs as a background LaunchAgent paired with a menu bar app. It exposes a local HTTPS proxy that intercepts outbound traffic, substitutes placeholders like `{{kc:anthropic_api_key}}` with real values pulled from the macOS Keychain, and forwards the request upstream. The agent's process environment only ever contains the placeholders.
+
+## 📖 Documentation
+
+**[Read the full user manual → sandjab.github.io/Iris](https://sandjab.github.io/Iris/)**
+
+The manual is the source of truth for day-to-day use: installation, configuration,
+the CLI reference, the menu bar app, the security model, provider compatibility,
+and uninstall. This README is just the overview.
 
 ## Why
 
@@ -43,7 +52,7 @@ IRIS is a single-user, single-machine implementation of that pattern. No cloud, 
 
 ## How IRIS compares to existing approaches
 
-Several mechanisms exist to manage credentials for AI coding agents. They sit at different layers and make different trade-offs.
+Several mechanisms manage credentials for AI coding agents. They sit at different layers and make different trade-offs — IRIS is one point in that space, optimized for a local, single-user setup. The table below is a best-effort summary; the other projects are actively developed, so check their own docs for current capabilities.
 
 |  | IRIS | Agent Vault (Infisical) | `apiKeyHelper` (native) | `op run` (1Password) | Claude Code sandbox |
 |---|---|---|---|---|---|
@@ -51,54 +60,40 @@ Several mechanisms exist to manage credentials for AI coding agents. They sit at
 | Covers MCP server tokens | ✅ | ✅ | ❌ Anthropic key only | ✅ | partial |
 | Covers Bash tools (`gh`, `aws`, etc.) | ✅ | ✅ | ❌ | ✅ (env inheritance) | ✅ |
 | Per-destination scoping | ✅ | partial | ❌ | ❌ | host allowlist |
-| Exfiltration detection | ✅ 5 rules | basic logs | ❌ | ❌ | ❌ |
+| Exfiltration detection | ✅ 5 rules | audit logs | ❌ | ❌ | ❌ |
 | Native macOS UI | ✅ menu bar | ❌ | ❌ | ❌ | ❌ |
-| Local-only, single-user focus | ✅ | ❌ cloud-first | ✅ | ✅ | ✅ |
-| Pre-existing | new | yes | yes | yes | yes |
+| Deployment model | local, single-user | team / cloud | local | local | local |
 
-**Position**: IRIS is the only option that keeps the secret out of the agent's process *and* enforces per-destination scoping *and* surfaces exfiltration attempts in a native UI. If you only need the Anthropic key managed with minimal effort and accept that it lives in `process.env`, `op run -- claude` is faster to set up and entirely sufficient.
-
-## Incompatibility with `apiKeyHelper`
-
-IRIS does not coexist with Claude Code's `apiKeyHelper` setting. This is by design.
-
-The Claude Code bug [anthropics/claude-code#2646](https://github.com/anthropics/claude-code/issues/2646) means that when `apiKeyHelper` is set, `HTTPS_PROXY` is not honored for inference requests, bypassing IRIS for the Anthropic API call. Rather than implementing a parallel reverse-proxy mechanism, IRIS commits to one unified path: MITM forward proxy for everything.
-
-If you currently use `apiKeyHelper`, `op run -- claude`, the Docker sandbox plugin, or Cordon, you'll need to remove those before using IRIS. The migration is straightforward:
-
-```bash
-iris secret add anthropic_api_key --allowed-hosts api.anthropic.com --value-from-stdin
-# Then remove apiKeyHelper from ~/.claude/settings.json and any project-level settings
-# Then set ANTHROPIC_API_KEY='{{kc:anthropic_api_key}}' in your shell profile
-```
-
-`iris doctor` checks for and flags any residual `apiKeyHelper` configuration.
+**Where IRIS fits**: it's aimed squarely at a single developer on one Mac who wants secrets kept out of the agent's process *with* per-destination scoping *and* native visibility into what the agent tries to send. If you need shared secrets, team policies, rotation, or audit across a fleet, a server-backed solution like **Agent Vault / Infisical** is built for that and a better fit. And if you just want the Anthropic key managed with minimal setup and are fine with it living in `process.env`, `op run -- claude` is faster to get going.
 
 ## Quickstart
 
 ```bash
-# Install — double-click Iris.pkg for the guided installer,
-# or headless from the CLI:
+# Install — double-click Iris.pkg for the guided installer, or headless:
 sudo installer -pkg Iris.pkg -target /
 
-# Add your first secret — read it without leaving a trace in shell history
+# Add your first secret (read without leaving a trace in shell history)
 read -rs ANTHROPIC_KEY
 printf %s "$ANTHROPIC_KEY" | iris secret add anthropic_api_key \
-  --allowed-hosts api.anthropic.com \
-  --value-from-stdin
+  --allowed-hosts api.anthropic.com --value-from-stdin
 
-# Configure your shell (one-time) — adds HTTPS_PROXY + NODE_EXTRA_CA_CERTS to ~/.zshrc.
-# It shows the lines and asks before writing; or use Settings → Terminal in the app.
+# Configure your shell once (HTTPS_PROXY + NODE_EXTRA_CA_CERTS), then point the
+# tool at a placeholder — your real key stays in the Keychain.
 iris shell install
-
-# Point the tool at a placeholder — your real key stays in the Keychain.
 export ANTHROPIC_API_KEY='{{kc:anthropic_api_key}}'
 
-# Use Claude Code as usual — your real key never enters its process
+# Use Claude Code as usual — your real key never enters its process.
 claude
 ```
 
-After install, the daemon and the menu bar app both start on their own — and relaunch at every login. The menu bar icon appears in the top-right; click it for live logs, alerts, and secret management. You can toggle either service's auto-start from **Settings → "Launch at login"**.
+The daemon and menu bar app start on their own after install and relaunch at every
+login. Full install walkthrough, shell setup, and troubleshooting are in the
+[user manual](https://sandjab.github.io/Iris/).
+
+> **Heads-up:** IRIS does not coexist with Claude Code's `apiKeyHelper` (see
+> [claude-code#2646](https://github.com/anthropics/claude-code/issues/2646)) — remove
+> `apiKeyHelper`, `op run`, the Docker sandbox plugin, or Cordon first. `iris doctor`
+> flags any leftover. Details and migration: see the manual.
 
 ## Architecture
 
@@ -123,65 +118,23 @@ After install, the daemon and the menu bar app both start on their own — and r
          (api.anthropic.com, api.github.com, …)
 ```
 
-The menu bar app and CLI both talk to the daemon over the Unix domain socket for control operations, and over the local HTTP/SSE endpoint for event streams.
+Configuration lives in a single JSON file owned by the daemon
+(`~/Library/Application Support/iris/config.json`), seeded on first run and edited
+via the CLI/app — never by hand. Secrets are **not** in that file; they live in the
+Keychain alongside their `allowed_hosts`. See the
+[manual](https://sandjab.github.io/Iris/) for the config reference and `SPECS.md`
+for the full threat model.
 
-## Configuration
-
-A single JSON file owned by the daemon, seeded with defaults on first run and
-edited via the CLI/app (`iris config set`, `iris rule add/rm`) — never by hand:
-`~/Library/Application Support/iris/config.json`:
-
-```json
-{
-  "version": 1,
-  "broker": {
-    "listen": "127.0.0.1:8888",
-    "events_listen": "127.0.0.1:8899",
-    "admin_socket": "~/Library/Application Support/iris/admin.sock",
-    "log_level": "info",
-    "event_retention_days": 7,
-    "event_ring_size": 10000
-  },
-  "security": {
-    "on_exfil_attempt": "block_and_notify",
-    "max_substitutions_per_minute": 60
-  },
-  "backups": { "max_count": 10 },
-  "hosts": [
-    { "host": "api.anthropic.com", "origin": "default", "created_at": "2026-06-05T12:00:00Z" }
-  ]
-}
-```
-
-`hosts` are the MITM whitelist (where the broker decrypts and scans for
-placeholders; anything else is CONNECT-only, end-to-end encrypted to the agent).
-A `default` host is protected (not removable via RPC). Secrets are NOT in this
-file — they live in the Keychain alongside their `allowed_hosts` (see `SPECS.md`).
-
-## Security model
-
-See `SPECS.md` for the full threat model. Short version:
+## Security model — in short
 
 - The agent process never has access to plaintext credentials.
-- The broker only substitutes a secret into a request destined for one of that secret's `allowed_hosts`.
-- A placeholder appearing in a request to a non-authorized host — or anywhere outside a canonical auth header — is treated as an exfiltration attempt: the request is forwarded with the placeholder left intact (never substituted) and the attempt is surfaced as an alert.
-- The local CA private key is stored in Keychain with an ACL bound to the signed `irisd` binary; no other process can read it without explicit user consent.
-- The daemon listens only on `127.0.0.1` and on a `0600` Unix socket.
+- A secret is only substituted into a request destined for one of its `allowed_hosts`; a placeholder sent anywhere else (or outside a canonical auth header) is treated as an exfiltration attempt — forwarded with the placeholder left intact and surfaced as an alert.
+- The local CA private key sits in the Keychain with an ACL bound to the signed `irisd` binary; the daemon listens only on `127.0.0.1` and a `0600` Unix socket.
 
-## Scope: what IRIS does and does not intercept
-
-IRIS works by setting `HTTPS_PROXY` and `NODE_EXTRA_CA_CERTS` in your shell environment. Any process inheriting that env and honoring proxy conventions goes through IRIS.
-
-**Intercepted**
-- CLI tools launched from a terminal: `claude`, `curl`, `gh`, `git`, `npm`, `pip`, `aws`, your scripts
-- Child processes of those tools (MCP servers, subprocesses)
-
-**Not intercepted**
-- GUI apps launched from Finder, Dock, or Spotlight (Safari, Slack, Mail, etc.) — they don't inherit the shell env
-- Background `launchd` services
-- Apps that ignore `HTTPS_PROXY` (rare)
-
-This is intentional. IRIS is designed for the agentic CLI workflow — narrow, predictable, low-noise. Forcing it system-wide (`launchctl setenv` + macOS network proxy settings) would multiply the hosts to whitelist, flood the logs, and break apps that pin certificates. If you ever need to broker traffic from a GUI app, launch it from a terminal instead.
+IRIS intercepts only processes that inherit the shell env and honor proxy
+conventions (CLI tools like `claude`, `curl`, `gh`, and their children) — not GUI
+apps, `launchd` services, or apps that ignore `HTTPS_PROXY`. This is intentional;
+the full scope and rationale are in the [manual](https://sandjab.github.io/Iris/).
 
 ## Non-goals
 
