@@ -63,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         statusItem = item
-        updateStatusIcon(appModel.daemonStatus)
+        updateStatusIcon(appModel.daemonStatus, iconSet: appModel.menubarIconSet)
 
         // Badge: mirror unreadAlertCount onto the status item title.
         appModel.$unreadAlertCount
@@ -87,15 +87,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // *shape* carries the state (HIG: menu bar extras use black + clear only).
         appModel.$daemonStatus
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] status in self?.updateStatusIcon(status) }
+            .sink { [weak self] status in
+                guard let self else { return }
+                self.updateStatusIcon(status, iconSet: self.appModel.menubarIconSet)
+            }
             .store(in: &cancellables)
 
         // Re-render the icon immediately when the user switches icon set in Settings.
+        // Pass the emitted value directly (it's published in willSet, so re-reading the
+        // property here could see the stale value) — Gemini #67.
         appModel.$menubarIconSet
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] iconSet in
                 guard let self else { return }
-                self.updateStatusIcon(self.appModel.daemonStatus)
+                self.updateStatusIcon(self.appModel.daemonStatus, iconSet: iconSet)
             }
             .store(in: &cancellables)
 
@@ -198,7 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `appModel.menubarIconSet`:
     ///   key  — up = `key.fill` · paused = `key` (hollow) · down = `key.slash` · connecting = `key`, dimmed.
     ///   bust — up = solid · paused = outline · down = barred outline · connecting = solid, dimmed.
-    private func updateStatusIcon(_ status: IrisAppCore.DaemonStatus) {
+    private func updateStatusIcon(_ status: IrisAppCore.DaemonStatus, iconSet: AppModel.MenubarIconSet) {
         guard let button = statusItem?.button else { return }
         let symbol: String
         let dimmed: Bool
@@ -218,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             label = "connecting"
         }
         let image: NSImage?
-        switch appModel.menubarIconSet {
+        switch iconSet {
         case .key:
             image = NSImage(systemSymbolName: symbol, accessibilityDescription: "IRIS daemon \(label)")
         case .bust:
@@ -242,7 +247,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .down: name = "MenubarBustStopped"
         case .connecting: name = "MenubarBustActive"
         }
-        guard let img = NSImage(named: name) else { return nil }
+        // NSImage(named:) returns a shared, cached instance — mutating its size/template
+        // flag would leak globally. Copy before customizing (Gemini #67).
+        guard let img = NSImage(named: name)?.copy() as? NSImage else { return nil }
         img.isTemplate = true
         img.accessibilityDescription = "IRIS daemon \(label)"
         let keyHeight = NSImage(systemSymbolName: "key.fill", accessibilityDescription: nil)?.size.height ?? 16
