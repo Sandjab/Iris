@@ -136,6 +136,17 @@ main {
   padding: 4px 8px; cursor: pointer; color: var(--fg-muted); font-size: 13px;
 }
 .theme-toggle:hover { color: var(--fg); }
+.lang-toggle {
+  position: absolute; top: 14px; right: 52px;
+  background: none; border: 1px solid var(--border-strong); border-radius: 6px;
+  padding: 4px 8px; cursor: pointer; color: var(--fg-muted); font-size: 13px;
+}
+.lang-toggle:hover { color: var(--fg); }
+/* i18n — show only the active language's blocks. Untranslated blocks carry no
+   .lang-* class, so they stay visible in both languages during the FR→EN
+   migration (the manual is never empty in English). */
+html[data-lang="en"] .lang-fr { display: none; }
+html[data-lang="fr"] .lang-en { display: none; }
 
 /* Hero / Typography */
 .hero {
@@ -387,18 +398,32 @@ ul li, ol li { margin-bottom: 4px; }
 }
 h2:hover .anchor, h3:hover .anchor { opacity: 1; }
 </style>
+<script>
+  // Set the language before first paint (no flash of the wrong language).
+  // Default: English; a French browser locale or a saved choice overrides it.
+  (function(){
+    var l = 'en';
+    try {
+      l = localStorage.getItem('iris-manual-lang')
+          || ((navigator.language || 'en').toLowerCase().indexOf('fr') === 0 ? 'fr' : 'en');
+    } catch (e) {}
+    document.documentElement.setAttribute('data-lang', l);
+    document.documentElement.setAttribute('lang', l);
+  })();
+</script>
 </head>
 <body data-theme="light">
 
 <div class="layout">
 <nav class="sidebar" id="sidebar">
+  <button class="lang-toggle" id="langToggle" aria-label="Language / Langue">FR</button>
   <button class="theme-toggle" id="themeToggle" aria-label="Bascule thème">☾</button>
   <button class="nav-toggle" id="navToggle" aria-label="Afficher le sommaire" aria-expanded="false" aria-controls="sidebar">☰</button>
   <div class="brand">
     <img class="brand-logo" src="../../assets/iris-icon-256.png" alt="" aria-hidden="true" width="32" height="32">
     <div>
       <div class="brand-name">IRIS</div>
-      <div class="brand-sub">Manuel · v1.0</div>
+      <div class="brand-sub"><span class="lang-fr">Manuel · v1.0</span><span class="lang-en">Manual · v1.0</span></div>
     </div>
   </div>
   <div class="search">
@@ -450,47 +475,69 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
 <section class="hero">
   <img class="hero-banner light" src="../../assets/banner.png" alt="" aria-hidden="true" width="1280" height="640">
   <img class="hero-banner dark" src="../../assets/banner-dark.png" alt="" aria-hidden="true" width="1280" height="640">
-  <h1>IRIS — Manuel utilisateur</h1>
+  <h1><span class="lang-fr">IRIS — Manuel utilisateur</span><span class="lang-en">IRIS — User Manual</span></h1>
   <p class="tagline">Interception · Resolution · Injection · Substitution. <em>Secrets are safe.</em></p>
   <div class="meta">
-    <span><span class="dot"></span>Version 1.0 · Juin 2026</span>
+    <span><span class="dot"></span><span class="lang-fr">Version 1.0 · Juin 2026</span><span class="lang-en">Version 1.0 · June 2026</span></span>
     <span>macOS 13+</span>
-    <span>Signé Developer ID + notarisé</span>
+    <span><span class="lang-fr">Signé Developer ID + notarisé</span><span class="lang-en">Developer ID signed + notarized</span></span>
   </div>
 </section>
 
 <!-- ============================================================ -->
 <!-- 1. PRÉAMBULE -->
 <!-- ============================================================ -->
-<h2 id="intro"><span class="chapnum">1</span>Préambule<a class="anchor" href="#intro">¶</a></h2>
+<h2 id="intro"><span class="chapnum">1</span><span class="lang-fr">Préambule</span><span class="lang-en">Preamble</span><a class="anchor" href="#intro">¶</a></h2>
 
-<p class="lead">
+<p class="lead lang-fr">
 IRIS est un broker de credentials local pour macOS. Il s'interpose entre vos outils en ligne de commande
 (agents CLI, <code>gh</code>, <code>curl</code>, scripts Python, serveurs MCP…) et les API distantes,
 et substitue à la volée des placeholders inertes par les vraies valeurs tirées du trousseau macOS.
 </p>
+<p class="lead lang-en">
+IRIS is a local credential broker for macOS. It sits between your command-line tools
+(CLI agents, <code>gh</code>, <code>curl</code>, Python scripts, MCP servers…) and remote APIs,
+substituting inert placeholders on the fly with the real values pulled from the macOS Keychain.
+</p>
 
-<h3>Le problème</h3>
-<p>
+<h3 class="lang-fr">Le problème</h3>
+<h3 class="lang-en">The problem</h3>
+<p class="lang-fr">
 Les agents IA sont structurellement vulnérables : prompt injection, fichiers malveillants dans un repo,
 sorties d'outils non assainies — autant de vecteurs qui peuvent piéger un agent et l'amener à exfiltrer
 ses propres credentials. Tant que la vraie clé API vit dans <code>process.env</code>, elle est à portée
 d'un <code>cat .env</code> ou d'un POST construit dynamiquement.
 </p>
+<p class="lang-en">
+AI agents are structurally vulnerable: prompt injection, malicious files in a repo, unsanitized tool
+output — all vectors that can trick an agent into exfiltrating its own credentials. As long as the real
+API key lives in <code>process.env</code>, it's one <code>cat .env</code> or one dynamically built POST away.
+</p>
 
-<h3>La réponse d'IRIS</h3>
-<p>
+<h3 class="lang-fr">La réponse d'IRIS</h3>
+<h3 class="lang-en">IRIS's answer</h3>
+<p class="lang-fr">
 Mettre une frontière de confiance entre l'agent et les secrets. L'agent fait son travail, IRIS détient
 les clés. Concrètement&nbsp;:
 </p>
-<ol>
+<p class="lang-en">
+Put a trust boundary between the agent and the secrets. The agent does the work, IRIS holds the keys.
+Concretely:
+</p>
+<ol class="lang-fr">
   <li>Vous remplacez <code>ANTHROPIC_API_KEY=sk-ant-…</code> par <code>ANTHROPIC_API_KEY={{kc:anthropic_api_key}}</code>.</li>
   <li>Un proxy MITM local sur <code>127.0.0.1:8888</code> intercepte les requêtes HTTPS sortantes.</li>
   <li>Pour les hosts whitelistés (ex. <code>api.anthropic.com</code>), il décrypte, détecte le placeholder, vérifie le scoping, substitue la vraie valeur, re-encrypte.</li>
   <li>Pour les autres hosts, il fait un CONNECT-tunnel transparent — pas de déchiffrement, pas de substitution.</li>
 </ol>
+<ol class="lang-en">
+  <li>You replace <code>ANTHROPIC_API_KEY=sk-ant-…</code> with <code>ANTHROPIC_API_KEY={{kc:anthropic_api_key}}</code>.</li>
+  <li>A local MITM proxy on <code>127.0.0.1:8888</code> intercepts outbound HTTPS requests.</li>
+  <li>For whitelisted hosts (e.g. <code>api.anthropic.com</code>), it decrypts, detects the placeholder, checks scoping, substitutes the real value, and re-encrypts.</li>
+  <li>For other hosts, it does a transparent CONNECT tunnel — no decryption, no substitution.</li>
+</ol>
 
-<p>
+<p class="lang-fr">
 Ce mécanisme est <strong>agnostique</strong> : il ne protège pas que la clé d'un LLM. Tout secret que
 vous enregistrez dans le trousseau — PAT GitHub, token npm, clé de registry, identifiants d'API
 fournisseur… — et que vous référencez par <code>{{kc:NAME}}</code> (dans l'environnement <em>ou</em>
@@ -498,30 +545,53 @@ dans un fichier de configuration) est résolu de la même façon, et borné à s
 La vraie valeur ne quitte jamais le trousseau : votre env et vos fichiers ne contiennent que des
 placeholders inertes.
 </p>
+<p class="lang-en">
+This mechanism is <strong>agnostic</strong>: it doesn't only protect an LLM key. Any secret you store
+in the Keychain — GitHub PAT, npm token, registry key, provider API credentials… — and reference via
+<code>{{kc:NAME}}</code> (in the environment <em>or</em> in a config file) is resolved the same way,
+and bound to its <code>allowed_hosts</code>. The real value never leaves the Keychain: your env and your
+files only ever contain inert placeholders.
+</p>
 
 <div class="callout callout-info">
   <div class="icon">i</div>
   <div class="body">
-    <p><strong>À qui s'adresse ce manuel.</strong> Développeurs et power-users macOS qui utilisent
+    <p class="lang-fr"><strong>À qui s'adresse ce manuel.</strong> Développeurs et power-users macOS qui utilisent
     quotidiennement des agents CLI et veulent durcir la posture sécurité
     autour de leurs clés API sans changer leur workflow.</p>
+    <p class="lang-en"><strong>Who this manual is for.</strong> macOS developers and power users who use
+    CLI agents daily and want to harden the security posture around their API keys without changing
+    their workflow.</p>
   </div>
 </div>
 
-<h3>Ce que ce manuel couvre</h3>
-<ul>
+<h3 class="lang-fr">Ce que ce manuel couvre</h3>
+<h3 class="lang-en">What this manual covers</h3>
+<ul class="lang-fr">
   <li><strong>Partie I</strong> — comprendre le modèle (concepts, architecture, flux, menace).</li>
   <li><strong>Partie II</strong> — installer et configurer IRIS sur une machine.</li>
   <li><strong>Partie III</strong> — la ligne de commande <code>iris</code>.</li>
   <li><strong>Partie IV</strong> — l'application menu-bar.</li>
   <li><strong>Partie V</strong> — exploitation : démarrage automatique, distribution, désinstallation, dépannage.</li>
 </ul>
+<ul class="lang-en">
+  <li><strong>Part I</strong> — understand the model (concepts, architecture, flow, threat).</li>
+  <li><strong>Part II</strong> — install and configure IRIS on a machine.</li>
+  <li><strong>Part III</strong> — the <code>iris</code> command line.</li>
+  <li><strong>Part IV</strong> — the menu bar app.</li>
+  <li><strong>Part V</strong> — operations: auto-start, distribution, uninstall, troubleshooting.</li>
+</ul>
 
-<p>
+<p class="lang-fr">
 IRIS 1.0 est complet : daemon, CLI, application menu-bar, installeur signé et notarisé, démarrage
 automatique et désinstallation propre sont tous livrés et exploitables dès aujourd'hui. La Partie III
 couvre l'usage en ligne de commande, la Partie IV l'application menu-bar — les deux pilotent le même
 daemon.
+</p>
+<p class="lang-en">
+IRIS 1.0 is complete: daemon, CLI, menu bar app, signed and notarized installer, auto-start, and clean
+uninstall are all shipped and usable today. Part III covers command-line usage, Part IV the menu bar
+app — both drive the same daemon.
 </p>
 
 <!-- ============================================================ -->
@@ -601,26 +671,46 @@ ajouté au trust store macOS.
       <rect x="280" y="180" width="100" height="0" />
     </g>
   </svg>
-  <div class="diagram-caption">Cliquez sur un composant pour voir le détail.</div>
+  <div class="diagram-caption"><span class="lang-fr">Cliquez sur un composant pour voir le détail.</span><span class="lang-en">Click a component to see details.</span></div>
   <div class="node-detail" id="conceptDetail">
-    <h5>Survolez ou cliquez un nœud du diagramme</h5>
-    <p>Les trois acteurs principaux : l'outil hôte (qui ne voit que des placeholders), le proxy <code>irisd</code> (qui détient les clés du trousseau), et l'API upstream (qui reçoit du trafic indistinguable d'un trafic direct).</p>
+    <h5 class="lang-fr">Survolez ou cliquez un nœud du diagramme</h5>
+    <h5 class="lang-en">Hover or click a node in the diagram</h5>
+    <p class="lang-fr">Les trois acteurs principaux : l'outil hôte (qui ne voit que des placeholders), le proxy <code>irisd</code> (qui détient les clés du trousseau), et l'API upstream (qui reçoit du trafic indistinguable d'un trafic direct).</p>
+    <p class="lang-en">The three main actors: the host tool (which only sees placeholders), the <code>irisd</code> proxy (which holds the Keychain keys), and the upstream API (which receives traffic indistinguishable from a direct request).</p>
   </div>
 </div>
 
 <script type="application/json" id="conceptData">
 {
   "placeholder": {
-    "title": "Outil hôte",
-    "body": "Agents CLI, <code>gh</code>, <code>curl</code>, scripts maison… Le seul changement par rapport à un setup classique : les variables d'environnement contiennent des <code>{{kc:NAME}}</code> au lieu de vraies clés. La requête HTTPS sort vers <code>127.0.0.1:8888</code> à cause de <code>HTTPS_PROXY</code>."
+    "fr": {
+      "title": "Outil hôte",
+      "body": "Agents CLI, <code>gh</code>, <code>curl</code>, scripts maison… Le seul changement par rapport à un setup classique : les variables d'environnement contiennent des <code>{{kc:NAME}}</code> au lieu de vraies clés. La requête HTTPS sort vers <code>127.0.0.1:8888</code> à cause de <code>HTTPS_PROXY</code>."
+    },
+    "en": {
+      "title": "Host tool",
+      "body": "CLI agents, <code>gh</code>, <code>curl</code>, home-grown scripts… The only change from a classic setup: environment variables hold <code>{{kc:NAME}}</code> instead of real keys. The HTTPS request goes out to <code>127.0.0.1:8888</code> because of <code>HTTPS_PROXY</code>."
+    }
   },
   "proxy": {
-    "title": "Daemon irisd",
-    "body": "Reçoit le CONNECT, vérifie la whitelist MITM. Si match : termine TLS avec un cert minté à la volée par la CA locale, scanne la requête déchiffrée, applique le scoping <code>allowed_hosts</code>, substitue, re-encrypte vers upstream. Si pas de match : tunnel CONNECT brut, zéro déchiffrement."
+    "fr": {
+      "title": "Daemon irisd",
+      "body": "Reçoit le CONNECT, vérifie la whitelist MITM. Si match : termine TLS avec un cert minté à la volée par la CA locale, scanne la requête déchiffrée, applique le scoping <code>allowed_hosts</code>, substitue, re-encrypte vers upstream. Si pas de match : tunnel CONNECT brut, zéro déchiffrement."
+    },
+    "en": {
+      "title": "irisd daemon",
+      "body": "Receives the CONNECT, checks the MITM whitelist. On a match: terminates TLS with a cert minted on the fly by the local CA, scans the decrypted request, applies <code>allowed_hosts</code> scoping, substitutes, and re-encrypts to upstream. No match: a raw CONNECT tunnel, zero decryption."
+    }
   },
   "upstream": {
-    "title": "API upstream",
-    "body": "Reçoit la requête finale avec la vraie clé. Aucune façon de détecter qu'IRIS est dans la boucle : le TLS upstream est légitime, vérifié contre le trust store système comme n'importe quel client."
+    "fr": {
+      "title": "API upstream",
+      "body": "Reçoit la requête finale avec la vraie clé. Aucune façon de détecter qu'IRIS est dans la boucle : le TLS upstream est légitime, vérifié contre le trust store système comme n'importe quel client."
+    },
+    "en": {
+      "title": "Upstream API",
+      "body": "Receives the final request with the real key. No way to tell IRIS is in the loop: the upstream TLS is legitimate, verified against the system trust store like any other client."
+    }
   }
 }
 </script>
@@ -2621,12 +2711,12 @@ sont du territoire enterprise. Bun à client HTTP custom et pinning sont des cas
   document.querySelectorAll('.svg-node[data-detail]').forEach(node => {
     node.addEventListener('click', () => {
       const key = node.dataset.detail;
-      const d = conceptData[key];
+      const d = pickLang(conceptData[key]);
       if (d) conceptDetail.innerHTML = '<h5>' + d.title + '</h5><p>' + d.body + '</p>';
     });
     node.addEventListener('mouseenter', () => {
       const key = node.dataset.detail;
-      const d = conceptData[key];
+      const d = pickLang(conceptData[key]);
       if (d) conceptDetail.innerHTML = '<h5>' + d.title + '</h5><p>' + d.body + '</p>';
     });
   });
@@ -2697,6 +2787,23 @@ sont du territoire enterprise. Bun à client HTTP custom et pinning sont des cas
     });
   });
   showFactor('pinning');
+
+  // ---- Language toggle (i18n) ----
+  // getLang/pickLang are function declarations → hoisted, so the concept/diagram
+  // handlers above can call them. The page language is set pre-paint by the inline
+  // <head> script; here we wire the toggle and sync the button + search placeholder.
+  function getLang() { return document.documentElement.getAttribute('data-lang') || 'en'; }
+  function pickLang(entry) { return entry ? (entry[getLang()] || entry.fr || entry.en) : null; }
+  const langBtn = document.getElementById('langToggle');
+  function applyLang(l) {
+    document.documentElement.setAttribute('data-lang', l);
+    document.documentElement.setAttribute('lang', l);
+    try { localStorage.setItem('iris-manual-lang', l); } catch (e) {}
+    langBtn.textContent = l === 'en' ? 'FR' : 'EN';
+    search.placeholder = l === 'en' ? 'Filter chapters…' : 'Filtrer les chapitres…';
+  }
+  langBtn.addEventListener('click', () => applyLang(getLang() === 'en' ? 'fr' : 'en'));
+  applyLang(getLang());
 })();
 </script>
 </body>
