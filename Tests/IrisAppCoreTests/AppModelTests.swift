@@ -65,6 +65,19 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model2.selectedTab, .security)
     }
 
+    func testMenubarIconSetDefaultsToBust() {
+        // New default menu-bar icon set is the winged-head bust, not the key.
+        let model = AppModel(defaults: defaults)
+        XCTAssertEqual(model.menubarIconSet, .bust)
+    }
+
+    func testMenubarIconSetPersistsAcrossInstances() {
+        let model1 = AppModel(defaults: defaults)
+        model1.menubarIconSet = .key
+        let model2 = AppModel(defaults: defaults)
+        XCTAssertEqual(model2.menubarIconSet, .key)
+    }
+
     func testLastAcknowledgedAtPersists() {
         let when = Date(timeIntervalSince1970: 1_700_000_000)
         let model1 = AppModel(defaults: defaults)

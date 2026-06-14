@@ -8,6 +8,11 @@ public final class AppModel: ObservableObject {
         case overview, logs, security, secrets, rules
     }
 
+    /// Which menu-bar status icon to render: the SF-Symbol key, or the winged-head bust.
+    public enum MenubarIconSet: String, Sendable, CaseIterable, Codable {
+        case key, bust
+    }
+
     @Published public var daemonStatus: DaemonStatus = .connecting
     @Published public var events: [Event] = []
     @Published public var alerts: [Event] = []
@@ -28,6 +33,9 @@ public final class AppModel: ObservableObject {
     @Published public var selectedTab: Tab {
         didSet { defaults.set(selectedTab.rawValue, forKey: Self.tabKey) }
     }
+    @Published public var menubarIconSet: MenubarIconSet {
+        didSet { defaults.set(menubarIconSet.rawValue, forKey: Self.iconSetKey) }
+    }
     @Published public private(set) var lastAcknowledgedAt: Date?
     @Published public private(set) var shellConfigured: Bool?
 
@@ -39,6 +47,7 @@ public final class AppModel: ObservableObject {
     private let daemonLogPaths: [String]
     private static let tabKey = "io.iris.app.selectedTab"
     private static let ackKey = "io.iris.app.lastAcknowledgedAt"
+    private static let iconSetKey = "io.iris.app.menubarIconSet"
 
     /// Daemon stdout/stderr log files. Kept in sync with `StandardOutPath` /
     /// `StandardErrorPath` in `packaging/io.iris.daemon.plist`; the uninstall flow
@@ -66,6 +75,8 @@ public final class AppModel: ObservableObject {
         self.daemonLogPaths = daemonLogPaths
         let storedTab = defaults.string(forKey: Self.tabKey).flatMap(Tab.init(rawValue:))
         self.selectedTab = storedTab ?? .overview
+        let storedIconSet = defaults.string(forKey: Self.iconSetKey).flatMap(MenubarIconSet.init(rawValue:))
+        self.menubarIconSet = storedIconSet ?? .bust  // default icon set = winged-head bust
         if let ts = defaults.object(forKey: Self.ackKey) as? Date {
             self.lastAcknowledgedAt = ts
         }

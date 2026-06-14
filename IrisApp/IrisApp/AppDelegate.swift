@@ -90,6 +90,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] status in self?.updateStatusIcon(status) }
             .store(in: &cancellables)
 
+        // Re-render the icon immediately when the user switches icon set in Settings.
+        appModel.$menubarIconSet
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.updateStatusIcon(self.appModel.daemonStatus)
+            }
+            .store(in: &cancellables)
+
         // One daemon client for the whole app: admin RPC over UDS + loopback SSE.
         // The same `admin` is reused by both the SyncCoordinator and the panel's
         // pause/resume control, so we never spin up (and leak) a per-click EventLoopGroup.
@@ -184,10 +193,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Swaps the status-item image to reflect the daemon state, as a monochrome
-    /// template image (macOS handles light/dark + selection tinting). The form
-    /// conveys the state, never colour:
-    ///   up = `key.fill` · paused = `key` (hollow) ·
-    ///   down/error = `key.slash` · connecting = `key`, dimmed.
+    /// template image (macOS handles light/dark + selection tinting). The *shape*
+    /// conveys the state, never colour. Two icon sets, picked via
+    /// `appModel.menubarIconSet`:
+    ///   key  — up = `key.fill` · paused = `key` (hollow) · down = `key.slash` · connecting = `key`, dimmed.
+    ///   bust — up = solid · paused = outline · down = barred outline · connecting = solid, dimmed.
     private func updateStatusIcon(_ status: IrisAppCore.DaemonStatus) {
         guard let button = statusItem?.button else { return }
         let symbol: String
@@ -207,13 +217,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dimmed = true
             label = "connecting"
         }
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "IRIS daemon \(label)")
+        let image: NSImage?
+        switch appModel.menubarIconSet {
+        case .key:
+            image = NSImage(systemSymbolName: symbol, accessibilityDescription: "IRIS daemon \(label)")
+        case .bust:
+            image = Self.bustImage(for: status, label: label)
+        }
         image?.isTemplate = true
         button.image = image
         // Cancel any pending pulse reset so it can't clobber the dimmed
         // connecting state; restore full opacity when leaving connecting.
         pulseWorkItem?.cancel()
         button.alphaValue = dimmed ? 0.45 : 1.0
+    }
+
+    /// Winged-head "bust" template image for a daemon state, sized to ~82% of the
+    /// key symbol's height so the emblem reads a touch more discreetly than the key.
+    /// `connecting` reuses the solid bust and is dimmed by the caller's `alphaValue`.
+    private static func bustImage(for status: IrisAppCore.DaemonStatus, label: String) -> NSImage? {
+        let name: String
+        switch status {
+        case .up(_, _, let paused): name = paused ? "MenubarBustPaused" : "MenubarBustActive"
+        case .down: name = "MenubarBustStopped"
+        case .connecting: name = "MenubarBustActive"
+        }
+        guard let img = NSImage(named: name) else { return nil }
+        img.isTemplate = true
+        img.accessibilityDescription = "IRIS daemon \(label)"
+        let keyHeight = NSImage(systemSymbolName: "key.fill", accessibilityDescription: nil)?.size.height ?? 16
+        let targetHeight = (keyHeight * 0.82).rounded()
+        let aspect = img.size.width / max(img.size.height, 1)
+        img.size = NSSize(width: (targetHeight * aspect).rounded(), height: targetHeight)
+        return img
     }
 
     private func updateBadge(_ count: Int) {
