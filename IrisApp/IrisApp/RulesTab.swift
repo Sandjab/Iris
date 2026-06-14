@@ -52,9 +52,11 @@ struct RulesTab: View {
             Divider()
 
             if model.rules.isEmpty {
-                Spacer()
-                Text("No rules.").foregroundStyle(.secondary)
-                Spacer()
+                GuidedEmptyState(
+                    symbol: "network",
+                    title: "No rules yet",
+                    message: "Add a host above to allow placeholder substitution in its traffic."
+                )
             } else {
                 List(model.rules, id: \.host) { rule in
                     RuleRow(rule: rule, onDelete: rule.origin == .user ? { pendingDelete = rule } : nil)

@@ -186,7 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Swaps the status-item image to reflect the daemon state, as a monochrome
     /// template image (macOS handles light/dark + selection tinting). The form
     /// conveys the state, never colour:
-    ///   up (active) = `key.fill` · paused = `key` (hollow) ·
+    ///   up = `key.fill` · paused = `key` (hollow) ·
     ///   down/error = `key.slash` · connecting = `key`, dimmed.
     private func updateStatusIcon(_ status: IrisAppCore.DaemonStatus) {
         guard let button = statusItem?.button else { return }
@@ -197,11 +197,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .up(_, _, let paused):
             symbol = paused ? "key" : "key.fill"
             dimmed = false
-            label = paused ? "paused" : "active"
+            label = paused ? "paused" : "up"
         case .down:
             symbol = "key.slash"
             dimmed = false
-            label = "stopped"
+            label = "down"
         case .connecting:
             symbol = "key"
             dimmed = true

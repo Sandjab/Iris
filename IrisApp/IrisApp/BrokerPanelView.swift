@@ -79,7 +79,7 @@ private struct HeaderBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            StatusDot(status: model.daemonStatus)
+            StatusIndicator(status: model.daemonStatus)
             StatusLabel(status: model.daemonStatus)
             Spacer()
             if case .up(_, _, let paused) = model.daemonStatus {
@@ -94,18 +94,32 @@ private struct HeaderBar: View {
     }
 }
 
-private struct StatusDot: View {
+private struct StatusIndicator: View {
     let status: IrisAppCore.DaemonStatus
 
     var body: some View {
-        Circle().fill(color).frame(width: 8, height: 8)
+        let glyph = statusGlyph(for: status)
+        Image(systemName: glyph.symbolName)
+            .font(.callout)
+            .foregroundStyle(color(for: glyph.tint))
+            .accessibilityLabel(Text(label(for: glyph.tint)))
     }
 
-    private var color: Color {
-        switch status {
-        case .up(_, _, let paused): return paused ? .orange : .green
+    private func label(for tint: StatusTint) -> String {
+        switch tint {
+        case .up: return "Daemon up"
+        case .paused: return "Daemon paused"
+        case .down: return "Daemon down"
+        case .connecting: return "Daemon connecting"
+        }
+    }
+
+    private func color(for tint: StatusTint) -> Color {
+        switch tint {
+        case .up: return .green
+        case .paused: return .orange
         case .down: return .red
-        case .connecting: return .gray
+        case .connecting: return .secondary
         }
     }
 }

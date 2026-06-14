@@ -81,7 +81,7 @@ struct GeneralSettingsView: View {
                                 )
                             ) {
                                 ForEach(ExfilAttemptPolicy.allCases, id: \.self) { policy in
-                                    Text(policy.rawValue).tag(policy)
+                                    Text(displayName(for: policy)).tag(policy)
                                 }
                             }
                             .labelsHidden()

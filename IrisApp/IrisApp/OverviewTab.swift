@@ -9,6 +9,7 @@ struct OverviewTab: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 countersSection
+                activitySection
                 Divider()
                 recentSection
             }
@@ -20,11 +21,29 @@ struct OverviewTab: View {
         let stats = currentStats()
         VStack(alignment: .leading, spacing: 4) {
             Text("Since daemon start").font(.headline)
-            HStack(spacing: 24) {
-                counter(label: "Requests", value: stats.reqTotal)
-                counter(label: "Substituted", value: stats.subTotal)
-                counter(label: "Blocked", value: stats.exfilBlockedTotal)
-                counter(label: "Errors", value: stats.errorsTotal)
+            HStack(spacing: 20) {
+                counter(label: "Requests", value: stats.reqTotal, style: .volume)
+                counter(label: "Substituted", value: stats.subTotal, style: .volume)
+                counter(label: "Blocked", value: stats.exfilBlockedTotal, style: .incident(.red))
+                counter(label: "Errors", value: stats.errorsTotal, style: .incident(.orange))
+            }
+        }
+    }
+
+    private enum CounterStyle {
+        case volume
+        case incident(Color)
+    }
+
+    private func counter(label: String, value: UInt64, style: CounterStyle) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            switch style {
+            case .volume:
+                Text("\(value)").font(.title3.monospacedDigit()).foregroundStyle(.secondary)
+                Text(label).font(.caption2).foregroundStyle(.tertiary)
+            case .incident(let color):
+                Text("\(value)").font(.title2.bold().monospacedDigit()).foregroundStyle(color)
+                Text(label).font(.caption.weight(.medium))
             }
         }
     }
@@ -34,10 +53,33 @@ struct OverviewTab: View {
         return .zero
     }
 
-    private func counter(label: String, value: UInt64) -> some View {
-        VStack(alignment: .leading) {
-            Text("\(value)").font(.title2.bold().monospacedDigit())
-            Text(label).font(.caption).foregroundStyle(.secondary)
+    @ViewBuilder private var activitySection: some View {
+        let series = ActivitySeries.buckets(from: model.events, count: 12)
+        if !series.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Activity (recent)").font(.headline)
+                Sparkline(values: series)
+                    .frame(height: 32)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private struct Sparkline: View {
+        let values: [Int]
+
+        var body: some View {
+            let peak = max(values.max() ?? 0, 1)
+            GeometryReader { geo in
+                HStack(alignment: .bottom, spacing: 2) {
+                    ForEach(Array(values.enumerated()), id: \.offset) { _, v in
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(Color.accentColor.opacity(0.45))
+                            .frame(height: max(1, geo.size.height * CGFloat(v) / CGFloat(peak)))
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
         }
     }
 
@@ -47,7 +89,7 @@ struct OverviewTab: View {
             if model.events.isEmpty {
                 Text("No events yet.").foregroundStyle(.secondary).font(.callout)
             } else {
-                ForEach(Array(model.events.prefix(5))) { event in
+                ForEach(Array(model.events.prefix(8))) { event in
                     EventRow(event: event)
                 }
             }
@@ -59,12 +101,15 @@ struct EventRow: View {
     let event: Event
 
     var body: some View {
+        let endpoint = eventEndpoint(method: event.method, host: event.host, path: event.path)
         HStack(spacing: 8) {
             Text(timeString(event.timestamp)).font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             kindBadge
-            Text(event.host).font(.callout)
-            Text(event.path).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            Text(endpoint.primary).font(.callout)
+            if !endpoint.secondary.isEmpty {
+                Text(endpoint.secondary).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            }
             Spacer()
         }
     }

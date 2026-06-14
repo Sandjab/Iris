@@ -62,7 +62,7 @@ struct LogsTab: View {
 
     private var list: some View {
         List(filteredEvents) { event in
-            EventRow(event: event)
+            LogEventRow(event: event)
         }
         .listStyle(.plain)
     }
