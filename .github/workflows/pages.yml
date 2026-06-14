@@ -15,6 +15,7 @@ on:
     branches: [main]
     paths:
       - "docs/manual/manuel.html"
+      - "docs/manual/screenshots/*.png"
       - "assets/iris-icon-256.png"
       - "assets/menubar-*.png"
       - ".github/scripts/build-pages.py"
@@ -40,8 +41,10 @@ jobs:
 
       - name: Assemble site
         run: |
-          mkdir -p _site/assets
+          mkdir -p _site/assets _site/screenshots
           cp assets/iris-icon-256.png assets/banner.png assets/banner-dark.png assets/menubar-*.png _site/assets/
+          # Manual screenshots are referenced as screenshots/*.png (root-relative on the flat site).
+          cp docs/manual/screenshots/*.png _site/screenshots/
           python3 .github/scripts/build-pages.py docs/manual/manuel.html _site/index.html
 
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa  # v3
