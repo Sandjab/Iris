@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var panelController: MainPanelController?
     private var settingsWindowController: SettingsWindowController?
+    private var aboutWindowController: AboutWindowController?
     private var cancellables: Set<AnyCancellable> = []
     private var pulseWorkItem: DispatchWorkItem?
 
@@ -116,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // commun à toute l'app et l'`appModel` partagé.
         panelController = MainPanelController(admin: admin, appModel: appModel)
         settingsWindowController = SettingsWindowController(admin: admin, appModel: appModel)
+        aboutWindowController = AboutWindowController()
 
         let sync = SyncCoordinator(model: appModel, admin: admin, events: eventsClient)
         let model = appModel
@@ -282,15 +284,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showAbout() {
-        // L'app est LSUIElement non-activante : activer avant pour que le panneau
-        // About standard passe au premier plan. `activate(ignoringOtherApps:)` est
-        // déprécié en macOS 14 → `activate()` sur 14+, l'ancien sur la cible 13.
-        if #available(macOS 14.0, *) {
-            NSApp.activate()
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        NSApp.orderFrontStandardAboutPanel(nil)
+        // Fenêtre « À propos » custom (version + notes de version scrollables) à la
+        // place du panneau standard `orderFrontStandardAboutPanel`. L'activation
+        // (LSUIElement non-activante) est gérée par le contrôleur.
+        aboutWindowController?.show()
     }
 
     @objc private func quit() {
