@@ -237,9 +237,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.alphaValue = dimmed ? 0.45 : 1.0
     }
 
-    /// Winged-head "bust" template image for a daemon state, sized to ~82% of the
-    /// key symbol's height so the emblem reads a touch more discreetly than the key.
-    /// `connecting` reuses the solid bust and is dimmed by the caller's `alphaValue`.
+    /// Winged-head "bust" template image for a daemon state, rendered 18 pt high
+    /// (the key glyph's height). `connecting` reuses the solid bust and is dimmed
+    /// by the caller's `alphaValue`.
     private static func bustImage(for status: IrisAppCore.DaemonStatus, label: String) -> NSImage? {
         let name: String
         switch status {
@@ -252,8 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let img = NSImage(named: name)?.copy() as? NSImage else { return nil }
         img.isTemplate = true
         img.accessibilityDescription = "IRIS daemon \(label)"
-        let keyHeight = NSImage(systemSymbolName: "key.fill", accessibilityDescription: nil)?.size.height ?? 16
-        let targetHeight = (keyHeight * 0.82).rounded()
+        let targetHeight: CGFloat = 18
         let aspect = img.size.width / max(img.size.height, 1)
         img.size = NSSize(width: (targetHeight * aspect).rounded(), height: targetHeight)
         return img
