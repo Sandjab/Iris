@@ -196,6 +196,18 @@ public struct DaemonStatus: Codable, Sendable, Equatable {
         self.stats = stats
         self.paused = paused
     }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.pid = try c.decode(Int32.self, forKey: .pid)
+        self.uptimeS = try c.decode(UInt64.self, forKey: .uptimeS)
+        self.version = try c.decode(String.self, forKey: .version)
+        self.stats = try c.decode(DaemonStats.self, forKey: .stats)
+        // Forward-compat: a daemon older than #54 omits `paused` (SPECS §15.4). Default it
+        // to false rather than failing the whole status decode (which strands the UI as
+        // "unreachable" against any daemon running a binary older than the app).
+        self.paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? false
+    }
 }
 
 public struct DaemonPauseResult: Codable, Sendable, Equatable {
