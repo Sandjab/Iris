@@ -37,7 +37,10 @@ public enum ReleaseNotes {
         var blocks: [ChangelogBlock] = []
         for rawLine in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
             let isContinuation = rawLine.first == " " || rawLine.first == "\t"
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            // .whitespacesAndNewlines also strips a trailing `\r` so CRLF-encoded
+            // CHANGELOG.md files (Git core.autocrlf) don't leave invisible carriage
+            // returns at the end of each rendered line.
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             if line.isEmpty { continue }
             if isContinuation, let last = blocks.last {
                 blocks[blocks.count - 1] = appending(line, to: last)

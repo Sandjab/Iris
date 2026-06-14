@@ -4,14 +4,37 @@ import SwiftUI
 
 /// Fenêtre « À propos » : en-tête (icône de l'app + nom + version lue depuis
 /// `Bundle.main`) suivi d'une zone scrollable affichant les notes de version
-/// (`CHANGELOG.md` embarqué dans le bundle). Le rendu Markdown est fait ici ;
-/// le chargement/parsing pur vit dans `IrisAppCore.ReleaseNotes` (testable).
+/// (`CHANGELOG.md` embarqué dans le bundle). Le chargement/parsing pur vit dans
+/// `IrisAppCore.ReleaseNotes` (testable) ; le Markdown inline est converti une
+/// seule fois dans l'`init` (le `body` SwiftUI peut être réévalué à chaque frame).
 struct AboutWindow: View {
+    /// Un bloc du changelog avec son texte Markdown déjà rendu. `id` stable (index
+    /// dans une liste statique calculée une fois) — pas d'index passé à `ForEach`.
+    private struct RenderedBlock: Identifiable {
+        let id: Int
+        let block: ChangelogBlock
+        let text: AttributedString
+    }
+
     private let version = ReleaseNotes.appVersion() ?? "—"
-    private let blocks: [ChangelogBlock] = {
-        guard let markdown = ReleaseNotes.loadMarkdown() else { return [] }
-        return ReleaseNotes.releaseSections(ReleaseNotes.parse(markdown))
-    }()
+    private let blocks: [RenderedBlock]
+
+    init() {
+        let raw: [ChangelogBlock] = {
+            guard let markdown = ReleaseNotes.loadMarkdown() else { return [] }
+            return ReleaseNotes.releaseSections(ReleaseNotes.parse(markdown))
+        }()
+        blocks = raw.enumerated().map { index, block in
+            let source: String
+            switch block {
+            case .heading(_, let text), .bullet(let text), .paragraph(let text):
+                source = text
+            }
+            // Inline Markdown (`**bold**`, `` `code` ``, links); plain text otherwise.
+            let rendered = (try? AttributedString(markdown: source)) ?? AttributedString(source)
+            return RenderedBlock(id: index, block: block, text: rendered)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,8 +68,8 @@ struct AboutWindow: View {
                     Text("Release notes are unavailable.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                        blockView(block)
+                    ForEach(blocks) { rendered in
+                        blockView(rendered)
                     }
                 }
             }
@@ -57,21 +80,21 @@ struct AboutWindow: View {
     }
 
     @ViewBuilder
-    private func blockView(_ block: ChangelogBlock) -> some View {
-        switch block {
-        case .heading(let level, let text):
-            Text(inline(text))
+    private func blockView(_ rendered: RenderedBlock) -> some View {
+        switch rendered.block {
+        case .heading(let level, _):
+            Text(rendered.text)
                 .font(headingFont(for: level))
                 .bold()
                 .padding(.top, level <= 2 ? 10 : 4)
-        case .bullet(let text):
+        case .bullet:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("•")
-                Text(inline(text))
+                Text(rendered.text)
             }
             .padding(.leading, 4)
-        case .paragraph(let text):
-            Text(inline(text))
+        case .paragraph:
+            Text(rendered.text)
                 .foregroundStyle(.secondary)
         }
     }
@@ -82,11 +105,5 @@ struct AboutWindow: View {
         case 2: return .headline
         default: return .subheadline
         }
-    }
-
-    /// Renders inline Markdown (`**bold**`, `` `code` ``, links) for a single
-    /// line; falls back to plain text if the line isn't valid Markdown.
-    private func inline(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text)) ?? AttributedString(text)
     }
 }
