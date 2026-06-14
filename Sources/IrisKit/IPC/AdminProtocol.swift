@@ -284,5 +284,5 @@ public struct AdminUninstallResult: Codable, Sendable, Equatable {
 /// Version string surfaced by `daemon.status`. Embedded into the binary at
 /// build time; for now a literal constant updated alongside releases.
 public enum DaemonVersion {
-    public static let current = "1.0.0"
+    public static let current = "1.0.1"
 }
