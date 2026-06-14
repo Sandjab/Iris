@@ -301,6 +301,29 @@ final class SyncCoordinatorTests: XCTestCase {
         }
     }
 
+    func testStatsPollDoesNotOverwriteConcurrentDownTransition() async throws {
+        // Gemini (PR #66) — the `guard case .up` is checked BEFORE `await fetchStatus()`.
+        // If another task (e.g. runStreamWithReconnect) flips the state to .down during
+        // that await, the poll must NOT blindly re-promote it to .up afterwards.
+        let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let admin = FakeAdminCalling()
+        let events = FakeEventsSubscribing()
+        let sleeper = FakeSleeper()
+        let coord = SyncCoordinator(model: model, admin: admin, events: events, sleeper: sleeper)
+
+        model.daemonStatus = .up(stats: .zero, uptime: 0, paused: false)
+        // Simulate the race: the daemon goes down while the status fetch is in flight.
+        admin.onFetchStatus = { model.daemonStatus = .down(reason: .notRunning) }
+
+        try await coord.runStatsPoll(intervalSeconds: 5, maxTicks: 1)
+
+        XCTAssertEqual(
+            model.daemonStatus,
+            .down(reason: .notRunning),
+            "poll must not overwrite a concurrent .down transition with a stale .up"
+        )
+    }
+
     func testStatsPollSkipsUpdateIfNotUp() async throws {
         let model = AppModel(defaults: UserDefaults(suiteName: UUID().uuidString)!)
         let admin = FakeAdminCalling()

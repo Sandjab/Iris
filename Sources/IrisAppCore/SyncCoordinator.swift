@@ -142,11 +142,16 @@ public final class SyncCoordinator {
             guard case .up = model.daemonStatus else { continue }
             do {
                 let status = try await admin.fetchStatus()
-                model.daemonStatus = .up(
-                    stats: status.stats,
-                    uptime: TimeInterval(status.uptimeS),
-                    paused: status.paused
-                )
+                // Re-check after the await: another task (e.g. runStreamWithReconnect)
+                // may have transitioned the daemon to .down while the fetch was in
+                // flight — don't blindly re-promote it to .up (PR #66 race fix).
+                if case .up = model.daemonStatus {
+                    model.daemonStatus = .up(
+                        stats: status.stats,
+                        uptime: TimeInterval(status.uptimeS),
+                        paused: status.paused
+                    )
+                }
             } catch {
                 logger.debug("status poll skipped: \(error)")
             }

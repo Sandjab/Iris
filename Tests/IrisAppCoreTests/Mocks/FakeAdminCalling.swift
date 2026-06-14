@@ -27,10 +27,14 @@ final class FakeAdminCalling: AdminCalling, @unchecked Sendable {
     var stubReloadResult: ConfigReloadResult = ConfigReloadResult(reloaded: true, ignored: [])
     /// Captured value bytes from the last add/rotate, to assert the value never leaks into AppModel.
     var capturedValue: Data?
+    /// Fires inside `fetchStatus()` (after recording the call, before returning the stub).
+    /// Lets a test mutate shared state mid-await to exercise the poll's post-await re-check.
+    var onFetchStatus: (@MainActor @Sendable () -> Void)?
 
     func fetchStatus() async throws -> IrisKit.DaemonStatus {
         calls.append("status")
         if let e = shouldThrow { throw e }
+        await onFetchStatus?()
         return stubStatus
     }
 
