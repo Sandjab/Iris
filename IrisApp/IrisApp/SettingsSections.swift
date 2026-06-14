@@ -67,6 +67,19 @@ struct GeneralSettingsView: View {
 
     var body: some View {
         SettingsPane(error: errorText, status: statusText) {
+            SettingSection("Appearance") {
+                HStack {
+                    Text("Menu-bar icon")
+                    Spacer()
+                    Picker("", selection: $model.menubarIconSet) {
+                        ForEach(AppModel.MenubarIconSet.allCases, id: \.self) { set in
+                            Text(set == .key ? "Key" : "Winged head").tag(set)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 190)
+                }
+            }
             if let cfg = model.config {
                 SettingSection("Security") {
                     VStack(alignment: .leading, spacing: 8) {

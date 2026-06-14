@@ -63,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         statusItem = item
-        updateStatusIcon(appModel.daemonStatus)
+        updateStatusIcon(appModel.daemonStatus, iconSet: appModel.menubarIconSet)
 
         // Badge: mirror unreadAlertCount onto the status item title.
         appModel.$unreadAlertCount
@@ -87,7 +87,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // *shape* carries the state (HIG: menu bar extras use black + clear only).
         appModel.$daemonStatus
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] status in self?.updateStatusIcon(status) }
+            .sink { [weak self] status in
+                guard let self else { return }
+                self.updateStatusIcon(status, iconSet: self.appModel.menubarIconSet)
+            }
+            .store(in: &cancellables)
+
+        // Re-render the icon immediately when the user switches icon set in Settings.
+        // Pass the emitted value directly (it's published in willSet, so re-reading the
+        // property here could see the stale value) — Gemini #67.
+        appModel.$menubarIconSet
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] iconSet in
+                guard let self else { return }
+                self.updateStatusIcon(self.appModel.daemonStatus, iconSet: iconSet)
+            }
             .store(in: &cancellables)
 
         // One daemon client for the whole app: admin RPC over UDS + loopback SSE.
@@ -184,11 +198,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Swaps the status-item image to reflect the daemon state, as a monochrome
-    /// template image (macOS handles light/dark + selection tinting). The form
-    /// conveys the state, never colour:
-    ///   up = `key.fill` · paused = `key` (hollow) ·
-    ///   down/error = `key.slash` · connecting = `key`, dimmed.
-    private func updateStatusIcon(_ status: IrisAppCore.DaemonStatus) {
+    /// template image (macOS handles light/dark + selection tinting). The *shape*
+    /// conveys the state, never colour. Two icon sets, picked via
+    /// `appModel.menubarIconSet`:
+    ///   key  — up = `key.fill` · paused = `key` (hollow) · down = `key.slash` · connecting = `key`, dimmed.
+    ///   bust — up = solid · paused = outline · down = barred outline · connecting = solid, dimmed.
+    private func updateStatusIcon(_ status: IrisAppCore.DaemonStatus, iconSet: AppModel.MenubarIconSet) {
         guard let button = statusItem?.button else { return }
         let symbol: String
         let dimmed: Bool
@@ -207,13 +222,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dimmed = true
             label = "connecting"
         }
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "IRIS daemon \(label)")
+        let image: NSImage?
+        switch iconSet {
+        case .key:
+            image = NSImage(systemSymbolName: symbol, accessibilityDescription: "IRIS daemon \(label)")
+        case .bust:
+            image = Self.bustImage(for: status, label: label)
+        }
         image?.isTemplate = true
         button.image = image
         // Cancel any pending pulse reset so it can't clobber the dimmed
         // connecting state; restore full opacity when leaving connecting.
         pulseWorkItem?.cancel()
         button.alphaValue = dimmed ? 0.45 : 1.0
+    }
+
+    /// Winged-head "bust" template image for a daemon state, rendered 18 pt high
+    /// (the key glyph's height). `connecting` reuses the solid bust and is dimmed
+    /// by the caller's `alphaValue`.
+    private static func bustImage(for status: IrisAppCore.DaemonStatus, label: String) -> NSImage? {
+        let name: String
+        switch status {
+        case .up(_, _, let paused): name = paused ? "MenubarBustPaused" : "MenubarBustActive"
+        case .down: name = "MenubarBustStopped"
+        case .connecting: name = "MenubarBustActive"
+        }
+        // NSImage(named:) returns a shared, cached instance — mutating its size/template
+        // flag would leak globally. Copy before customizing (Gemini #67).
+        guard let img = NSImage(named: name)?.copy() as? NSImage else { return nil }
+        img.isTemplate = true
+        img.accessibilityDescription = "IRIS daemon \(label)"
+        let targetHeight: CGFloat = 18
+        let aspect = img.size.width / max(img.size.height, 1)
+        img.size = NSSize(width: (targetHeight * aspect).rounded(), height: targetHeight)
+        return img
     }
 
     private func updateBadge(_ count: Int) {
