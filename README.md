@@ -30,9 +30,15 @@ IRIS runs as a background LaunchAgent paired with a menu bar app. It exposes a l
 
 **[Read the full user manual → sandjab.github.io/Iris](https://sandjab.github.io/Iris/)**
 
-The manual is the source of truth for day-to-day use: installation, configuration,
-the CLI reference, the menu bar app, the security model, provider compatibility,
-and uninstall. This README is just the overview.
+The manual is the source of truth for day-to-day use:
+[installation](https://sandjab.github.io/Iris/#install),
+[configuration](https://sandjab.github.io/Iris/#config-json),
+the [CLI reference](https://sandjab.github.io/Iris/#cli-overview),
+the [menu bar app](https://sandjab.github.io/Iris/#menubar),
+the [security model](https://sandjab.github.io/Iris/#threat),
+[provider compatibility](https://sandjab.github.io/Iris/#provider-compat),
+and [uninstall](https://sandjab.github.io/Iris/#packaging).
+This README is just the overview.
 
 ## Why
 
@@ -66,75 +72,15 @@ Several mechanisms manage credentials for AI coding agents. They sit at differen
 
 **Where IRIS fits**: it's aimed squarely at a single developer on one Mac who wants secrets kept out of the agent's process *with* per-destination scoping *and* native visibility into what the agent tries to send. If you need shared secrets, team policies, rotation, or audit across a fleet, a server-backed solution like **Agent Vault / Infisical** is built for that and a better fit. And if you just want the Anthropic key managed with minimal setup and are fine with it living in `process.env`, `op run -- claude` is faster to get going.
 
-## Quickstart
-
-```bash
-# Install — double-click Iris.pkg for the guided installer, or headless:
-sudo installer -pkg Iris.pkg -target /
-
-# Add your first secret (read without leaving a trace in shell history)
-read -rs ANTHROPIC_KEY
-printf %s "$ANTHROPIC_KEY" | iris secret add anthropic_api_key \
-  --allowed-hosts api.anthropic.com --value-from-stdin
-
-# Configure your shell once (HTTPS_PROXY + NODE_EXTRA_CA_CERTS), then point the
-# tool at a placeholder — your real key stays in the Keychain.
-iris shell install
-export ANTHROPIC_API_KEY='{{kc:anthropic_api_key}}'
-
-# Use Claude Code as usual — your real key never enters its process.
-claude
-```
-
-The daemon and menu bar app start on their own after install and relaunch at every
-login. Full install walkthrough, shell setup, and troubleshooting are in the
-[user manual](https://sandjab.github.io/Iris/).
-
-> **Heads-up:** IRIS does not coexist with Claude Code's `apiKeyHelper` (see
-> [claude-code#2646](https://github.com/anthropics/claude-code/issues/2646)) — remove
-> `apiKeyHelper`, `op run`, the Docker sandbox plugin, or Cordon first. `iris doctor`
-> flags any leftover. Details and migration: see the manual.
-
-## Architecture
-
-```
-┌──────────────────────────────────┐
-│  Claude Code (or any HTTPS tool) │
-│  ENV: ANTHROPIC_API_KEY=         │
-│       "{{kc:anthropic_api_key}}" │
-│  HTTPS_PROXY=127.0.0.1:8888      │
-└────────────┬─────────────────────┘
-             │ HTTPS (TLS via local CA)
-             ▼
-┌──────────────────────────────────┐         ┌─────────────────────┐
-│  irisd (LaunchAgent)             │         │  login Keychain     │
-│  ├─ MITM proxy   :8888           │◄────────┤  (secrets + CA key) │
-│  ├─ Events SSE   :8899           │         └─────────────────────┘
-│  └─ Admin RPC    unix socket     │
-└────────────┬─────────────────────┘
-             │ HTTPS (clean, with real credential)
-             ▼
-         Upstream API
-         (api.anthropic.com, api.github.com, …)
-```
-
-Configuration lives in a single JSON file owned by the daemon
-(`~/Library/Application Support/iris/config.json`), seeded on first run and edited
-via the CLI/app — never by hand. Secrets are **not** in that file; they live in the
-Keychain alongside their `allowed_hosts`. See the
-[manual](https://sandjab.github.io/Iris/) for the config reference and `SPECS.md`
-for the full threat model.
-
 ## Security model — in short
 
 - The agent process never has access to plaintext credentials.
 - A secret is only substituted into a request destined for one of its `allowed_hosts`; a placeholder sent anywhere else (or outside a canonical auth header) is treated as an exfiltration attempt — forwarded with the placeholder left intact and surfaced as an alert.
 - The local CA private key sits in the Keychain with an ACL bound to the signed `irisd` binary; the daemon listens only on `127.0.0.1` and a `0600` Unix socket.
 
-IRIS intercepts only processes that inherit the shell env and honor proxy
-conventions (CLI tools like `claude`, `curl`, `gh`, and their children) — not GUI
-apps, `launchd` services, or apps that ignore `HTTPS_PROXY`. This is intentional;
-the full scope and rationale are in the [manual](https://sandjab.github.io/Iris/).
+IRIS intercepts only processes that inherit the shell env and honor proxy conventions (CLI tools like `claude`, `curl`, `gh`, and their children) — not GUI apps, `launchd` services, or apps that ignore `HTTPS_PROXY`. This is intentional; the full [security model](https://sandjab.github.io/Iris/#threat) is in the manual and `SPECS.md` covers the complete threat model.
+
+> **Heads-up:** IRIS does not coexist with Claude Code's `apiKeyHelper` (see [claude-code#2646](https://github.com/anthropics/claude-code/issues/2646)) — remove `apiKeyHelper`, `op run`, the Docker sandbox plugin, or Cordon first. `iris doctor` flags any leftover. Details and migration are in the [manual](https://sandjab.github.io/Iris/#setup-shell).
 
 ## Non-goals
 
