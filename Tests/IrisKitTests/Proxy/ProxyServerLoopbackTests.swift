@@ -50,7 +50,9 @@ final class ProxyServerLoopbackTests: XCTestCase {
 
         let proxy = makeProxyServer(group: group, listenHost: "127.0.0.1")
         let address = try await proxy.start()
-        defer { Task { try? await proxy.stop() } }
         XCTAssertEqual(address.ipAddress, "127.0.0.1")
+        // Await the channel close before the group is torn down (the `defer`
+        // above) so the EventLoopGroup isn't shut down mid-close (Gemini review).
+        try? await proxy.stop()
     }
 }
