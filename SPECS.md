@@ -79,6 +79,7 @@
 - Kernel exploits, Mach injection, SIP bypass.
 - Network adversaries on the local network (the broker only listens on `127.0.0.1`).
 - The agent calling a non-whitelisted host directly with credentials — but since the agent never has the real credentials, this is moot for whitelisted secrets.
+- A same-user process that drives the legitimate `iris` CLI (or the admin socket) to **re-scope** a secret (`iris secret edit`) or add a MITM host (`iris rule add`). The admin socket is `0600`/owner-only (I5), but any same-uid process can run the signed CLI exactly as the user can — authenticating the socket peer's code signature would not change this, since the CLI is freely invokable. This mirrors the `ssh-agent`/`gpg-agent` posture and **user decision #4**. IRIS's guarantee is over secret *values* (I1/I2), not over a same-uid actor's ability to change which hosts a secret is scoped to. See [§13.3](#133-auth).
 
 ### Key invariants
 
@@ -87,6 +88,15 @@
 - **I3.** A placeholder is only resolved if the destination host matches the secret's `allowed_hosts` list.
 - **I4.** The CA private key is accessible only to the signed `irisd` binary (Keychain ACL).
 - **I5.** The admin Unix socket has mode `0600` and is owned by the current user.
+
+### Accepted residuals (audit 2026-06)
+
+These are known, deliberately-accepted limitations; each is documented at its point of relevance.
+
+- **CA without `NameConstraints`** — a stolen CA private key could mint leaf certs for any host, not only whitelisted ones. Constraining the CA to a name set is incompatible with dynamic `rule add` (it would either break interception of newly-added hosts or force a trust-store re-prompt on every host change). The CA key itself is protected by I4, and industry MITM tools (mitmproxy, Charles) omit the constraint for the same reason. See [§11.1](#111-ca-generation).
+- **CA key adoption before first boot** — a same-uid process that pre-positions a CA private key (and a matching `ca.pem`) before the daemon's first launch could have its key adopted as the root. The write path is hardened (the daemon stores the key with `SecItemAdd` and fails on a duplicate; it never overwrites or adopts via update), but full closure is structurally impossible to distinguish from a legitimate prior install without a hardware root of trust — it requires a non-extractable / Secure-Enclave key (deferred, see [§11.2](#112-per-host-leaf-certificates)). Preconditions are strong (code execution before first boot + the user installing the resulting trust anchor).
+- **Events SSE stream is unauthenticated** — the loopback SSE endpoint (§14) exposes request metadata (hostnames, paths, secret *names*, exfil alerts — never values, I2 holds) to any local process. On a single-user machine this is equivalent to same-uid access; the residual is cross-user metadata exposure on shared machines. See [§14.1](#141-endpoint).
+- **Unbounded request-body buffering** — a same-uid client can grow the in-memory request-body buffer before the size cap is applied. This is a local same-uid availability concern only (no privilege boundary is crossed; such a process can already exhaust its own memory). Bounding it safely requires streaming pass-through rather than buffering (deferred). See [§7.2](#72-scan-scope).
 
 ---
 
@@ -354,7 +364,9 @@ For each intercepted HTTPS request that targets a MITM-whitelisted host, the bro
 
 1. **All request headers**, both name and value. (Substitution in header names is allowed but extremely rare in practice.)
 2. **URL path and query string.**
-3. **Request body**, only if `Content-Length` ≤ 4 MiB (configurable). Bodies larger than the threshold: pass through unchanged, emit a `noMatch` event with a `bodyTooLarge` flag.
+3. **Request body**, only if the **received body** is ≤ 4 MiB (configurable). The decision is made on the bytes actually buffered, **not** on the client-declared `Content-Length` header (a lie would otherwise skip the scan, audit L-1). Bodies larger than the threshold: pass through unchanged, emit a `noMatch` event with a `bodyTooLarge` flag.
+
+> **Deferred (audit L-1):** the body is buffered entirely before the cap is checked, so a same-uid client can grow the in-memory buffer. This is a local same-uid availability concern only; bounding it safely requires streaming pass-through (see [§2 Accepted residuals](#accepted-residuals-audit-2026-06)).
 
 Response bodies are **never** scanned or modified.
 
@@ -565,7 +577,7 @@ On first daemon startup:
         - CN: `IRIS local CA`
         - O: `iris`
         - Validity: 10 years from creation
-        - Extensions: `basicConstraints=CA:TRUE`, `keyUsage=keyCertSign,cRLSign`
+        - Extensions: `basicConstraints=CA:TRUE`, `keyUsage=keyCertSign,cRLSign`. **No `NameConstraints`** — see [§2 Accepted residuals](#accepted-residuals-audit-2026-06) for the rationale (incompatible with dynamic `rule add`).
     - Export the public cert as PEM to `~/Library/Application Support/iris/ca.pem` (mode 0644 — public material, fine on disk).
 3. If present: load and verify it parses correctly. If not, refuse to start and emit a critical log.
 
@@ -732,7 +744,13 @@ Errors: standard JSON-RPC 2.0 error object. Custom codes in the `-32000..-32099`
 
 ### 13.3 Auth
 
-None beyond filesystem permissions. The socket is `0600`, so only the owning user can connect. This matches user decision #4 in design.
+The socket is `0600` + owner-uid (invariant I5), so only the current user's processes can connect. This matches **user decision #4** in design.
+
+**Threat-model boundary (explicit).** IRIS does **not** defend against a malicious process running as the **same user** that can execute arbitrary code — including invoking the signed `iris` CLI. Such a process can re-scope a secret (`iris secret edit`, which only takes a name + allowed-hosts, never the value) or add a MITM host (`iris rule add`) exactly as the user could. This is the same posture as `ssh-agent` / `gpg-agent` (any same-uid process can drive the agent). Authenticating the connecting peer's code signature would **not** change this boundary, because the legitimate CLI is freely invokable by any same-uid process; it would only stop a process speaking the socket protocol directly, which is not the relevant capability.
+
+**What IRIS does guarantee:** secret *values* never leave the daemon — not via this IPC channel (`secret.get`/`secret.list` return metadata only), nor logs, events, or the host tool's view of upstream traffic (I1/I2).
+
+**Possible future hardening (out of scope):** out-of-band user confirmation (e.g. a GUI prompt / Touch ID) for sensitive mutations such as re-scoping a secret or adding a host. This is the only mechanism that would meaningfully raise the bar, at a real cost in friction.
 
 ---
 
@@ -741,6 +759,8 @@ None beyond filesystem permissions. The socket is `0600`, so only the owning use
 ### 14.1 Endpoint
 
 `http://127.0.0.1:<events_listen>/events`
+
+The stream is **loopback-only and unauthenticated**: it carries request metadata (hostnames, paths, secret *names*, exfil alerts) but never secret values (I2). Any local process can subscribe. See [§2 Accepted residuals](#accepted-residuals-audit-2026-06) for the cross-user-exposure boundary on shared machines.
 
 ### 14.2 Protocol
 
