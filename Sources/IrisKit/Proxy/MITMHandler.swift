@@ -202,7 +202,17 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
     }
 
     // SPECS §7.2: bodies larger than this are passed through without scanning.
-    private static let bodyMaxBytes = 4 * 1024 * 1024
+    static let bodyMaxBytes = 4 * 1024 * 1024
+
+    /// Whether a request body is too large to scan/substitute (SPECS §7.2).
+    /// SECURITY (audit L-1): the size is measured on the bytes ACTUALLY received
+    /// and buffered (`readableBytes`), never on the client-declared
+    /// `Content-Length`. Taking the buffer itself — not a declared length — puts
+    /// the header structurally out of reach, so a client cannot declare an
+    /// oversized length to skip the exfiltration scan on a small body.
+    static func bodyExceedsScanCap(_ body: ByteBuffer?) -> Bool {
+        (body?.readableBytes ?? 0) > bodyMaxBytes
+    }
 
     private static func processRequest(
         head: HTTPRequestHead,
@@ -224,18 +234,14 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
             preparedHeaders.add(name: name, value: value)
         }
 
-        // Body size cap (SPECS §7.2).
-        var bodyTooLarge = false
-        if let original = body {
-            let contentLength = head.headers.first(name: "content-length").flatMap(Int.init)
-            let declaredSize = contentLength ?? original.readableBytes
-            if declaredSize > bodyMaxBytes {
-                bodyTooLarge = true
-                logger.warning(
-                    "Body too large, skipping substitution scan",
-                    metadata: ["host": "\(host)", "size": "\(declaredSize)"]
-                )
-            }
+        // Body size cap (SPECS §7.2). Measured on bytes actually received, not
+        // the declared Content-Length (audit L-1).
+        let bodyTooLarge = bodyExceedsScanCap(body)
+        if bodyTooLarge {
+            logger.warning(
+                "Body too large, skipping substitution scan",
+                metadata: ["host": "\(host)", "size": "\(body?.readableBytes ?? 0)"]
+            )
         }
 
         var preparedHead = HTTPRequestHead(
