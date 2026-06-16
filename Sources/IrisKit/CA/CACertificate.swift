@@ -34,6 +34,7 @@ public enum CAError: Error, LocalizedError, Equatable {
     case keychainStatus(OSStatus)
     case dataCorruption(String)
     case trustCommandFailed(status: Int32, message: String)
+    case duplicateCAKey
 
     public var errorDescription: String? {
         switch self {
@@ -52,6 +53,9 @@ public enum CAError: Error, LocalizedError, Equatable {
             return "CA data corruption: \(reason)"
         case .trustCommandFailed(let status, let message):
             return "security tool failed (exit \(status)): \(message)"
+        case .duplicateCAKey:
+            return
+                "A CA private key item already exists; refusing to overwrite or adopt it"
         }
     }
 }
