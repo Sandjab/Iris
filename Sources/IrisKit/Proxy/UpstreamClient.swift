@@ -14,6 +14,18 @@ final class UpstreamClient: @unchecked Sendable {
         self.logger = logger
     }
 
+    /// Builds the TLS configuration for the upstream (egress) connection.
+    /// SECURITY (audit I-4): this is the channel that carries the real secrets,
+    /// so the negotiated version is floored at TLS 1.2 — never the swift-nio-ssl
+    /// default of TLS 1.0. Full chain + hostname verification is on by default.
+    static func makeClientTLSConfiguration(trustRoots: NIOSSLTrustRoots) -> TLSConfiguration {
+        var tlsConfig = TLSConfiguration.makeClientConfiguration()
+        tlsConfig.trustRoots = trustRoots
+        tlsConfig.applicationProtocols = ["http/1.1"]
+        tlsConfig.minimumTLSVersion = .tlsv12
+        return tlsConfig
+    }
+
     /// Opens the upstream connection ON THE CLIENT'S EVENTLOOP (co-location, as
     /// the passthrough tunnel does), sends the request, and installs an
     /// `UpstreamResponseRelay` that streams each response part back to
@@ -31,9 +43,7 @@ final class UpstreamClient: @unchecked Sendable {
     ) -> EventLoopFuture<StreamOutcome> {
         let completion = eventLoop.makePromise(of: StreamOutcome.self)
         do {
-            var tlsConfig = TLSConfiguration.makeClientConfiguration()
-            tlsConfig.trustRoots = trustRoots
-            tlsConfig.applicationProtocols = ["http/1.1"]
+            let tlsConfig = Self.makeClientTLSConfiguration(trustRoots: trustRoots)
             let sslContext = try NIOSSLContext(configuration: tlsConfig)
 
             // Backpressure pairing: the client-side handler (tail of the client
