@@ -67,6 +67,10 @@ let package = Package(
                 .linkedLibrary("sandbox")
             ]
         ),
+        .executableTarget(
+            name: "iris-test-plugin",
+            swiftSettings: strictConcurrency
+        ),
         .testTarget(
             name: "IrisKitTests",
             dependencies: [
@@ -83,6 +87,7 @@ let package = Package(
                 "iris",
                 "irisd",
                 "iris-sandbox-exec",
+                "iris-test-plugin",
                 .product(name: "NIO", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
