@@ -46,8 +46,9 @@ public enum HookOutcome: Sendable {
 public final class HookDispatcher: Sendable {
     /// Iris-side ceiling on a hook's declared timeout (design §4.5 "plafonné par Iris").
     public static let maxHookTimeout: TimeInterval = 5.0
-    /// Cap on a `respond` body the dispatcher will relay (mirror MITM scan cap).
-    static let maxRespondBodyBytes = 4 * 1024 * 1024
+    /// Cap on a plugin-supplied body the dispatcher will relay — applies to both
+    /// `modify` and `respond` bodies (mirror MITM scan cap).
+    static let maxBodyBytes = 4 * 1024 * 1024
 
     private let chainBox = NIOLockedValueBox<[PluginChainEntry]>([])
     private let logger: Logger
@@ -84,24 +85,43 @@ public final class HookDispatcher: Sendable {
         var curBody = body
         for entry in applicable {
             let params = Self.makeParams(head: curHead, body: curBody, host: host)
-            let timeout = min(Double(entry.hook.timeoutMs) / 1000.0, Self.maxHookTimeout)
+            // Clamp: validate() rejects timeoutMs<=0 for installed plugins, but a
+            // hook built in code could carry 0 — never hand the invoker a 0s window.
+            let timeout = min(max(Double(entry.hook.timeoutMs) / 1000.0, 0.001), Self.maxHookTimeout)
             do {
                 let result = try await entry.invoker.onRequest(params, timeout: timeout)
                 switch result.action {
                 case .pass:
                     continue
                 case .modify:
+                    if result.body != nil, Self.decodeBody(result.body, cap: Self.maxBodyBytes) == nil {
+                        logger.warning(
+                            "plugin modify body ignored (over-cap or invalid encoding)",
+                            metadata: ["id": "\(entry.pluginId)"]
+                        )
+                    }
                     (curHead, curBody) = Self.applyModify(result, to: curHead, body: curBody)
                 case .block:
                     return .block(pluginId: entry.pluginId, reason: result.reason)
                 case .respond:
                     let status = result.status ?? 200
                     let headers = (result.headers ?? []).compactMap { $0.count == 2 ? ($0[0], $0[1]) : nil }
-                    let rbody = Self.decodeBody(result.body, cap: Self.maxRespondBodyBytes)
+                    let rbody = Self.decodeBody(result.body, cap: Self.maxBodyBytes)
+                    if result.body != nil, rbody == nil {
+                        logger.warning(
+                            "plugin respond body ignored (over-cap or invalid encoding)",
+                            metadata: ["id": "\(entry.pluginId)"]
+                        )
+                    }
                     return .respond(pluginId: entry.pluginId, status: status, headers: headers, body: rbody)
                 }
             } catch {
-                // Value-free: id + failure mode only, never request payload (§6.1).
+                // At onRequest the request is PRE-substitution: it carries only
+                // placeholders ({{kc:NAME}}), never a resolved secret value
+                // (invariant §3; substitution runs later in scanAndSubstitute). So
+                // `error` may echo placeholder text but can never carry a secret
+                // VALUE — §6.1 (no secret values in logs) holds structurally. Keep
+                // the full error for diagnosing flaky plugins.
                 logger.warning(
                     "plugin onRequest failed",
                     metadata: [
@@ -121,7 +141,9 @@ public final class HookDispatcher: Sendable {
 
     // MARK: - Wire conversion
 
-    static func makeParams(head: HTTPRequestHead, body: ByteBuffer?, host: String) -> PluginRPC.OnRequestParams {
+    private static func makeParams(head: HTTPRequestHead, body: ByteBuffer?, host: String)
+        -> PluginRPC.OnRequestParams
+    {
         let headers = head.headers.map { [$0.name, $0.value] }
         return PluginRPC.OnRequestParams(
             method: head.method.rawValue,
@@ -132,7 +154,7 @@ public final class HookDispatcher: Sendable {
         )
     }
 
-    static func encodeBody(_ body: ByteBuffer?) -> PluginRPC.Body? {
+    private static func encodeBody(_ body: ByteBuffer?) -> PluginRPC.Body? {
         guard let body, body.readableBytes > 0 else { return nil }
         let bytes = body.getBytes(at: body.readerIndex, length: body.readableBytes) ?? []
         let data = Data(bytes)
@@ -142,7 +164,7 @@ public final class HookDispatcher: Sendable {
         return PluginRPC.Body(encoding: "base64", data: data.base64EncodedString())
     }
 
-    static func decodeBody(_ body: PluginRPC.Body?, cap: Int) -> ByteBuffer? {
+    private static func decodeBody(_ body: PluginRPC.Body?, cap: Int) -> ByteBuffer? {
         guard let body else { return nil }
         let data: Data?
         switch body.encoding.lowercased() {
@@ -159,7 +181,7 @@ public final class HookDispatcher: Sendable {
     /// via `replaceOrAdd` (unspecified headers are preserved — notably the
     /// credential placeholder Iris must still substitute); no header removal in
     /// v1. URI and body replacement are independent of the header overlay.
-    static func applyModify(
+    private static func applyModify(
         _ result: PluginRPC.OnRequestResult,
         to head: HTTPRequestHead,
         body: ByteBuffer?
@@ -172,7 +194,7 @@ public final class HookDispatcher: Sendable {
             }
         }
         var newBody = body
-        if let b = result.body, let decoded = decodeBody(b, cap: maxRespondBodyBytes) {
+        if let b = result.body, let decoded = decodeBody(b, cap: maxBodyBytes) {
             newBody = decoded
             if newHead.headers.contains(name: "content-length") {
                 newHead.headers.replaceOrAdd(name: "content-length", value: "\(decoded.readableBytes)")
