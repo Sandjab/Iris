@@ -1,5 +1,6 @@
 import IrisKit
 import Logging
+import NIOConcurrencyHelpers
 import XCTest
 
 /// Exercises the manager against a real registry + the iris-test-plugin fixture,
@@ -61,7 +62,8 @@ final class PluginHostManagerTests: XCTestCase {
         plugins: URL,
         scratch: URL,
         registry: PluginRegistry,
-        alerts: AlertCollector
+        alerts: AlertCollector,
+        onChainChanged: @escaping @Sendable ([PluginChainEntry]) -> Void = { _ in }
     ) -> PluginHostManager {
         PluginHostManager(
             registry: registry,
@@ -74,6 +76,7 @@ final class PluginHostManagerTests: XCTestCase {
                 timeouts: PluginHost.Timeouts(initialize: 5, shutdown: 1)
             ),
             emitSystemAlert: { alert in await alerts.append(alert) },
+            onChainChanged: onChainChanged,
             logger: Logger(label: "test")
         )
     }
@@ -118,6 +121,27 @@ final class PluginHostManagerTests: XCTestCase {
         XCTAssertEqual(alert?.severity, .high)
         XCTAssertTrue(alert?.message.contains("test.mgr.plugin") ?? false)
         await manager.shutdownAll()
+    }
+
+    func testReconcilePushesOnRequestChain() async throws {
+        let env = try await makeRegistryWithEnabledFixture(mode: "ok")
+        let alerts = AlertCollector()
+        let pushed = NIOLockedValueBox<[PluginChainEntry]>([])
+        let manager = makeManager(
+            plugins: env.plugins,
+            scratch: env.scratch,
+            registry: env.registry,
+            alerts: alerts,
+            onChainChanged: { chain in pushed.withLockedValue { $0 = chain } }
+        )
+
+        await manager.startEnabled()
+        let chain = pushed.withLockedValue { $0 }
+        XCTAssertEqual(chain.map(\.pluginId), ["test.mgr.plugin"])
+        XCTAssertEqual(chain.first?.hook.event, .onRequest)
+
+        await manager.shutdownAll()
+        XCTAssertTrue(pushed.withLockedValue { $0 }.isEmpty, "shutdown clears the chain")
     }
 
     // MARK: - Helpers
