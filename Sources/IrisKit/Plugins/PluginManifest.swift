@@ -181,6 +181,42 @@ public struct HookMatch: Codable, Sendable, Hashable {
     }
 }
 
+extension HookMatch {
+    /// True iff every declared condition matches. Empty/nil condition = wildcard.
+    /// Host is exact, case-insensitive, port-stripped (SPECS §8.2; no glob in MVP).
+    /// An unparseable `pathRegex` matches nothing (fail-closed gating).
+    public func matches(
+        host: String,
+        method: String,
+        path: String,
+        requestContentType: String?
+    ) -> Bool {
+        if !hosts.isEmpty {
+            let normalized = Self.normalizeHost(host)
+            guard hosts.contains(where: { Self.normalizeHost($0) == normalized }) else { return false }
+        }
+        if !methods.isEmpty {
+            let m = method.lowercased()
+            guard methods.contains(where: { $0.lowercased() == m }) else { return false }
+        }
+        if let pattern = pathRegex, !pattern.isEmpty {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+            let range = NSRange(path.startIndex..<path.endIndex, in: path)
+            guard regex.firstMatch(in: path, range: range) != nil else { return false }
+        }
+        if let want = contentType, !want.isEmpty {
+            guard let have = requestContentType?.lowercased(), have.contains(want.lowercased()) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func normalizeHost(_ host: String) -> String {
+        (host.split(separator: ":", maxSplits: 1).first.map(String.init) ?? host).lowercased()
+    }
+}
+
 /// Declared sandbox needs. Empty = no egress / no extra filesystem (deny-by-default).
 public struct PluginCapabilities: Codable, Sendable, Hashable {
     public let network: [String]  // host:port allowed for egress
