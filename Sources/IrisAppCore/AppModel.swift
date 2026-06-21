@@ -18,6 +18,7 @@ public final class AppModel: ObservableObject {
     @Published public var alerts: [Event] = []
     @Published public var secrets: [Secret] = []
     @Published public var rules: [MITMRule] = []
+    @Published public var plugins: [Plugin] = []
     @Published public var config: Config?
     @Published public var caTrusted: Bool?
     @Published public var daemonAutoStart: AutoStartStatus?
@@ -211,6 +212,38 @@ public final class AppModel: ObservableObject {
     public func deleteRule(host: String, via admin: AdminCalling) async throws {
         try await admin.deleteRule(host: host)
         try await refreshRules(via: admin)
+    }
+
+    // MARK: - Plugins (P4)
+    // All mutations go through admin RPC, then re-fetch the list (no optimistic update).
+
+    public func refreshPlugins(via admin: AdminCalling) async throws {
+        plugins = try await admin.listPlugins().sorted { $0.order < $1.order }
+    }
+
+    public func installPlugin(path: String, via admin: AdminCalling) async throws {
+        _ = try await admin.installPlugin(path: path)
+        try await refreshPlugins(via: admin)
+    }
+
+    public func enablePlugin(id: String, via admin: AdminCalling) async throws {
+        _ = try await admin.enablePlugin(id: id)
+        try await refreshPlugins(via: admin)
+    }
+
+    public func disablePlugin(id: String, via admin: AdminCalling) async throws {
+        _ = try await admin.disablePlugin(id: id)
+        try await refreshPlugins(via: admin)
+    }
+
+    public func removePlugin(id: String, via admin: AdminCalling) async throws {
+        try await admin.removePlugin(id: id)
+        try await refreshPlugins(via: admin)
+    }
+
+    public func reorderPlugin(id: String, index: Int, via admin: AdminCalling) async throws {
+        _ = try await admin.reorderPlugin(id: id, index: index)
+        try await refreshPlugins(via: admin)
     }
 
     // MARK: - Config / CA (Phase 6.3b)
