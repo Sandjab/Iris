@@ -54,4 +54,36 @@ final class ConfigPluginsTests: XCTestCase {
         let reloaded = try await ConfigStore(path: path, logger: logger).current
         XCTAssertEqual(reloaded.plugins, [entry])
     }
+
+    func testApplyUpdatesDoesNotWipePlugins() async throws {
+        let store = try ConfigStore(path: path, logger: logger)
+        let entry = PluginStateEntry(
+            id: "org.example.guard",
+            enabled: true,
+            order: 0,
+            approvedCapabilities: nil,
+            pinnedHash: "deadbeef"
+        )
+        try await store.setPlugins([entry])
+        _ = try await store.applyUpdates([
+            .init(key: "security.max_substitutions_per_minute", value: "30")
+        ])
+        let cfg = await store.current
+        XCTAssertEqual(cfg.plugins, [entry])
+    }
+
+    func testAddHostDoesNotWipePlugins() async throws {
+        let store = try ConfigStore(path: path, logger: logger)
+        let entry = PluginStateEntry(
+            id: "org.example.guard",
+            enabled: true,
+            order: 0,
+            approvedCapabilities: nil,
+            pinnedHash: "deadbeef"
+        )
+        try await store.setPlugins([entry])
+        _ = try await store.addHost("example.com", now: Date())
+        let cfg = await store.current
+        XCTAssertEqual(cfg.plugins, [entry])
+    }
 }

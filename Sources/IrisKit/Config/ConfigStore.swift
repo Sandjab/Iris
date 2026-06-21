@@ -56,6 +56,8 @@ public actor ConfigStore {
         Set(config.hosts.map(\.host))
     }
 
+    // MARK: - Plugin state (back `plugin.*`)
+
     /// Persisted plugin state entries (source of truth for the installed set).
     public func plugins() -> [PluginStateEntry] {
         config.plugins
