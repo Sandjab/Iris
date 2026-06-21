@@ -183,6 +183,9 @@ public actor PluginHostManager {
                 )
             }
             crashTimes[id] = nil
+            // Terminal: the plugin won't restart, so reclaim its scratch dir
+            // (a transient crash leaves it for reuse on the next restart).
+            try? FileManager.default.removeItem(at: scratchRoot.appendingPathComponent(id, isDirectory: true))
             await emitSystemAlert(
                 SystemAlert(
                     severity: .high,

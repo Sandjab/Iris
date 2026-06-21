@@ -27,6 +27,10 @@ final class PluginLineReader: @unchecked Sendable {
         self.queue = DispatchQueue(label: "io.iris.plugin.reader")
     }
 
+    deinit {
+        stop()
+    }
+
     func start() {
         // Non-blocking so reads inside the handler never stall the queue.
         let flags = fcntl(fileDescriptor, F_GETFL)
