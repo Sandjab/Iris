@@ -13,6 +13,11 @@ public actor InMemoryCAKeyStore: CAKeyStore {
     }
 
     public func storeKey(_ key: P256.Signing.PrivateKey) async throws {
+        // Model the Keychain contract (audit M-1): never overwrite/adopt an
+        // existing item — `storeKey` fails on a pre-existing key.
+        guard self.key == nil else {
+            throw CAError.duplicateCAKey
+        }
         self.key = key
     }
 

@@ -111,6 +111,13 @@ public final class ProxyServer: @unchecked Sendable {
 
     /// Binds the listener and returns the bound socket address.
     public func start() async throws -> SocketAddress {
+        // Loopback-only invariant (audit M-4): the proxy substitutes real
+        // credentials into forwarded requests. An external bind would turn it
+        // into a LAN-reachable open proxy that injects the local user's secrets.
+        // Refuse anything that isn't a loopback literal, mirroring `EventsServer`.
+        guard Self.isLoopback(configuration.listenHost) else {
+            throw ProxyError.refusingNonLoopbackHost(configuration.listenHost)
+        }
         let server = self
         let bootstrap = ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.backlog, value: 64)
@@ -225,15 +232,22 @@ public final class ProxyServer: @unchecked Sendable {
     var currentOnExfilAttempt: ExfilAttemptPolicy {
         securityPolicyBox.withLockedValue { $0.onExfilAttempt }
     }
+
+    private static func isLoopback(_ host: String) -> Bool {
+        host == "127.0.0.1" || host == "::1" || host == "localhost"
+    }
 }
 
 public enum ProxyError: Error, LocalizedError {
     case bindReportedNoAddress
+    case refusingNonLoopbackHost(String)
 
     public var errorDescription: String? {
         switch self {
         case .bindReportedNoAddress:
             return "Server channel bound but reported no local address"
+        case .refusingNonLoopbackHost(let host):
+            return "Refusing to bind proxy listener on non-loopback host '\(host)'"
         }
     }
 }

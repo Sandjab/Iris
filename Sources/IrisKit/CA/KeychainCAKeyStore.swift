@@ -50,24 +50,14 @@ public actor KeychainCAKeyStore: CAKeyStore {
     public func storeKey(_ key: P256.Signing.PrivateKey) async throws {
         let raw = key.rawRepresentation
 
-        let updateQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        let updateAttrs: [String: Any] = [
-            kSecValueData as String: raw
-        ]
-        let updateStatus = SecItemUpdate(updateQuery as CFDictionary, updateAttrs as CFDictionary)
-        switch updateStatus {
-        case errSecSuccess:
-            return
-        case errSecItemNotFound:
-            break
-        default:
-            throw CAError.keychainStatus(updateStatus)
-        }
-
+        // SECURITY (audit M-1): store with `SecItemAdd` ONLY, failing loudly on a
+        // pre-existing item — mirroring `KeychainSecretStore.add`. The previous
+        // `SecItemUpdate`-first path overwrote an existing item's value WITHOUT
+        // re-attaching the per-binary ACL, so a key pre-positioned by another
+        // local process (before the first daemon boot) could keep its own
+        // "allow-all" ACL and still back the root CA. Adopting/overwriting such an
+        // item is never legitimate here: `loadOrGenerateKey` only calls `storeKey`
+        // after `loadKey()` returned nil.
         let access = try KeychainACL.selfOnlyAccess(
             description: KeychainACL.accessDescription(service: service, account: account)
         )
@@ -79,7 +69,12 @@ public actor KeychainCAKeyStore: CAKeyStore {
             kSecAttrAccess as String: access,
         ]
         let addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
+        switch addStatus {
+        case errSecSuccess:
+            return
+        case errSecDuplicateItem:
+            throw CAError.duplicateCAKey
+        default:
             throw CAError.keychainStatus(addStatus)
         }
     }
