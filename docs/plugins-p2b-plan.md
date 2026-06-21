@@ -1535,15 +1535,27 @@ Expected: `Build complete!`. **Si erreur « extra argument 'onPluginsChanged' »
 Create `Tests/IntegrationTests/PluginDaemonWiringTests.swift` :
 
 ```swift
+import Foundation
 import IrisKit
 import Logging
 import XCTest
 
-/// Boots a real Daemon with an installed+enabled fixture plugin and asserts the
-/// host manager starts it at boot: the fixture writes a scratch marker during
-/// the initialize handshake. Proves Daemon → PluginHostManager → PluginHost →
-/// sandbox → NDJSON initialize end-to-end.
+@testable import irisd
+
+/// Boots a real Daemon (isolated ephemeral ports + in-memory CA/secrets) with an
+/// installed + enabled fixture plugin and asserts the host manager starts it at
+/// boot: the fixture writes a scratch marker during the initialize handshake.
+/// Proves Daemon → PluginHostManager → PluginHost → sandbox → NDJSON initialize.
 final class PluginDaemonWiringTests: XCTestCase {
+    /// Two adjacent ephemeral ports derived from the temp id (same trick as
+    /// DaemonReloadTests / CLIDaemonHarness — collisions vanishingly rare). Keeps
+    /// the boot off the default ports so it never collides with a running irisd.
+    private func ports(from id: String) -> (proxy: Int, events: Int) {
+        let seed = id.utf8.reduce(0 as UInt32) { acc, byte in acc &* 31 &+ UInt32(byte) }
+        let base = 49152 + Int(seed % 15848)
+        return (base, base + 1)
+    }
+
     func testDaemonStartsEnabledPluginAtBoot() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("iris-wire-\(UUID().uuidString)")
@@ -1552,7 +1564,9 @@ final class PluginDaemonWiringTests: XCTestCase {
         let source = root.appendingPathComponent("src")
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
 
+        // Install + enable a fixture plugin (run.sh launcher → fixture "ok" mode).
         let bin = source.appendingPathComponent("bin")
         try FileManager.default.copyItem(at: ExecutableLocator.testPlugin, to: bin)
         let launcher = source.appendingPathComponent("run.sh")
@@ -1569,10 +1583,36 @@ final class PluginDaemonWiringTests: XCTestCase {
         try manifest.write(
             to: source.appendingPathComponent("plugin.json"), atomically: true, encoding: .utf8)
 
-        // Use a free admin/listen config via in-memory CA + secrets; isolate
-        // every path under `root` so nothing touches the user's real install.
+        // Isolated config: ephemeral ports + a unique admin socket under `root`,
+        // so the daemon boot never collides with a developer's running irisd.
+        let (proxyPort, eventsPort) = ports(from: root.lastPathComponent)
+        let adminSocket = root.appendingPathComponent("admin.sock").path
+        let config = Config(
+            version: 1,
+            broker: BrokerConfig(
+                listen: "127.0.0.1:\(proxyPort)",
+                eventsListen: "127.0.0.1:\(eventsPort)",
+                adminSocket: adminSocket,
+                logLevel: .error,
+                eventRetentionDays: 1,
+                eventRingSize: 100
+            ),
+            security: SecurityConfig(onExfilAttempt: .blockOnly, maxSubstitutionsPerMinute: 60),
+            backups: BackupsConfig(maxCount: 10),
+            hosts: [
+                HostEntry(
+                    host: "api.anthropic.com",
+                    origin: .user,
+                    createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+                )
+            ]
+        )
         let configPath = root.appendingPathComponent("config.json")
-        let store = try await ConfigStore(path: configPath)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(config).write(to: configPath)
+
+        let store = try ConfigStore(path: configPath, logger: Logger(label: "test"))
         let registry = PluginRegistry(
             pluginsDirectory: pluginsDir, configStore: store, logger: Logger(label: "test"))
         _ = try await registry.install(from: source)
@@ -1593,18 +1633,21 @@ final class PluginDaemonWiringTests: XCTestCase {
         defer { runTask.cancel() }
 
         let marker = scratch.appendingPathComponent("test.wire.plugin/initialized")
-        var ok = false
+        var started = false
         for _ in 0..<160 {  // up to 8s
-            if FileManager.default.fileExists(atPath: marker.path) { ok = true; break }
+            if FileManager.default.fileExists(atPath: marker.path) {
+                started = true
+                break
+            }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         try? await daemon.stop()
-        XCTAssertTrue(ok, "daemon should have started the enabled plugin and run initialize")
+        XCTAssertTrue(started, "daemon should have started the enabled plugin and run initialize")
     }
 }
 ```
 
-> **Pré-requis du test :** `secretBackend: .inMemoryFromEnvironment` lit les secrets depuis l'environnement (vide ici = aucun secret, suffisant — le plugin n'a pas besoin de secrets). Le port d'écoute vient de la config par défaut ; comme `ConfigStore` neuf seed les défauts, le daemon écoute sur le port par défaut. **Si un autre test/daemon occupe déjà ce port en CI**, ce test peut échouer au `proxy.start()` — dans ce cas, écrire un `config.json` initial dans `root` avec des ports libres (ex. `listen = "127.0.0.1:0"`) avant de construire le `ConfigStore`. Vérifier le comportement de bind sur port 0 ; sinon choisir des ports hauts fixes peu probables d'être pris.
+> **Notes du test :** `Daemon` vit dans le module `irisd` → `@testable import irisd` (comme `DaemonReloadTests`). Les ports sont **éphémères et isolés** (dérivés du temp id, plage 49152+, + socket admin unique sous `root`) pour ne jamais entrer en conflit avec un `irisd` installé qui tournerait sur les ports par défaut. `secretBackend: .inMemoryFromEnvironment` (aucun secret requis), `caBackend: .inMemory` (CA générée sous `root`). Le test n'ouvre jamais de connexion vers le proxy/admin/events — il n'observe que le marqueur scratch écrit par le plugin pendant `initialize`, donc le bind éphémère suffit. Les `Config`/`BrokerConfig`/`SecurityConfig`/`BackupsConfig`/`HostEntry` reprennent les signatures réelles utilisées par `DaemonReloadTests`.
 
 - [ ] **Step 6 : Lancer le test de câblage**
 
