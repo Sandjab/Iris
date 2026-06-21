@@ -19,12 +19,22 @@ public actor PluginRegistry {
 
     // MARK: - Private helpers
 
-    private func directory(for id: String) -> URL {
-        pluginsDirectory.appendingPathComponent(id, isDirectory: true)
+    /// Single point where a filesystem path is derived from a plugin id. Validates
+    /// the id as a safe, non-traversing path component (#7) — every other method
+    /// that touches a per-plugin directory routes through here, so an unsafe id can
+    /// never reach `FileManager` (nor leak a derived path through an ioError
+    /// message). Installed ids were already validated at install (manifest.validate);
+    /// this only throws for an id injected directly (e.g. a hand-edited config), and
+    /// public callers reject an unknown id as `unknownPlugin` before reaching here.
+    private func directory(for id: String) throws -> URL {
+        guard PluginManifest.isSafePathComponent(id) else {
+            throw PluginError.invalidManifest("invalid id: \(id)")
+        }
+        return pluginsDirectory.appendingPathComponent(id, isDirectory: true)
     }
 
     private func loadManifest(id: String) throws -> PluginManifest {
-        let url = directory(for: id).appendingPathComponent("plugin.json")
+        let url = try directory(for: id).appendingPathComponent("plugin.json")
         let data: Data
         do { data = try Data(contentsOf: url) } catch { throw PluginError.ioError("read manifest \(id): \(error)") }
         let decoder = JSONDecoder()
@@ -98,7 +108,7 @@ public actor PluginRegistry {
             throw PluginError.duplicateId(manifest.id)
         }
         let hash = try PluginHasher.hash(directory: sourceDir)
-        let dest = directory(for: manifest.id)
+        let dest = try directory(for: manifest.id)
         do {
             try fm.createDirectory(at: pluginsDirectory, withIntermediateDirectories: true)
             if fm.fileExists(atPath: dest.path) {

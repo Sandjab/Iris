@@ -208,6 +208,38 @@ final class PluginRegistryTests: XCTestCase {
         }
     }
 
+    func testInfoRejectsUnsafeIdInConfigWithoutLeakingPath() async throws {
+        // Inject a path-traversing id directly into persisted state (simulating a
+        // hand-edited config.json). Deriving a filesystem path from it must be
+        // refused centrally in directory(for:) — a clean invalidManifest, never a
+        // filesystem ioError whose message echoes the derived path.
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        _ = try await store.updatePlugins { _ in
+            [
+                PluginStateEntry(
+                    id: "../../etc",
+                    enabled: false,
+                    order: 0,
+                    approvedCapabilities: nil,
+                    pinnedHash: "x",
+                    configValues: [:]
+                )
+            ]
+        }
+        await assertThrowsAsyncError(try await reg.info(id: "../../etc")) { error in
+            XCTAssertEqual(error as? PluginError, .invalidManifest("invalid id: ../../etc"))
+        }
+    }
+
+    func testRemoveRejectsUnsafeIdAsUnknown() async throws {
+        // A path-traversing id that isn't installed surfaces unknownPlugin (the
+        // appartenance check precedes any path derivation), uniform with enable.
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        await assertThrowsAsyncError(try await reg.remove(id: "../../etc")) { error in
+            XCTAssertEqual(error as? PluginError, .unknownPlugin("../../etc"))
+        }
+    }
+
     func testReorderClampsPastEnd() async throws {
         let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
         for id in ["a.1", "a.2", "a.3"] {
