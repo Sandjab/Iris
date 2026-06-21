@@ -129,6 +129,13 @@ public actor PluginHostManager {
 
     private func startHost(for plugin: Plugin) async {
         let id = plugin.manifest.id
+        // Defense in depth (design §14 #7): the runtime derives the executable and
+        // scratch paths from the id. Installed ids are validated at install, but
+        // never build a filesystem path from an id that isn't a safe component.
+        guard PluginManifest.isSafePathComponent(id) else {
+            logger.error("plugin id is not a safe path component; refusing to launch", metadata: ["id": "\(id)"])
+            return
+        }
         guard let scratch = makeScratch(for: id) else {
             logger.error("plugin scratch dir setup failed", metadata: ["id": "\(id)"])
             return

@@ -10,21 +10,61 @@ public actor PluginRegistry {
     private let configStore: ConfigStore
     private let logger: Logger
     private let fm = FileManager.default
+    private let sourceLimits: PluginSourceValidator.Limits
 
-    public init(pluginsDirectory: URL, configStore: ConfigStore, logger: Logger) {
+    /// Memoised content hash per plugin id, keyed on a cheap stat-only signature.
+    /// `view`/`enable` re-hash on every `list`/`info`; the cache returns the pinned
+    /// digest unchanged unless the tree's signature moved (#9). Actor-isolated, so
+    /// no locking. Invalidated on `remove`.
+    private struct CachedHash {
+        let signature: String
+        let value: String
+    }
+    private var hashCache: [String: CachedHash] = [:]
+
+    /// Content hash for `id`, reusing the cache when the stat-only signature is
+    /// unchanged (#9). A moved signature forces a recompute — so a tamper is never
+    /// masked by a stale cache entry.
+    private func currentHash(id: String, directory: URL) throws -> String {
+        let signature = try PluginHasher.signature(directory: directory)
+        if let cached = hashCache[id], cached.signature == signature {
+            return cached.value
+        }
+        let value = try PluginHasher.hash(directory: directory)
+        hashCache[id] = CachedHash(signature: signature, value: value)
+        return value
+    }
+
+    public init(
+        pluginsDirectory: URL,
+        configStore: ConfigStore,
+        logger: Logger,
+        sourceLimits: PluginSourceValidator.Limits = PluginSourceValidator.Limits()
+    ) {
         self.pluginsDirectory = pluginsDirectory
         self.configStore = configStore
         self.logger = logger
+        self.sourceLimits = sourceLimits
     }
 
     // MARK: - Private helpers
 
-    private func directory(for id: String) -> URL {
-        pluginsDirectory.appendingPathComponent(id, isDirectory: true)
+    /// Single point where a filesystem path is derived from a plugin id. Validates
+    /// the id as a safe, non-traversing path component (#7) — every other method
+    /// that touches a per-plugin directory routes through here, so an unsafe id can
+    /// never reach `FileManager` (nor leak a derived path through an ioError
+    /// message). Installed ids were already validated at install (manifest.validate);
+    /// this only throws for an id injected directly (e.g. a hand-edited config), and
+    /// public callers reject an unknown id as `unknownPlugin` before reaching here.
+    private func directory(for id: String) throws -> URL {
+        guard PluginManifest.isSafePathComponent(id) else {
+            throw PluginError.invalidManifest("invalid id: \(id)")
+        }
+        return pluginsDirectory.appendingPathComponent(id, isDirectory: true)
     }
 
     private func loadManifest(id: String) throws -> PluginManifest {
-        let url = directory(for: id).appendingPathComponent("plugin.json")
+        let url = try directory(for: id).appendingPathComponent("plugin.json")
         let data: Data
         do { data = try Data(contentsOf: url) } catch { throw PluginError.ioError("read manifest \(id): \(error)") }
         let decoder = JSONDecoder()
@@ -39,7 +79,7 @@ public actor PluginRegistry {
 
     private func view(for entry: PluginStateEntry) throws -> Plugin {
         let manifest = try loadManifest(id: entry.id)
-        let currentHash = try PluginHasher.hash(directory: directory(for: entry.id))
+        let currentHash = try currentHash(id: entry.id, directory: directory(for: entry.id))
         return Plugin(
             manifest: manifest,
             enabled: entry.enabled,
@@ -93,26 +133,43 @@ public actor PluginRegistry {
         }
         try manifest.validate()
 
+        // Pre-check the source tree (symlinks, size/count caps) BEFORE copying, so
+        // a manifestly oversized/unsafe source is rejected without copying it (#8,
+        // anti-DoS + fast UX). This is best-effort: the authoritative, fail-closed
+        // check runs on the staged copy below (the source can mutate between here
+        // and the copy — TOCTOU — but the staged copy cannot).
+        try PluginSourceValidator.validate(directory: sourceDir, limits: sourceLimits)
+
         // cheap early reject (optimization only; the atomic block below is authoritative)
         if await configStore.plugins().contains(where: { $0.id == manifest.id }) {
             throw PluginError.duplicateId(manifest.id)
         }
-        let hash = try PluginHasher.hash(directory: sourceDir)
-        let dest = directory(for: manifest.id)
+
+        // Stage the copy under a unique temp dir INSIDE the plugins dir (same
+        // volume → atomic rename later). The state is committed BEFORE the rename,
+        // so a rollback only ever deletes our own staging dir — never a directory
+        // another concurrent install of the same id already committed (#6).
+        try fm.createDirectory(at: pluginsDirectory, withIntermediateDirectories: true)
+        let staging = pluginsDirectory.appendingPathComponent(
+            ".staging-\(manifest.id)-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let hash: String
         do {
-            try fm.createDirectory(at: pluginsDirectory, withIntermediateDirectories: true)
-            if fm.fileExists(atPath: dest.path) {
-                logger.warning(
-                    "install: removing pre-existing plugin directory with no state entry",
-                    metadata: ["id": "\(manifest.id)"]
-                )
-                try fm.removeItem(at: dest)
-            }
-            try fm.copyItem(at: sourceDir, to: dest)
+            try fm.copyItem(at: sourceDir, to: staging)
+            // Authoritative validation on the STAGED copy (not sourceDir): it is
+            // immutable under our control, closing the TOCTOU between the pre-check
+            // and the copy (a symlink injected into sourceDir in between would
+            // otherwise be copied and survive, unpinned). Hash the staged tree too,
+            // so pinnedHash is exactly what we install (#8).
+            try PluginSourceValidator.validate(directory: staging, limits: sourceLimits)
+            hash = try PluginHasher.hash(directory: staging)
         } catch {
-            try? fm.removeItem(at: dest)  // clean a partial copy
-            throw PluginError.ioError("copy plugin \(manifest.id): \(error)")
+            try? fm.removeItem(at: staging)
+            if case PluginError.unsafeSource = error { throw error }
+            throw PluginError.ioError("stage plugin \(manifest.id): \(error)")
         }
+
         let entries: [PluginStateEntry]
         do {
             entries = try await configStore.updatePlugins { current in
@@ -132,15 +189,38 @@ public actor PluginRegistry {
                 ]
             }
         } catch {
-            try? fm.removeItem(at: dest)  // roll back the copy on persist/dup failure
+            try? fm.removeItem(at: staging)  // rollback touches only our staging dir
             throw error
         }
         guard let newEntry = entries.first(where: { $0.id == manifest.id }) else {
+            try? fm.removeItem(at: staging)
             throw PluginError.ioError("install: entry missing after persist for \(manifest.id)")
         }
-        // hashMatches is true by construction (we just hashed + pinned the same dir) —
-        // build the view directly, do NOT re-hash via view(for:) (avoids redundant I/O
-        // and a misleading post-persist failure).
+
+        // Move staging into place AFTER the commit. Only one install wins the
+        // atomic dup re-check above, so only one reaches here for a given id — no
+        // rename race.
+        let dest = try directory(for: manifest.id)
+        do {
+            if fm.fileExists(atPath: dest.path) {
+                logger.warning(
+                    "install: replacing pre-existing plugin directory with no state entry",
+                    metadata: ["id": "\(manifest.id)"]
+                )
+                try fm.removeItem(at: dest)
+            }
+            try fm.moveItem(at: staging, to: dest)
+        } catch {
+            // State is committed but the directory isn't in place. Restore
+            // consistency: best-effort roll the entry back and clean staging, then
+            // fail loud (CLAUDE.md §12).
+            try? fm.removeItem(at: staging)
+            _ = try? await configStore.updatePlugins { $0.filter { $0.id != manifest.id } }
+            throw PluginError.ioError("place plugin \(manifest.id): \(error)")
+        }
+
+        // hashMatches is true by construction (we just hashed + pinned the same
+        // tree) — build the view directly, do NOT re-hash via view(for:).
         return Plugin(
             manifest: manifest,
             enabled: newEntry.enabled,
@@ -166,7 +246,7 @@ public actor PluginRegistry {
             throw PluginError.unknownPlugin(id)
         }
         let manifest = try loadManifest(id: id)
-        let currentHash = try PluginHasher.hash(directory: directory(for: id))
+        let currentHash = try currentHash(id: id, directory: directory(for: id))
         let entries = try await configStore.updatePlugins { current in
             guard let idx = current.firstIndex(where: { $0.id == id }) else {
                 throw PluginError.unknownPlugin(id)
@@ -216,10 +296,11 @@ public actor PluginRegistry {
             }
             return Self.renumber(current.filter { $0.id != id })
         }
+        hashCache[id] = nil  // invalidate any memoised digest for this id
         // State is already committed; a failed directory delete must not throw,
         // but it must not be swallowed silently either (CLAUDE.md §12).
         do {
-            try fm.removeItem(at: directory(for: id))
+            try fm.removeItem(at: try directory(for: id))
         } catch {
             logger.warning(
                 "remove: failed to delete plugin directory",

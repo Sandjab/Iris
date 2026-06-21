@@ -437,29 +437,33 @@ Sources : doc Apple « Disable Library Validation Entitlement » et « Configuri
    tests injectent `ExecutableLocator.sandboxExec`. Le `.pkg` qui embarque + signe le shim à côté
    d'`irisd` reste un **suivi Phase 9** (hors P2b ; en dev `swift build` place les deux dans `.build/`).
 
-### Découvertes durant l'implémentation P1 (à durcir en P2)
+### Découvertes durant l'implémentation P1 (✅ durcies — PR « durcissements §14 #6-10 »)
 
 > P1 (socle de gestion) est livré et mergé-candidat ; ces points sont sortis de la revue
-> holistique et sont **différés à P2** par conception (aucun n'est un bloqueur P1, l'impact étant
-> borné par le socket admin `0600` owner-only et l'absence d'exécution de plugin en P1).
+> holistique et ont été **différés** par conception (aucun n'est un bloqueur P1, l'impact étant
+> borné par le socket admin `0600` owner-only et l'absence d'exécution de plugin en P1). **#6-10 sont
+> désormais ✅ implémentés** (branche `feat/plugins-hardening-6-10`, plan `docs/plugins-hardening-plan.md`).
 
-6. **Install non transactionnel FS↔config sous concurrence.** `PluginRegistry.install` copie le
-   dossier **avant** le commit atomique de l'état ; deux `install` concurrents du **même id** peuvent
-   laisser une entrée d'état committée pointant vers un dossier supprimé par le rollback de l'autre.
-   L'invariant du tableau de config reste intact ; c'est la cohérence FS↔config qui manque. Fix P2 :
-   copier vers un chemin de staging puis `rename`-into-place **après** le commit (le rollback ne
-   touche alors jamais un dossier committé), ou sérialiser l'install par un verrou par-id.
-7. **Validation d'id centralisée.** P1 garde `enable` contre un id path-unsafe (le seul qui dérivait
-   un chemin FS avant le check d'appartenance). En P2/P3, dès que le runtime dérive des dossiers de
-   process/travail depuis l'id, **centraliser** la validation `isSafePathComponent` dans
-   `directory(for:)` plutôt que par-méthode.
-8. **Copie verbatim d'un arbre fourni par le client.** `install` recopie le dossier source tel quel :
-   (a) les **symlinks** sont copiés et `PluginHasher` ignore les non-réguliers → un symlink est
-   non-épinglé (sa cible peut changer après install sans changer le hash) ; (b) **aucun cap** de
-   taille / nombre de fichiers. À durcir avant que P2 n'exécute quoi que ce soit depuis ce dossier.
-9. **Coût du re-hash sur `list`/`info`.** `view(for:)` re-hash tout le dossier du plugin à chaque
-   appel. Acceptable à l'échelle P1 ; ajouter un cache invalidé par mtime si le nombre/la taille des
-   plugins croît.
-10. **Validation des `capabilities`.** Les chaînes `network` (`host:port`) / `filesystem` sont
-    stockées mais non validées en P1 (l'enforcement est P2/sandbox) — valider leur forme au moment
-    où le sandbox les consomme.
+6. **Install non transactionnel FS↔config sous concurrence.** ✅ **Corrigé.** `install` copiait le
+   dossier **avant** le commit atomique de l'état ; deux `install` concurrents du **même id** pouvaient
+   laisser le rollback du perdant supprimer le dossier committé du gagnant (régression prouvée par
+   `testConcurrentInstallSameIdLeavesWinnerDirectoryIntact` : 10/10 échecs avant fix). Schéma retenu :
+   copie vers `.staging-<id>-<uuid>` (même volume) → commit d'état → `rename`-into-place **après** le
+   commit ; le rollback ne touche alors jamais qu'un staging. Échec du rename post-commit → best-effort
+   rollback de l'entrée + fail loud.
+7. **Validation d'id centralisée.** ✅ **Corrigé.** `PluginRegistry.directory(for:)` est l'unique point
+   qui dérive un chemin FS d'un id ; il est devenu `throws` et valide `isSafePathComponent` — ferme
+   aussi une fuite du chemin dérivé via le message `ioError` sur un id injecté en config. Garde
+   défensive symétrique dans `PluginHostManager.startHost` (le runtime dérive executable + scratch).
+8. **Copie verbatim d'un arbre fourni par le client.** ✅ **Corrigé.** `PluginSourceValidator` refuse
+   tout **symlink** (non épinglé par le hasher) et borne **taille totale + nombre de fichiers**
+   (défauts 100 MiB / 10 000 fichiers, injectables) ; appelé en tête d'`install` avant toute copie.
+   Nouveau `PluginError.unsafeSource` (code RPC `-32035`).
+9. **Coût du re-hash sur `list`/`info`.** ✅ **Corrigé.** `PluginHasher.signature` calcule une empreinte
+   stat-only (path+mtime+size triés, même ensemble que `hash`) ; le registry mémoise le digest par id,
+   clé sur la signature → recompute seulement si l'arbre bouge (un tamper n'est jamais masqué). Plus
+   strict que l'invalidation « mtime » seule envisagée (path set + size aussi). Invalidé sur `remove`.
+10. **Validation des `capabilities`.** ✅ **Corrigé.** `PluginCapabilities.validate()` (appelée par
+    `PluginManifest.validate()`, donc à l'install) vérifie la forme : `network` = `host:port` (port
+    1…65535, host non vide sans whitespace/contrôle), `filesystem` ∈ {`scratch`}. Défense en profondeur
+    (l'injection SBPL reste neutralisée par l'échappement de `PluginSandboxProfile.sbplString`).

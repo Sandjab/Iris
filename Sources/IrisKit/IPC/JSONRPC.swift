@@ -175,6 +175,7 @@ extension JSONRPCError {
     // `IOError` is a domain term (I/O), not the `Error` type suffix the rule guards against.
     // swift-format-ignore: DontRepeatTypeInStaticProperties
     public static let pluginIOError = JSONRPCError(code: -32034, message: "plugin I/O error")
+    public static let pluginUnsafeSource = JSONRPCError(code: -32035, message: "unsafe plugin source")
 }
 
 // MARK: - JSON value

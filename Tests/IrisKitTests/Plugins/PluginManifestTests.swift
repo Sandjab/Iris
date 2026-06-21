@@ -138,4 +138,89 @@ final class PluginManifestTests: XCTestCase {
             }
         }
     }
+
+    func testValidateRejectsMalformedNetworkCapability() throws {
+        let m = try decode(
+            #"""
+            { "id": "a.b", "name": "B", "version": "1", "api_version": 1, "executable": "run",
+              "hooks": [ { "event": "on_request", "match": {} } ],
+              "capabilities": { "network": ["api.example.com"], "filesystem": [] } }
+            """#
+        )
+        XCTAssertThrowsError(try m.validate()) { error in
+            guard case PluginError.invalidManifest = error else {
+                return XCTFail("expected invalidManifest, got \(error)")
+            }
+        }
+    }
+
+    func testValidateRejectsNonNumericPort() throws {
+        let m = try decode(
+            #"""
+            { "id": "a.b", "name": "B", "version": "1", "api_version": 1, "executable": "run",
+              "hooks": [ { "event": "on_request", "match": {} } ],
+              "capabilities": { "network": ["api.example.com:https"], "filesystem": [] } }
+            """#
+        )
+        XCTAssertThrowsError(try m.validate()) { error in
+            guard case PluginError.invalidManifest = error else {
+                return XCTFail("expected invalidManifest, got \(error)")
+            }
+        }
+    }
+
+    func testValidateRejectsUnknownFilesystemCapability() throws {
+        let m = try decode(
+            #"""
+            { "id": "a.b", "name": "B", "version": "1", "api_version": 1, "executable": "run",
+              "hooks": [ { "event": "on_request", "match": {} } ],
+              "capabilities": { "network": [], "filesystem": ["/etc"] } }
+            """#
+        )
+        XCTAssertThrowsError(try m.validate()) { error in
+            guard case PluginError.invalidManifest = error else {
+                return XCTFail("expected invalidManifest, got \(error)")
+            }
+        }
+    }
+
+    func testValidateAcceptsWellFormedNetworkCapability() throws {
+        let m = try decode(
+            #"""
+            { "id": "a.b", "name": "B", "version": "1", "api_version": 1, "executable": "run",
+              "hooks": [ { "event": "on_request", "match": {} } ],
+              "capabilities": { "network": ["api.example.com:443"], "filesystem": ["scratch"] } }
+            """#
+        )
+        XCTAssertNoThrow(try m.validate())
+    }
+
+    func testValidateRejectsBareIPv6Host() throws {
+        // "::1" splits on the last colon into host ":" + port "1" — a malformed
+        // host:port. Bare (unbracketed) IPv6 is rejected; the valid form is
+        // bracketed ([::1]:443).
+        let m = try decode(
+            #"""
+            { "id": "a.b", "name": "B", "version": "1", "api_version": 1, "executable": "run",
+              "hooks": [ { "event": "on_request", "match": {} } ],
+              "capabilities": { "network": ["::1"], "filesystem": [] } }
+            """#
+        )
+        XCTAssertThrowsError(try m.validate()) { error in
+            guard case PluginError.invalidManifest = error else {
+                return XCTFail("expected invalidManifest, got \(error)")
+            }
+        }
+    }
+
+    func testValidateAcceptsBracketedIPv6Host() throws {
+        let m = try decode(
+            #"""
+            { "id": "a.b", "name": "B", "version": "1", "api_version": 1, "executable": "run",
+              "hooks": [ { "event": "on_request", "match": {} } ],
+              "capabilities": { "network": ["[::1]:443"], "filesystem": [] } }
+            """#
+        )
+        XCTAssertNoThrow(try m.validate())
+    }
 }

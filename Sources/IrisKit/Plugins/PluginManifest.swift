@@ -84,6 +84,7 @@ public struct PluginManifest: Codable, Sendable, Hashable {
                 throw PluginError.invalidManifest("timeout_ms must be positive")
             }
         }
+        try capabilities.validate()
     }
 
     /// Allowed characters for a single path component, built once and cached
@@ -260,6 +261,49 @@ public struct PluginCapabilities: Codable, Sendable, Hashable {
         self.network = try c.decodeIfPresent([String].self, forKey: .network) ?? []
         self.filesystem = try c.decodeIfPresent([String].self, forKey: .filesystem) ?? []
     }
+
+    /// Filesystem capability values understood by the v1 sandbox. `scratch` =
+    /// a per-plugin private working dir; nothing else is granted by default.
+    static let knownFilesystemCapabilities: Set<String> = ["scratch"]
+
+    /// Structural validation of declared capabilities (design §5/§6). Rejects
+    /// garbage early (install time) rather than letting it reach the sandbox
+    /// profile. Note: SBPL injection is independently neutralised by
+    /// `PluginSandboxProfile.sbplString` escaping — this is defense in depth and
+    /// a fail-fast UX, not the injection boundary.
+    ///
+    /// - `network`: each entry is `host:port`, host non-empty and free of
+    ///   whitespace/control chars, port a decimal in 1...65535. (The SBPL
+    ///   `(remote ip ...)` form is still PROVISIONAL — Seatbelt resolves no DNS —
+    ///   so this validates shape, not runtime reachability. Cf. §6/§14.)
+    /// - `filesystem`: each entry must be a known capability (`scratch`).
+    func validate() throws {
+        for endpoint in network {
+            guard let colon = endpoint.lastIndex(of: ":") else {
+                throw PluginError.invalidManifest("network capability must be host:port: \(endpoint)")
+            }
+            let host = String(endpoint[..<colon])
+            let portString = String(endpoint[endpoint.index(after: colon)...])
+            // A host containing ':' is only valid as a bracketed IPv6 literal
+            // ([::1]); a bare "::1" splits into host ":" + port "1" and must be
+            // rejected as malformed.
+            let bracketedIPv6 = host.hasPrefix("[") && host.hasSuffix("]")
+            guard !host.isEmpty,
+                !host.unicodeScalars.contains(where: {
+                    $0 == " " || CharacterSet.controlCharacters.contains($0)
+                }),
+                !host.contains(":") || bracketedIPv6
+            else {
+                throw PluginError.invalidManifest("invalid network host: \(endpoint)")
+            }
+            guard let port = Int(portString), (1...65535).contains(port) else {
+                throw PluginError.invalidManifest("invalid network port: \(endpoint)")
+            }
+        }
+        for entry in filesystem where !Self.knownFilesystemCapabilities.contains(entry) {
+            throw PluginError.invalidManifest("unknown filesystem capability: \(entry)")
+        }
+    }
 }
 
 public enum PluginError: Error, LocalizedError, Equatable {
@@ -269,6 +313,7 @@ public enum PluginError: Error, LocalizedError, Equatable {
     case unknownPlugin(String)
     case hashMismatch(String)
     case ioError(String)
+    case unsafeSource(String)
 
     public var errorDescription: String? {
         switch self {
@@ -278,6 +323,7 @@ public enum PluginError: Error, LocalizedError, Equatable {
         case .unknownPlugin(let id): return "Unknown plugin: \(id)"
         case .hashMismatch(let id): return "Plugin content changed since approval: \(id)"
         case .ioError(let msg): return "Plugin I/O error: \(msg)"
+        case .unsafeSource(let reason): return "Unsafe plugin source: \(reason)"
         }
     }
 }

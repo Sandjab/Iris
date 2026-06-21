@@ -69,6 +69,56 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertEqual(storedIds, ["org.example.tagger"])
     }
 
+    func testConcurrentInstallSameIdLeavesWinnerDirectoryIntact() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let srcA = try writeSource(id: "race.id")
+        let srcB = try writeSource(id: "race.id")
+        defer {
+            try? FileManager.default.removeItem(at: srcA)
+            try? FileManager.default.removeItem(at: srcB)
+        }
+
+        async let a: Plugin? = try? await reg.install(from: srcA)
+        async let b: Plugin? = try? await reg.install(from: srcB)
+        let (ra, rb) = await (a, b)
+
+        // Exactly one install wins the atomic dup check.
+        let successes = [ra, rb].compactMap { $0 }
+        XCTAssertEqual(successes.count, 1)
+
+        // The committed entry and its on-disk directory both exist and agree —
+        // the loser's rollback must not have deleted the winner's committed dir.
+        let entries = await store.plugins()
+        XCTAssertEqual(entries.map(\.id), ["race.id"])
+        let plugin = try await reg.info(id: "race.id")
+        XCTAssertTrue(plugin.hashMatches)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("race.id").path))
+
+        // No staging crumbs left behind.
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: root.path)
+            .filter { $0.hasPrefix(".staging-") }
+        XCTAssertEqual(leftovers, [])
+    }
+
+    func testInstallRejectsSourceWithSymlink() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let src = try writeSource(id: "sym.id")
+        defer { try? FileManager.default.removeItem(at: src) }
+        try FileManager.default.createSymbolicLink(
+            at: src.appendingPathComponent("evil"),
+            withDestinationURL: URL(fileURLWithPath: "/etc/hosts")
+        )
+        await assertThrowsAsyncError(try await reg.install(from: src)) { error in
+            guard case PluginError.unsafeSource = error else {
+                return XCTFail("expected unsafeSource, got \(error)")
+            }
+        }
+        // Nothing committed, nothing copied.
+        let count = await store.plugins().count
+        XCTAssertEqual(count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("sym.id").path))
+    }
+
     func testInstallRejectsDuplicate() async throws {
         let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
         let src = try writeSource(id: "dup.id")
@@ -205,6 +255,58 @@ final class PluginRegistryTests: XCTestCase {
         let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
         await assertThrowsAsyncError(try await reg.enable(id: "org.not.installed")) { error in
             XCTAssertEqual(error as? PluginError, .unknownPlugin("org.not.installed"))
+        }
+    }
+
+    func testCachedHashStillDetectsTamperAfterCleanListing() async throws {
+        // A first listing primes the per-id hash cache with a matching digest. A
+        // later tamper must still flip hashMatches — the cache is keyed on a
+        // stat-only signature that moves when the tree changes (#9), so it cannot
+        // return a stale "matches". A naive id-only cache would fail this.
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let src = try writeSource(id: "cache.id")
+        defer { try? FileManager.default.removeItem(at: src) }
+        _ = try await reg.install(from: src)
+
+        let first = try await reg.list()
+        XCTAssertTrue(first[0].hashMatches)  // primes the cache
+
+        let runFile = root.appendingPathComponent("cache.id/run")
+        try "#!/bin/sh\necho tampered\n".write(to: runFile, atomically: true, encoding: .utf8)
+
+        let second = try await reg.list()
+        XCTAssertFalse(second[0].hashMatches)
+    }
+
+    func testInfoRejectsUnsafeIdInConfigWithoutLeakingPath() async throws {
+        // Inject a path-traversing id directly into persisted state (simulating a
+        // hand-edited config.json). Deriving a filesystem path from it must be
+        // refused centrally in directory(for:) — a clean invalidManifest, never a
+        // filesystem ioError whose message echoes the derived path.
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        _ = try await store.updatePlugins { _ in
+            [
+                PluginStateEntry(
+                    id: "../../etc",
+                    enabled: false,
+                    order: 0,
+                    approvedCapabilities: nil,
+                    pinnedHash: "x",
+                    configValues: [:]
+                )
+            ]
+        }
+        await assertThrowsAsyncError(try await reg.info(id: "../../etc")) { error in
+            XCTAssertEqual(error as? PluginError, .invalidManifest("invalid id: ../../etc"))
+        }
+    }
+
+    func testRemoveRejectsUnsafeIdAsUnknown() async throws {
+        // A path-traversing id that isn't installed surfaces unknownPlugin (the
+        // appartenance check precedes any path derivation), uniform with enable.
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        await assertThrowsAsyncError(try await reg.remove(id: "../../etc")) { error in
+            XCTAssertEqual(error as? PluginError, .unknownPlugin("../../etc"))
         }
     }
 

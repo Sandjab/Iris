@@ -398,6 +398,8 @@ public struct AdminDispatcher: Sendable {
             return JSONRPCError(code: JSONRPCError.pluginInvalidManifest.code, message: error.localizedDescription)
         case .ioError:
             return JSONRPCError(code: JSONRPCError.pluginIOError.code, message: error.localizedDescription)
+        case .unsafeSource:
+            return JSONRPCError(code: JSONRPCError.pluginUnsafeSource.code, message: error.localizedDescription)
         }
     }
 }
