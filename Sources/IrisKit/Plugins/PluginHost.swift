@@ -102,8 +102,14 @@ public actor PluginHost {
 
         let reader = PluginLineReader(
             fileDescriptor: stdout.fileHandleForReading.fileDescriptor,
-            onLine: { [weak self] line in Task { await self?.handleLine(line) } },
-            onEOF: { [weak self] in Task { await self?.handleEOF() } }
+            onLine: { [weak self] line in
+                guard let self else { return }
+                Task { await self.handleLine(line) }
+            },
+            onEOF: { [weak self] in
+                guard let self else { return }
+                Task { await self.handleEOF() }
+            }
         )
         reader.start()
         self.reader = reader
@@ -129,7 +135,8 @@ public actor PluginHost {
         let previousHandler = process.terminationHandler
         process.terminationHandler = { [weak self] proc in
             previousHandler?(proc)
-            Task { await self?.handleTermination() }
+            guard let self else { return }
+            Task { await self.handleTermination() }
         }
 
         // Any post-spawn failure (timeout, error response, bad/false result)
