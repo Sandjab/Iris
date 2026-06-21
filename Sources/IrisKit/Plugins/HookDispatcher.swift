@@ -62,6 +62,10 @@ public final class HookDispatcher: Sendable {
         chainBox.withLockedValue { $0 = chain }
     }
 
+    /// Test-only: number of entries in the current chain snapshot. Production code
+    /// must not depend on this.
+    public var chainCountForTesting: Int { chainBox.withLockedValue { $0.count } }
+
     /// Runs the onRequest chain. `host`/`path` are gating inputs; `head`/`body`
     /// are the request as decrypted (placeholders present, pre-Iris-scan).
     ///

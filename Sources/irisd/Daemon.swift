@@ -103,11 +103,17 @@ public actor Daemon {
             maxSubstitutionsPerMinute: config.security.maxSubstitutionsPerMinute,
             onExfilAttempt: config.security.onExfilAttempt
         )
+        // The hook dispatcher is created before the proxy so it can be injected
+        // into it, then wired to PluginHostManager's onChainChanged below: the
+        // manager pushes the live plugin chain into this same dispatcher after
+        // each reconcile.
+        let hookDispatcher = HookDispatcher(logger: logger)
         let proxy = ProxyServer(
             configuration: proxyConfig,
             secretStore: secretStore,
             caManager: caManager,
             group: eventLoopGroup,
+            hookDispatcher: hookDispatcher,
             logger: logger
         )
         self.proxy = proxy
@@ -181,6 +187,7 @@ public actor Daemon {
                     )
                 )
             },
+            onChainChanged: { [hookDispatcher] chain in hookDispatcher.updateChain(chain) },
             logger: logger
         )
         self.pluginHostManager = pluginHostManager

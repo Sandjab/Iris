@@ -19,7 +19,19 @@ final class PluginDaemonWiringTests: XCTestCase {
         return (base, base + 1)
     }
 
-    func testDaemonStartsEnabledPluginAtBoot() async throws {
+    /// A booted Daemon plus the temp paths the caller must read/clean up.
+    private struct BootedFixture {
+        let daemon: Daemon
+        let root: URL
+        let scratch: URL
+    }
+
+    /// Boots a real Daemon (isolated ephemeral ports, in-memory CA/secrets, /tmp
+    /// root) with a fixture plugin installed + enabled. The fixture's manifest
+    /// declares an `on_request` hook, so a successful boot publishes a one-entry
+    /// chain to the proxy's `hookDispatcher`. The caller owns `daemon.run()`,
+    /// `daemon.stop()`, and removing `root`.
+    private func bootFixtureDaemon() async throws -> BootedFixture {
         // Root under /tmp with a short id, NOT FileManager.temporaryDirectory:
         // the daemon binds a real admin socket under `root`, and the macOS
         // sun_path limit (~104 chars) rejects a socket under the long
@@ -30,7 +42,6 @@ final class PluginDaemonWiringTests: XCTestCase {
         let source = root.appendingPathComponent("src")
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
 
         // Install + enable a fixture plugin (run.sh launcher → fixture "ok" mode).
         let bin = source.appendingPathComponent("bin")
@@ -102,11 +113,17 @@ final class PluginDaemonWiringTests: XCTestCase {
             scratchRoot: scratch,
             logger: Logger(label: "test")
         )
+        return BootedFixture(daemon: daemon, root: root, scratch: scratch)
+    }
 
-        let runTask = Task { try await daemon.run() }
+    func testDaemonStartsEnabledPluginAtBoot() async throws {
+        let fixture = try await bootFixtureDaemon()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let runTask = Task { try await fixture.daemon.run() }
         defer { runTask.cancel() }
 
-        let marker = scratch.appendingPathComponent("test.wire.plugin/initialized")
+        let marker = fixture.scratch.appendingPathComponent("test.wire.plugin/initialized")
         var started = false
         for _ in 0..<160 {  // up to 8s
             if FileManager.default.fileExists(atPath: marker.path) {
@@ -115,7 +132,32 @@ final class PluginDaemonWiringTests: XCTestCase {
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        try? await daemon.stop()
+        try? await fixture.daemon.stop()
         XCTAssertTrue(started, "daemon should have started the enabled plugin and run initialize")
+    }
+
+    /// Boot wiring proof: PluginHostManager → HookDispatcher. After the daemon
+    /// runs (`startEnabled` → reconcile → republishChain), the proxy's injected
+    /// dispatcher must hold the enabled plugin's onRequest hook, so a real request
+    /// would dispatch through it.
+    func testDaemonWiresPluginChainIntoDispatcher() async throws {
+        let fixture = try await bootFixtureDaemon()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let runTask = Task { try await fixture.daemon.run() }
+        defer { runTask.cancel() }
+
+        var chainCount = 0
+        for _ in 0..<160 {  // up to 8s
+            chainCount = await fixture.daemon.proxyForTesting.hookDispatcher.chainCountForTesting
+            if chainCount >= 1 { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try? await fixture.daemon.stop()
+        XCTAssertGreaterThanOrEqual(
+            chainCount,
+            1,
+            "daemon boot must connect PluginHostManager → HookDispatcher (chain published)"
+        )
     }
 }
