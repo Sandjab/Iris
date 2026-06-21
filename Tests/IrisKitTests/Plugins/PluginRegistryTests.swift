@@ -69,6 +69,25 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertEqual(storedIds, ["org.example.tagger"])
     }
 
+    func testInstallRejectsSourceWithSymlink() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let src = try writeSource(id: "sym.id")
+        defer { try? FileManager.default.removeItem(at: src) }
+        try FileManager.default.createSymbolicLink(
+            at: src.appendingPathComponent("evil"),
+            withDestinationURL: URL(fileURLWithPath: "/etc/hosts")
+        )
+        await assertThrowsAsyncError(try await reg.install(from: src)) { error in
+            guard case PluginError.unsafeSource = error else {
+                return XCTFail("expected unsafeSource, got \(error)")
+            }
+        }
+        // Nothing committed, nothing copied.
+        let count = await store.plugins().count
+        XCTAssertEqual(count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("sym.id").path))
+    }
+
     func testInstallRejectsDuplicate() async throws {
         let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
         let src = try writeSource(id: "dup.id")

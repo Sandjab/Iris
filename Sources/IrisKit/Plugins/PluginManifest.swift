@@ -308,6 +308,7 @@ public enum PluginError: Error, LocalizedError, Equatable {
     case unknownPlugin(String)
     case hashMismatch(String)
     case ioError(String)
+    case unsafeSource(String)
 
     public var errorDescription: String? {
         switch self {
@@ -317,6 +318,7 @@ public enum PluginError: Error, LocalizedError, Equatable {
         case .unknownPlugin(let id): return "Unknown plugin: \(id)"
         case .hashMismatch(let id): return "Plugin content changed since approval: \(id)"
         case .ioError(let msg): return "Plugin I/O error: \(msg)"
+        case .unsafeSource(let reason): return "Unsafe plugin source: \(reason)"
         }
     }
 }

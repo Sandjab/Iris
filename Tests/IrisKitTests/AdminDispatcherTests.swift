@@ -775,4 +775,10 @@ final class AdminDispatcherTests: XCTestCase {
         // so a misroute to the generic -32603 internalError would fail this test.
         XCTAssertEqual(resp.error?.code, -32030)
     }
+
+    func testUnsafeSourceMapsToDedicatedCode() {
+        // A rejected client source (symlink / over cap, #8) gets its own code,
+        // not the generic plugin I/O error.
+        XCTAssertEqual(AdminDispatcher.mapPluginError(.unsafeSource("x")).code, -32035)
+    }
 }

@@ -10,6 +10,7 @@ public actor PluginRegistry {
     private let configStore: ConfigStore
     private let logger: Logger
     private let fm = FileManager.default
+    private let sourceLimits: PluginSourceValidator.Limits
 
     /// Memoised content hash per plugin id, keyed on a cheap stat-only signature.
     /// `view`/`enable` re-hash on every `list`/`info`; the cache returns the pinned
@@ -34,10 +35,16 @@ public actor PluginRegistry {
         return value
     }
 
-    public init(pluginsDirectory: URL, configStore: ConfigStore, logger: Logger) {
+    public init(
+        pluginsDirectory: URL,
+        configStore: ConfigStore,
+        logger: Logger,
+        sourceLimits: PluginSourceValidator.Limits = PluginSourceValidator.Limits()
+    ) {
         self.pluginsDirectory = pluginsDirectory
         self.configStore = configStore
         self.logger = logger
+        self.sourceLimits = sourceLimits
     }
 
     // MARK: - Private helpers
@@ -125,6 +132,10 @@ public actor PluginRegistry {
             throw PluginError.invalidManifest("\(error)")
         }
         try manifest.validate()
+
+        // Refuse a source tree with symlinks (unpinned by the hasher) or one that
+        // blows the size/count caps, BEFORE copying anything (#8).
+        try PluginSourceValidator.validate(directory: sourceDir, limits: sourceLimits)
 
         // cheap early reject (optimization only; the atomic block below is authoritative)
         if await configStore.plugins().contains(where: { $0.id == manifest.id }) {
