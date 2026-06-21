@@ -88,6 +88,8 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(Event.Kind.exfilBlocked.rawValue, "exfilBlocked")
         XCTAssertEqual(Event.Kind.error.rawValue, "error")
         XCTAssertEqual(Event.Kind.systemAlert.rawValue, "systemAlert")
+        XCTAssertEqual(Event.Kind.pluginBlocked.rawValue, "pluginBlocked")
+        XCTAssertEqual(Event.Kind.pluginResponded.rawValue, "pluginResponded")
     }
 
     func testSystemAlertRoundTrip() throws {
