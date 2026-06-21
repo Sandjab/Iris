@@ -48,3 +48,41 @@ public struct PluginStateEntry: Codable, Sendable, Hashable {
             try c.decodeIfPresent([String: String].self, forKey: .configValues) ?? [:]
     }
 }
+
+extension PluginStateEntry {
+    /// Copy with `enabled` on and the given approved capabilities.
+    func enabling(capabilities: PluginCapabilities) -> PluginStateEntry {
+        PluginStateEntry(
+            id: id,
+            enabled: true,
+            order: order,
+            approvedCapabilities: capabilities,
+            pinnedHash: pinnedHash,
+            configValues: configValues
+        )
+    }
+
+    /// Copy with `enabled` off, preserving approved capabilities and pin.
+    func disabling() -> PluginStateEntry {
+        PluginStateEntry(
+            id: id,
+            enabled: false,
+            order: order,
+            approvedCapabilities: approvedCapabilities,
+            pinnedHash: pinnedHash,
+            configValues: configValues
+        )
+    }
+
+    /// Copy with a new `order`, all other fields unchanged.
+    func with(order newOrder: Int) -> PluginStateEntry {
+        PluginStateEntry(
+            id: id,
+            enabled: enabled,
+            order: newOrder,
+            approvedCapabilities: approvedCapabilities,
+            pinnedHash: pinnedHash,
+            configValues: configValues
+        )
+    }
+}

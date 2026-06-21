@@ -151,6 +151,20 @@ final class PluginRegistryTests: XCTestCase {
         _ = try await reg.enable(id: "p.id")
         let disabled = try await reg.disable(id: "p.id")
         XCTAssertFalse(disabled.enabled)
+        // Approved capabilities survive a disable (only the flag flips).
+        XCTAssertEqual(disabled.approvedCapabilities, PluginCapabilities(network: [], filesystem: ["scratch"]))
+    }
+
+    func testEnableAfterDisable() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let src = try writeSource(id: "p.id")
+        defer { try? FileManager.default.removeItem(at: src) }
+        _ = try await reg.install(from: src)
+        _ = try await reg.enable(id: "p.id")
+        _ = try await reg.disable(id: "p.id")
+        let reEnabled = try await reg.enable(id: "p.id")
+        XCTAssertTrue(reEnabled.enabled)
+        XCTAssertEqual(reEnabled.approvedCapabilities, PluginCapabilities(network: [], filesystem: ["scratch"]))
     }
 
     func testRemoveDeletesDirAndState() async throws {
@@ -174,6 +188,19 @@ final class PluginRegistryTests: XCTestCase {
         // Move a.3 to the front.
         let reordered = try await reg.reorder(id: "a.3", to: 0)
         XCTAssertEqual(reordered.map(\.manifest.id), ["a.3", "a.1", "a.2"])
+        XCTAssertEqual(reordered.map(\.order), [0, 1, 2])
+    }
+
+    func testReorderClampsPastEnd() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        for id in ["a.1", "a.2", "a.3"] {
+            let src = try writeSource(id: id)
+            _ = try await reg.install(from: src)
+            try? FileManager.default.removeItem(at: src)
+        }
+        // Target index past the end is clamped to the last slot.
+        let reordered = try await reg.reorder(id: "a.1", to: 99)
+        XCTAssertEqual(reordered.map(\.manifest.id), ["a.2", "a.3", "a.1"])
         XCTAssertEqual(reordered.map(\.order), [0, 1, 2])
     }
 }

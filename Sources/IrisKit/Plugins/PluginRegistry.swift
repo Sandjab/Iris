@@ -166,21 +166,21 @@ public actor PluginRegistry {
                 throw PluginError.hashMismatch(id)
             }
             var copy = current
-            let old = copy[idx]
-            copy[idx] = PluginStateEntry(
-                id: old.id,
-                enabled: true,
-                order: old.order,
-                approvedCapabilities: manifest.capabilities,
-                pinnedHash: old.pinnedHash,
-                configValues: old.configValues
-            )
+            copy[idx] = copy[idx].enabling(capabilities: manifest.capabilities)
             return copy
         }
         guard let updated = entries.first(where: { $0.id == id }) else {
             throw PluginError.unknownPlugin(id)
         }
-        return try view(for: updated)
+        // hashMatches is true by construction — the TOFU check above passed.
+        return Plugin(
+            manifest: manifest,
+            enabled: updated.enabled,
+            order: updated.order,
+            approvedCapabilities: updated.approvedCapabilities,
+            pinnedHash: updated.pinnedHash,
+            hashMatches: true
+        )
     }
 
     /// Flips `enabled` off, leaving approved capabilities and pinned hash intact.
@@ -190,15 +190,7 @@ public actor PluginRegistry {
                 throw PluginError.unknownPlugin(id)
             }
             var copy = current
-            let old = copy[idx]
-            copy[idx] = PluginStateEntry(
-                id: old.id,
-                enabled: false,
-                order: old.order,
-                approvedCapabilities: old.approvedCapabilities,
-                pinnedHash: old.pinnedHash,
-                configValues: old.configValues
-            )
+            copy[idx] = copy[idx].disabling()
             return copy
         }
         guard let updated = entries.first(where: { $0.id == id }) else {
@@ -215,7 +207,16 @@ public actor PluginRegistry {
             }
             return Self.renumber(current.filter { $0.id != id })
         }
-        try? fm.removeItem(at: directory(for: id))
+        // State is already committed; a failed directory delete must not throw,
+        // but it must not be swallowed silently either (CLAUDE.md §12).
+        do {
+            try fm.removeItem(at: directory(for: id))
+        } catch {
+            logger.warning(
+                "remove: failed to delete plugin directory",
+                metadata: ["id": "\(id)", "error": "\(error)"]
+            )
+        }
     }
 
     /// Moves `id` to `index` in the chain and renumbers `order` densely (0..<n).
@@ -234,7 +235,10 @@ public actor PluginRegistry {
         var out: [Plugin] = []
         for entry in entries.sorted(by: { $0.order < $1.order }) {
             do { out.append(try view(for: entry)) } catch {
-                logger.warning("plugin skipped", metadata: ["id": "\(entry.id)"])
+                logger.warning(
+                    "plugin skipped",
+                    metadata: ["id": "\(entry.id)", "error": "\(error)"]
+                )
             }
         }
         return out
@@ -242,15 +246,6 @@ public actor PluginRegistry {
 
     /// Reassigns dense `order` values following array position.
     private static func renumber(_ entries: [PluginStateEntry]) -> [PluginStateEntry] {
-        entries.enumerated().map { i, e in
-            PluginStateEntry(
-                id: e.id,
-                enabled: e.enabled,
-                order: i,
-                approvedCapabilities: e.approvedCapabilities,
-                pinnedHash: e.pinnedHash,
-                configValues: e.configValues
-            )
-        }
+        entries.enumerated().map { $1.with(order: $0) }
     }
 }
