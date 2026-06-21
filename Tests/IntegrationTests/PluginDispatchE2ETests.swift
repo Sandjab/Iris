@@ -54,9 +54,9 @@ final class PluginDispatchE2ETests: XCTestCase {
 
     /// Builds the full E2E harness: a real `PluginHost` (fixture) started under the
     /// sandbox, an `onRequest` chain entry built from `hook`, a mock upstream, and
-    /// a `ProxyServer` constructed with the dispatcher injected. The chain is
-    /// pushed via `proxy.hookDispatcher.updateChain` AFTER the host starts so the
-    /// proxy and the dispatcher we feed are the exact same instance.
+    /// a `ProxyServer` constructed with a dispatcher injected. The chain is pushed
+    /// via `proxy.hookDispatcher.updateChain` AFTER the host starts — that is the
+    /// dispatcher the proxy actually uses, so no second instance is kept around.
     private func makeHarness(
         hook: PluginHook,
         secret: (name: String, value: String, hosts: [String])? = nil
@@ -95,7 +95,6 @@ final class PluginDispatchE2ETests: XCTestCase {
         )
         try await host.start()
 
-        let dispatcher = HookDispatcher()
         let proxyConfig = ProxyServer.Configuration(
             listenHost: "127.0.0.1",
             listenPort: 0,
@@ -108,7 +107,7 @@ final class PluginDispatchE2ETests: XCTestCase {
             configuration: proxyConfig,
             secretStore: secretStore,
             caManager: proxyCAManager,
-            hookDispatcher: dispatcher
+            hookDispatcher: HookDispatcher()
         )
         proxy.hookDispatcher.updateChain([
             PluginChainEntry(pluginId: "e2e.plugin", invoker: host, hook: hook)

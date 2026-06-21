@@ -37,6 +37,11 @@ final class PluginDaemonWiringTests: XCTestCase {
         // sun_path limit (~104 chars) rejects a socket under the long
         // /var/folders/.../T/ temp path with `unixDomainSocketPathTooLong`.
         let root = URL(fileURLWithPath: "/tmp/iris-wire-\(UUID().uuidString.prefix(8))")
+        // On a mid-setup throw the caller never receives a fixture, so `root`
+        // would leak; remove it here unless setup completes. On success the
+        // caller's defer owns `root`, so we flip the guard just before returning.
+        var committed = false
+        defer { if !committed { try? FileManager.default.removeItem(at: root) } }
         let pluginsDir = root.appendingPathComponent("plugins")
         let scratch = root.appendingPathComponent("scratch")
         let source = root.appendingPathComponent("src")
@@ -113,6 +118,7 @@ final class PluginDaemonWiringTests: XCTestCase {
             scratchRoot: scratch,
             logger: Logger(label: "test")
         )
+        committed = true
         return BootedFixture(daemon: daemon, root: root, scratch: scratch)
     }
 
