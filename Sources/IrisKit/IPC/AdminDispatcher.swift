@@ -377,15 +377,15 @@ public struct AdminDispatcher: Sendable {
     static func mapPluginError(_ error: PluginError) -> JSONRPCError {
         switch error {
         case .unknownPlugin:
-            return JSONRPCError(code: -32030, message: error.localizedDescription)
+            return JSONRPCError(code: JSONRPCError.pluginUnknown.code, message: error.localizedDescription)
         case .duplicateId:
-            return JSONRPCError(code: -32031, message: error.localizedDescription)
+            return JSONRPCError(code: JSONRPCError.pluginDuplicate.code, message: error.localizedDescription)
         case .hashMismatch:
-            return JSONRPCError(code: -32032, message: error.localizedDescription)
+            return JSONRPCError(code: JSONRPCError.pluginHashMismatch.code, message: error.localizedDescription)
         case .invalidManifest, .unsupportedApiVersion:
-            return JSONRPCError(code: -32033, message: error.localizedDescription)
+            return JSONRPCError(code: JSONRPCError.pluginInvalidManifest.code, message: error.localizedDescription)
         case .ioError:
-            return JSONRPCError(code: -32034, message: error.localizedDescription)
+            return JSONRPCError(code: JSONRPCError.pluginIOError.code, message: error.localizedDescription)
         }
     }
 }
