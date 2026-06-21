@@ -28,6 +28,17 @@ final class PluginSandboxEnforcementTests: XCTestCase {
         return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
     }
 
+    private func wait(for process: Process, timeout: TimeInterval = 5.0) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+            XCTFail("process did not exit within \(timeout)s")
+        }
+    }
+
     func testRealProfileStillLetsBinaryRun() throws {
         let scratch = try scratchDir()
         defer { try? FileManager.default.removeItem(at: scratch) }
@@ -42,8 +53,8 @@ final class PluginSandboxEnforcementTests: XCTestCase {
             profile: profile,
             standardOutput: out
         )
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        let data = (try? out.fileHandleForReading.readToEnd()) ?? Data()
+        wait(for: process)
         XCTAssertEqual(process.terminationStatus, 0)
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("alive"))
     }
@@ -65,7 +76,7 @@ final class PluginSandboxEnforcementTests: XCTestCase {
             arguments: ["-c", "echo x > \(outside.path)"],
             profile: profile
         )
-        denied.waitUntilExit()
+        wait(for: denied)
         XCTAssertNotEqual(denied.terminationStatus, 0, "write outside scratch must be denied")
         XCTAssertFalse(FileManager.default.fileExists(atPath: outside.path))
 
@@ -76,7 +87,7 @@ final class PluginSandboxEnforcementTests: XCTestCase {
             arguments: ["-c", "echo x > \(inside.path)"],
             profile: profile
         )
-        allowed.waitUntilExit()
+        wait(for: allowed)
         XCTAssertEqual(allowed.terminationStatus, 0, "write inside scratch must be allowed")
         XCTAssertTrue(FileManager.default.fileExists(atPath: inside.path))
     }
@@ -101,7 +112,7 @@ final class PluginSandboxEnforcementTests: XCTestCase {
         control.executableURL = URL(fileURLWithPath: "/bin/sh")
         control.arguments = ["-c", probe]
         try control.run()
-        control.waitUntilExit()
+        wait(for: control)
         XCTAssertEqual(control.terminationStatus, 0, "control: connect should work without sandbox")
 
         // Sandboxed: deny network* → connect blocked → status non-zero.
@@ -116,7 +127,7 @@ final class PluginSandboxEnforcementTests: XCTestCase {
             arguments: ["-c", probe],
             profile: profile
         )
-        blocked.waitUntilExit()
+        wait(for: blocked)
         XCTAssertNotEqual(blocked.terminationStatus, 0, "sandbox must deny outbound network")
     }
 }

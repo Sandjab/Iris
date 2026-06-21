@@ -7,6 +7,17 @@ import XCTest
 /// "does the API/plumbing work" from "is our deny-default profile workable"
 /// (the latter is PluginSandboxEnforcementTests).
 final class PluginShimSmokeTests: XCTestCase {
+    private func wait(for process: Process, timeout: TimeInterval = 5.0) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+            XCTFail("process did not exit within \(timeout)s")
+        }
+    }
+
     private func runShim(_ args: [String]) throws -> (status: Int32, stdout: String) {
         let process = Process()
         process.executableURL = ExecutableLocator.sandboxExec
@@ -14,8 +25,8 @@ final class PluginShimSmokeTests: XCTestCase {
         let out = Pipe()
         process.standardOutput = out
         try process.run()
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        let data = (try? out.fileHandleForReading.readToEnd()) ?? Data()
+        wait(for: process)
         return (process.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 
