@@ -17,6 +17,30 @@ final class PluginSourceValidatorTests: XCTestCase {
         XCTAssertNoThrow(try PluginSourceValidator.validate(directory: dir))
     }
 
+    func testAcceptsNestedDirectories() throws {
+        let dir = try makeDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sub = dir.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+        try "x".write(to: sub.appendingPathComponent("run"), atomically: true, encoding: .utf8)
+        XCTAssertNoThrow(try PluginSourceValidator.validate(directory: dir))
+    }
+
+    func testRejectsNonRegularNonDirectoryFile() throws {
+        // A FIFO (and likewise sockets / device nodes) is neither a regular file
+        // nor a directory; it must be refused, not silently skipped, since
+        // copyItem would still copy it into the plugins dir.
+        let dir = try makeDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fifo = dir.appendingPathComponent("pipe")
+        XCTAssertEqual(mkfifo(fifo.path, 0o644), 0, "mkfifo should succeed")
+        XCTAssertThrowsError(try PluginSourceValidator.validate(directory: dir)) { error in
+            guard case PluginError.unsafeSource = error else {
+                return XCTFail("expected unsafeSource, got \(error)")
+            }
+        }
+    }
+
     func testRejectsSymlink() throws {
         let dir = try makeDir()
         defer { try? FileManager.default.removeItem(at: dir) }

@@ -26,7 +26,9 @@ public enum PluginSourceValidator {
         guard
             let enumerator = fm.enumerator(
                 at: directory.standardizedFileURL,
-                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],
+                includingPropertiesForKeys: [
+                    .isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey,
+                ],
                 options: []
             )
         else {
@@ -36,12 +38,18 @@ public enum PluginSourceValidator {
         var totalBytes = 0
         for case let url as URL in enumerator {
             let values = try url.resourceValues(forKeys: [
-                .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey,
+                .isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey,
             ])
             if values.isSymbolicLink == true {
                 throw PluginError.unsafeSource("contains a symbolic link: \(url.lastPathComponent)")
             }
-            guard values.isRegularFile == true else { continue }
+            if values.isDirectory == true { continue }  // recurse into real subdirectories
+            // Reject anything that is neither a regular file nor a directory (socket,
+            // FIFO, device node, …): copyItem would still copy it, so refuse it here
+            // rather than skip it silently.
+            guard values.isRegularFile == true else {
+                throw PluginError.unsafeSource("contains a non-regular file: \(url.lastPathComponent)")
+            }
             fileCount += 1
             if fileCount > limits.maxFileCount {
                 throw PluginError.unsafeSource("too many files (> \(limits.maxFileCount))")
