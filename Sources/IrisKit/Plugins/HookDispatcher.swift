@@ -104,7 +104,22 @@ public final class HookDispatcher: Sendable {
                 case .block:
                     return .block(pluginId: entry.pluginId, reason: result.reason)
                 case .respond:
-                    let status = result.status ?? 200
+                    // Clamp at the wire→domain boundary: NIO's HTTPResponseStatus
+                    // init does `UInt(statusCode)` for unknown codes, which TRAPS
+                    // on a negative int — a plugin returning `status: -1` would
+                    // crash the daemon. Reject anything outside the valid HTTP
+                    // range and fall back to 200 (value-free warning).
+                    let rawStatus = result.status ?? 200
+                    let status: Int
+                    if (100...599).contains(rawStatus) {
+                        status = rawStatus
+                    } else {
+                        logger.warning(
+                            "plugin respond status out of range; using 200",
+                            metadata: ["id": "\(entry.pluginId)", "status": "\(rawStatus)"]
+                        )
+                        status = 200
+                    }
                     let headers = (result.headers ?? []).compactMap { $0.count == 2 ? ($0[0], $0[1]) : nil }
                     let rbody = Self.decodeBody(result.body, cap: Self.maxBodyBytes)
                     if result.body != nil, rbody == nil {

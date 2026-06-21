@@ -83,6 +83,9 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
             case substituted(names: [String])
             case noMatch(unresolved: [String], nonUtf8: Bool, bodyTooLarge: Bool)
             case blocked(alert: Alert)
+            // `reason` is intentionally stored but NEVER forwarded to the client
+            // (block returns an empty 403) nor written to events/logs (§6.1) — it
+            // is retained only for a future debug channel.
             case pluginBlocked(pluginId: String, reason: String?)
             case pluginResponded(pluginId: String, status: Int, headers: [(String, String)], body: ByteBuffer?)
         }
@@ -233,7 +236,7 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
     /// and resolves with its status. Routes via `Channel.write` (thread-safe),
     /// never `context` — this runs in a future callback (the CONNECT-502 lesson).
     /// Sets `headWritten` so the failure path doesn't double-write. Strips any
-    /// client-supplied content-length/transfer-encoding and sets a correct
+    /// plugin-supplied hop-by-hop headers (RFC 7230 §6.1) and sets a correct
     /// content-length for the synthetic body.
     private static func writeSynthetic(
         status: Int,
@@ -244,8 +247,14 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         headWritten: NIOLoopBoundBox<Bool>
     ) -> EventLoopFuture<StreamOutcome> {
         var h = HTTPHeaders()
-        for (n, v) in headers
-        where n.lowercased() != "content-length" && n.lowercased() != "transfer-encoding" {
+        // Strip the full RFC 7230 §6.1 hop-by-hop set: a plugin `respond` payload
+        // could otherwise inject framing headers that desync the client connection.
+        let hopByHop: Set<String> = [
+            "content-length", "transfer-encoding", "connection", "keep-alive",
+            "upgrade", "te", "trailer", "proxy-authenticate", "proxy-authorization",
+            "proxy-connection",
+        ]
+        for (n, v) in headers where !hopByHop.contains(n.lowercased()) {
             h.add(name: n, value: v)
         }
         h.replaceOrAdd(name: "content-length", value: "\(body?.readableBytes ?? 0)")

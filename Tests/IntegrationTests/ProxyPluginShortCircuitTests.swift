@@ -131,6 +131,9 @@ final class ProxyPluginShortCircuitTests: XCTestCase {
         XCTAssertEqual(blocked?.statusCode, 403)
 
         // §6.1: neither the block reason nor the secret value may surface in events.
+        // The "nope" check is a documentation assertion: the reason is discarded at
+        // makeEvent (only pluginId is carried), so it structurally cannot reach an
+        // event, and log redaction is structural in logOutcome (id/host only).
         for event in events {
             XCTAssertFalse(event.host.contains(secretValue))
             XCTAssertFalse(event.path.contains(secretValue))

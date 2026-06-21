@@ -117,6 +117,36 @@ final class HookDispatcherTests: XCTestCase {
         XCTAssertEqual(body?.getString(at: 0, length: body?.readableBytes ?? 0), "teapot")
     }
 
+    func testRespondStatusOutOfRangeClampsTo200() async {
+        // A plugin returning an invalid status must not crash the daemon: NIO's
+        // HTTPResponseStatus(statusCode:) does `UInt(statusCode)`, which TRAPS on a
+        // negative int. The dispatcher clamps any out-of-range status to 200.
+        for badStatus in [-1, 0, 99, 600, 99_999] {
+            let inv = MockInvoker(id: "p") { _ in .init(action: .respond, status: badStatus) }
+            let d = HookDispatcher()
+            d.updateChain([entry(inv)])
+            let out = await d.onRequest(head: head(), body: nil, host: "h")
+            guard case .respond(_, let status, _, _) = out else {
+                return XCTFail("expected .respond for status \(badStatus)")
+            }
+            XCTAssertEqual(status, 200, "out-of-range status \(badStatus) must clamp to 200")
+        }
+    }
+
+    func testRespondStatusInRangeIsPreserved() async {
+        // Boundary values of the valid HTTP range must pass through unchanged.
+        for goodStatus in [100, 200, 418, 599] {
+            let inv = MockInvoker(id: "p") { _ in .init(action: .respond, status: goodStatus) }
+            let d = HookDispatcher()
+            d.updateChain([entry(inv)])
+            let out = await d.onRequest(head: head(), body: nil, host: "h")
+            guard case .respond(_, let status, _, _) = out else {
+                return XCTFail("expected .respond for status \(goodStatus)")
+            }
+            XCTAssertEqual(status, goodStatus, "in-range status \(goodStatus) must be preserved")
+        }
+    }
+
     func testOnFailureSkipContinues() async {
         struct Boom: Error {}
         let a = MockInvoker(id: "a") { _ in throw Boom() }
