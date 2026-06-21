@@ -69,6 +69,37 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertEqual(storedIds, ["org.example.tagger"])
     }
 
+    func testConcurrentInstallSameIdLeavesWinnerDirectoryIntact() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let srcA = try writeSource(id: "race.id")
+        let srcB = try writeSource(id: "race.id")
+        defer {
+            try? FileManager.default.removeItem(at: srcA)
+            try? FileManager.default.removeItem(at: srcB)
+        }
+
+        async let a: Plugin? = try? await reg.install(from: srcA)
+        async let b: Plugin? = try? await reg.install(from: srcB)
+        let (ra, rb) = await (a, b)
+
+        // Exactly one install wins the atomic dup check.
+        let successes = [ra, rb].compactMap { $0 }
+        XCTAssertEqual(successes.count, 1)
+
+        // The committed entry and its on-disk directory both exist and agree —
+        // the loser's rollback must not have deleted the winner's committed dir.
+        let entries = await store.plugins()
+        XCTAssertEqual(entries.map(\.id), ["race.id"])
+        let plugin = try await reg.info(id: "race.id")
+        XCTAssertTrue(plugin.hashMatches)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("race.id").path))
+
+        // No staging crumbs left behind.
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: root.path)
+            .filter { $0.hasPrefix(".staging-") }
+        XCTAssertEqual(leftovers, [])
+    }
+
     func testInstallRejectsSourceWithSymlink() async throws {
         let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
         let src = try writeSource(id: "sym.id")

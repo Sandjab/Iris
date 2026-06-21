@@ -142,21 +142,23 @@ public actor PluginRegistry {
             throw PluginError.duplicateId(manifest.id)
         }
         let hash = try PluginHasher.hash(directory: sourceDir)
-        let dest = try directory(for: manifest.id)
+
+        // Stage the copy under a unique temp dir INSIDE the plugins dir (same
+        // volume → atomic rename later). The state is committed BEFORE the rename,
+        // so a rollback only ever deletes our own staging dir — never a directory
+        // another concurrent install of the same id already committed (#6).
+        try fm.createDirectory(at: pluginsDirectory, withIntermediateDirectories: true)
+        let staging = pluginsDirectory.appendingPathComponent(
+            ".staging-\(manifest.id)-\(UUID().uuidString)",
+            isDirectory: true
+        )
         do {
-            try fm.createDirectory(at: pluginsDirectory, withIntermediateDirectories: true)
-            if fm.fileExists(atPath: dest.path) {
-                logger.warning(
-                    "install: removing pre-existing plugin directory with no state entry",
-                    metadata: ["id": "\(manifest.id)"]
-                )
-                try fm.removeItem(at: dest)
-            }
-            try fm.copyItem(at: sourceDir, to: dest)
+            try fm.copyItem(at: sourceDir, to: staging)
         } catch {
-            try? fm.removeItem(at: dest)  // clean a partial copy
-            throw PluginError.ioError("copy plugin \(manifest.id): \(error)")
+            try? fm.removeItem(at: staging)
+            throw PluginError.ioError("stage plugin \(manifest.id): \(error)")
         }
+
         let entries: [PluginStateEntry]
         do {
             entries = try await configStore.updatePlugins { current in
@@ -176,15 +178,38 @@ public actor PluginRegistry {
                 ]
             }
         } catch {
-            try? fm.removeItem(at: dest)  // roll back the copy on persist/dup failure
+            try? fm.removeItem(at: staging)  // rollback touches only our staging dir
             throw error
         }
         guard let newEntry = entries.first(where: { $0.id == manifest.id }) else {
+            try? fm.removeItem(at: staging)
             throw PluginError.ioError("install: entry missing after persist for \(manifest.id)")
         }
-        // hashMatches is true by construction (we just hashed + pinned the same dir) —
-        // build the view directly, do NOT re-hash via view(for:) (avoids redundant I/O
-        // and a misleading post-persist failure).
+
+        // Move staging into place AFTER the commit. Only one install wins the
+        // atomic dup re-check above, so only one reaches here for a given id — no
+        // rename race.
+        let dest = try directory(for: manifest.id)
+        do {
+            if fm.fileExists(atPath: dest.path) {
+                logger.warning(
+                    "install: replacing pre-existing plugin directory with no state entry",
+                    metadata: ["id": "\(manifest.id)"]
+                )
+                try fm.removeItem(at: dest)
+            }
+            try fm.moveItem(at: staging, to: dest)
+        } catch {
+            // State is committed but the directory isn't in place. Restore
+            // consistency: best-effort roll the entry back and clean staging, then
+            // fail loud (CLAUDE.md §12).
+            try? fm.removeItem(at: staging)
+            _ = try? await configStore.updatePlugins { $0.filter { $0.id != manifest.id } }
+            throw PluginError.ioError("place plugin \(manifest.id): \(error)")
+        }
+
+        // hashMatches is true by construction (we just hashed + pinned the same
+        // tree) — build the view directly, do NOT re-hash via view(for:).
         return Plugin(
             manifest: manifest,
             enabled: newEntry.enabled,
