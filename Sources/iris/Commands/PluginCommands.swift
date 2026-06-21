@@ -116,7 +116,9 @@ extension PluginCommand {
                     """
                 try Output.print(humanText: humanText, jsonValue: plugin, json: json)
             } catch let error as JSONRPCError where error.code == JSONRPCError.pluginUnknown.code {
-                FileHandle.standardError.write(Data("error: unknown plugin: \(id)\n".utf8))
+                try? FileHandle.standardError.write(
+                    contentsOf: Data("error: unknown plugin: \(id)\n".utf8)
+                )
                 throw ExitCode(IrisExitCode.usage)
             }
         }
@@ -145,12 +147,16 @@ extension PluginCommand {
                 }
                 try Output.print(humanText: "enabled \(plugin.manifest.id)", jsonValue: plugin, json: json)
             } catch let error as JSONRPCError where error.code == JSONRPCError.pluginHashMismatch.code {
-                FileHandle.standardError.write(
-                    Data("error: plugin content changed — run 'iris plugin info \(id)' then re-enable.\n".utf8)
+                try? FileHandle.standardError.write(
+                    contentsOf: Data(
+                        "error: plugin content changed — run 'iris plugin info \(id)' then re-enable.\n".utf8
+                    )
                 )
                 throw ExitCode(IrisExitCode.usage)
             } catch let error as JSONRPCError where error.code == JSONRPCError.pluginUnknown.code {
-                FileHandle.standardError.write(Data("error: unknown plugin: \(id)\n".utf8))
+                try? FileHandle.standardError.write(
+                    contentsOf: Data("error: unknown plugin: \(id)\n".utf8)
+                )
                 throw ExitCode(IrisExitCode.usage)
             }
         }
@@ -179,7 +185,9 @@ extension PluginCommand {
                 }
                 try Output.print(humanText: "disabled \(plugin.manifest.id)", jsonValue: plugin, json: json)
             } catch let error as JSONRPCError where error.code == JSONRPCError.pluginUnknown.code {
-                FileHandle.standardError.write(Data("error: unknown plugin: \(id)\n".utf8))
+                try? FileHandle.standardError.write(
+                    contentsOf: Data("error: unknown plugin: \(id)\n".utf8)
+                )
                 throw ExitCode(IrisExitCode.usage)
             }
         }
@@ -211,7 +219,9 @@ extension PluginCommand {
                 // `removed: false`, so a successful response always means removed.
                 try Output.print(humanText: "removed \(id)", jsonValue: result, json: json)
             } catch let error as JSONRPCError where error.code == JSONRPCError.pluginUnknown.code {
-                FileHandle.standardError.write(Data("error: unknown plugin: \(id)\n".utf8))
+                try? FileHandle.standardError.write(
+                    contentsOf: Data("error: unknown plugin: \(id)\n".utf8)
+                )
                 throw ExitCode(IrisExitCode.usage)
             }
         }

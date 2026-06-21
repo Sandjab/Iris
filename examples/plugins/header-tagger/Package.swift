@@ -3,5 +3,6 @@ import PackageDescription
 
 let package = Package(
     name: "header-tagger",
+    platforms: [ .macOS(.v13) ],
     targets: [ .executableTarget(name: "header-tagger") ]
 )

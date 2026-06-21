@@ -85,15 +85,18 @@ public struct PluginManifest: Codable, Sendable, Hashable {
         }
     }
 
+    /// Allowed characters for a single path component, built once and cached
+    /// rather than reconstructed on every `isSafePathComponent` call.
+    private static let safePathComponentChars = CharacterSet(
+        charactersIn:
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+    )
+
     /// A single, non-traversing, filesystem-safe path component.
     static func isSafePathComponent(_ s: String) -> Bool {
         guard !s.isEmpty, s != ".", s != ".." else { return false }
         guard !s.contains("/"), !s.contains("\u{0}") else { return false }
-        let allowed = CharacterSet(
-            charactersIn:
-                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
-        )
-        return s.unicodeScalars.allSatisfy { allowed.contains($0) }
+        return s.unicodeScalars.allSatisfy { safePathComponentChars.contains($0) }
     }
 }
 
