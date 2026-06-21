@@ -658,30 +658,31 @@ final class AdminDispatcherTests: XCTestCase {
 
     // MARK: - plugin.*
 
-    /// Temp dirs backing a plugin-capable dispatcher, plus the source dir to
-    /// install from. `cleanup()` removes all three.
+    /// Temp state backing a plugin-capable dispatcher. Everything lives under a
+    /// single per-test `testDir`, so `cleanup()` removes one directory — and
+    /// with it the `config.json`, the `backups/` sidecar `ConfigStore` writes
+    /// next to it, the installed-plugins dir, and the install source dir.
     private struct PluginTestContext {
+        let testDir: URL
         let sourceDir: URL
-        let pluginsDir: URL
-        let configPath: URL
         func cleanup() {
-            try? FileManager.default.removeItem(at: sourceDir)
-            try? FileManager.default.removeItem(at: pluginsDir)
-            try? FileManager.default.removeItem(at: configPath)
+            try? FileManager.default.removeItem(at: testDir)
         }
     }
 
     /// Builds a dispatcher whose `PluginRegistry` operates over a fresh temp
     /// plugins directory, plus a ready-to-install source dir holding a minimal
-    /// `org.example.tagger` plugin (manifest + `run`).
+    /// `org.example.tagger` plugin (manifest + `run`). All paths are nested
+    /// under one per-test UUID directory so no sidecar leaks into `$TMPDIR`.
     private func makeDispatcherWithPlugins() async throws -> (AdminDispatcher, PluginTestContext) {
         let caManager = CAManager(keyStore: InMemoryCAKeyStore())
         _ = try await caManager.ensureCA()
 
-        let base = FileManager.default.temporaryDirectory
-        let configPath = base.appendingPathComponent("iris-test-config-\(UUID().uuidString).json")
-        let pluginsDir = base.appendingPathComponent("iris-test-plugins-\(UUID().uuidString)")
-        let sourceDir = base.appendingPathComponent("iris-test-src-\(UUID().uuidString)")
+        let testDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("iris-test-\(UUID().uuidString)")
+        let configPath = testDir.appendingPathComponent("config.json")
+        let pluginsDir = testDir.appendingPathComponent("plugins")
+        let sourceDir = testDir.appendingPathComponent("src")
         try FileManager.default.createDirectory(at: pluginsDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
 
@@ -717,11 +718,7 @@ final class AdminDispatcherTests: XCTestCase {
             pluginRegistry: registry,
             logger: Logger(label: "test")
         )
-        let ctx = PluginTestContext(
-            sourceDir: sourceDir,
-            pluginsDir: pluginsDir,
-            configPath: configPath
-        )
+        let ctx = PluginTestContext(testDir: testDir, sourceDir: sourceDir)
         return (dispatcher, ctx)
     }
 
@@ -762,6 +759,10 @@ final class AdminDispatcherTests: XCTestCase {
             )
         )
         XCTAssertTrue(try unwrapResult(removeResp).decode(as: PluginRemovedResult.self).removed)
+
+        // Effect, not just return shape: the plugin is actually gone.
+        let afterResp = await dispatcher.dispatch(request(.pluginList))
+        XCTAssertTrue(try unwrapResult(afterResp).decode(as: [Plugin].self).isEmpty)
     }
 
     func testPluginUnknownMapsToError() async throws {
@@ -770,6 +771,8 @@ final class AdminDispatcherTests: XCTestCase {
         let resp = await dispatcher.dispatch(
             request(.pluginInfo, params: try JSONValue.encoding(PluginIdParams(id: "nope")))
         )
-        XCTAssertNotNil(resp.error)  // unknownPlugin → JSON-RPC error
+        // Pin the mapping, not just presence: unknownPlugin → -32030 (mapPluginError),
+        // so a misroute to the generic -32603 internalError would fail this test.
+        XCTAssertEqual(resp.error?.code, -32030)
     }
 }
