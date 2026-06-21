@@ -43,6 +43,7 @@ public actor Daemon {
         secretBackend: SecretBackend,
         caBackend: CABackend = .keychain,
         caPath: URL,
+        pluginsDirectory: URL,
         logger: Logger
     ) async throws {
         let config = await configStore.current
@@ -149,12 +150,18 @@ public actor Daemon {
         let reloadBox = NIOLockedValueBox<@Sendable () async throws -> ConfigReloadResult>(
             { throw JSONRPCError.internalError }
         )
+        let pluginRegistry = PluginRegistry(
+            pluginsDirectory: pluginsDirectory,
+            configStore: configStore,
+            logger: logger
+        )
         let dispatcher = AdminDispatcher(
             secretStore: secretStore,
             eventRing: proxy.eventRing,
             caManager: caManager,
             daemon: daemonControl,
             configStore: configStore,
+            pluginRegistry: pluginRegistry,
             onHostsChanged: { [capturedProxy, capturedStore] in
                 await capturedProxy.updateAllowedHosts(await capturedStore.allowedHosts())
             },

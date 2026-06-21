@@ -17,6 +17,7 @@ public struct AdminDispatcher: Sendable {
     public let caManager: CAManager
     public let daemon: any DaemonControl
     public let configStore: ConfigStore
+    public let pluginRegistry: PluginRegistry
     public let logger: Logger
     /// Re-applies the live host set to the proxy after a `rule.*` mutation.
     public let onHostsChanged: @Sendable () async -> Void
@@ -32,6 +33,7 @@ public struct AdminDispatcher: Sendable {
         caManager: CAManager,
         daemon: any DaemonControl,
         configStore: ConfigStore,
+        pluginRegistry: PluginRegistry,
         onHostsChanged: @escaping @Sendable () async -> Void = {},
         onSecurityChanged: @escaping @Sendable () async -> Void = {},
         onConfigReload: @escaping @Sendable () async throws -> ConfigReloadResult = {
@@ -44,6 +46,7 @@ public struct AdminDispatcher: Sendable {
         self.caManager = caManager
         self.daemon = daemon
         self.configStore = configStore
+        self.pluginRegistry = pluginRegistry
         self.onHostsChanged = onHostsChanged
         self.onSecurityChanged = onSecurityChanged
         self.onConfigReload = onConfigReload
@@ -67,6 +70,8 @@ public struct AdminDispatcher: Sendable {
             return .failure(id: request.id, error: error)
         } catch let error as SecretStoreError {
             return .failure(id: request.id, error: Self.mapSecretStoreError(error))
+        } catch let error as PluginError {
+            return .failure(id: request.id, error: Self.mapPluginError(error))
         } catch let error as ConfigStore.Error {
             switch error {
             case .invalidHost(let h):
@@ -252,6 +257,29 @@ public struct AdminDispatcher: Sendable {
             return try JSONValue.encoding(
                 AdminUninstallResult(caKeyDeleted: caKeyDeleted, secretsDeleted: secretsDeleted)
             )
+
+        case .pluginList:
+            return try JSONValue.encoding(try await pluginRegistry.list())
+        case .pluginInfo:
+            let p = try Self.decode(PluginIdParams.self, from: params)
+            return try JSONValue.encoding(try await pluginRegistry.info(id: p.id))
+        case .pluginInstall:
+            let p = try Self.decode(PluginInstallParams.self, from: params)
+            let url = URL(fileURLWithPath: (p.path as NSString).expandingTildeInPath)
+            return try JSONValue.encoding(try await pluginRegistry.install(from: url))
+        case .pluginEnable:
+            let p = try Self.decode(PluginIdParams.self, from: params)
+            return try JSONValue.encoding(try await pluginRegistry.enable(id: p.id))
+        case .pluginDisable:
+            let p = try Self.decode(PluginIdParams.self, from: params)
+            return try JSONValue.encoding(try await pluginRegistry.disable(id: p.id))
+        case .pluginRemove:
+            let p = try Self.decode(PluginIdParams.self, from: params)
+            try await pluginRegistry.remove(id: p.id)
+            return try JSONValue.encoding(PluginRemovedResult(removed: true))
+        case .pluginReorder:
+            let p = try Self.decode(PluginReorderParams.self, from: params)
+            return try JSONValue.encoding(try await pluginRegistry.reorder(id: p.id, to: p.index))
         }
     }
 
@@ -343,6 +371,21 @@ public struct AdminDispatcher: Sendable {
                 code: JSONRPCError.internalError.code,
                 message: "Keychain data corruption: \(message)"
             )
+        }
+    }
+
+    static func mapPluginError(_ error: PluginError) -> JSONRPCError {
+        switch error {
+        case .unknownPlugin:
+            return JSONRPCError(code: JSONRPCError.pluginUnknown.code, message: error.localizedDescription)
+        case .duplicateId:
+            return JSONRPCError(code: JSONRPCError.pluginDuplicate.code, message: error.localizedDescription)
+        case .hashMismatch:
+            return JSONRPCError(code: JSONRPCError.pluginHashMismatch.code, message: error.localizedDescription)
+        case .invalidManifest, .unsupportedApiVersion:
+            return JSONRPCError(code: JSONRPCError.pluginInvalidManifest.code, message: error.localizedDescription)
+        case .ioError:
+            return JSONRPCError(code: JSONRPCError.pluginIOError.code, message: error.localizedDescription)
         }
     }
 }

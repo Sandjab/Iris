@@ -56,6 +56,30 @@ public actor ConfigStore {
         Set(config.hosts.map(\.host))
     }
 
+    // MARK: - Plugin state (back `plugin.*`)
+
+    /// Persisted plugin state entries (source of truth for the installed set).
+    public func plugins() -> [PluginStateEntry] {
+        config.plugins
+    }
+
+    /// Replaces the whole plugin state array and persists atomically.
+    /// The `PluginRegistry` owns the merge logic; the store just writes.
+    func setPlugins(_ entries: [PluginStateEntry]) throws {
+        try persist(config.with(plugins: entries))
+    }
+
+    /// Atomically read → transform → validate → persist the plugin-state array
+    /// inside a single actor critical section (no suspension point between read
+    /// and write), so concurrent callers cannot lose or duplicate entries.
+    public func updatePlugins(
+        _ transform: ([PluginStateEntry]) throws -> [PluginStateEntry]
+    ) throws -> [PluginStateEntry] {
+        let updated = try transform(config.plugins)
+        try persist(config.with(plugins: updated))
+        return updated
+    }
+
     // MARK: - Host mutations (back `rule.*`)
 
     @discardableResult
@@ -149,7 +173,8 @@ public actor ConfigStore {
             broker: broker,
             security: security,
             backups: backups,
-            hosts: config.hosts
+            hosts: config.hosts,
+            plugins: config.plugins
         )
         try persist(candidate)  // validates, backs up, writes atomically
         return ConfigSetResult(applied: applied, requiresRestart: requiresRestart)

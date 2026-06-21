@@ -27,6 +27,12 @@ struct IrisDaemonCLI: AsyncParsableCommand {
     )
     var caPath: String?
 
+    @Option(
+        name: .long,
+        help: "Plugins directory (default ~/Library/Application Support/iris/plugins)."
+    )
+    var pluginsPath: String?
+
     @Option(name: .long, help: "Override broker.log_level (trace|debug|info|warning|error).")
     var logLevel: String?
 
@@ -80,6 +86,13 @@ struct IrisDaemonCLI: AsyncParsableCommand {
             caURL = URL(fileURLWithPath: support)
         }
 
+        let resolvedPluginsDir: URL =
+            pluginsPath.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+            ?? URL(
+                fileURLWithPath: ("~/Library/Application Support/iris/plugins" as NSString)
+                    .expandingTildeInPath
+            )
+
         logger.info(
             "Starting irisd",
             metadata: [
@@ -96,6 +109,7 @@ struct IrisDaemonCLI: AsyncParsableCommand {
             secretBackend: inMemorySecrets ? .inMemoryFromEnvironment : .keychain,
             caBackend: inMemoryCa ? .inMemory : .keychain,
             caPath: caURL,
+            pluginsDirectory: resolvedPluginsDir,
             logger: logger
         )
 

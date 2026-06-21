@@ -162,6 +162,19 @@ extension JSONRPCError {
     public static func configReloadFailed(_ reason: String) -> JSONRPCError {
         JSONRPCError(code: -32012, message: "config.reload failed: \(reason)")
     }
+
+    // Plugin codes (P1). Numeric values are stable; the dispatcher reuses the
+    // codes while substituting the dynamic `PluginError.localizedDescription`.
+    public static let pluginUnknown = JSONRPCError(code: -32030, message: "unknown plugin")
+    public static let pluginDuplicate = JSONRPCError(code: -32031, message: "plugin already installed")
+    public static let pluginHashMismatch = JSONRPCError(
+        code: -32032,
+        message: "plugin content changed since approval"
+    )
+    public static let pluginInvalidManifest = JSONRPCError(code: -32033, message: "invalid plugin manifest")
+    // `IOError` is a domain term (I/O), not the `Error` type suffix the rule guards against.
+    // swift-format-ignore: DontRepeatTypeInStaticProperties
+    public static let pluginIOError = JSONRPCError(code: -32034, message: "plugin I/O error")
 }
 
 // MARK: - JSON value
