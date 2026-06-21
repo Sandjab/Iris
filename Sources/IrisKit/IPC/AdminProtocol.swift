@@ -28,6 +28,13 @@ public enum AdminMethod: String, Codable, Sendable, CaseIterable {
     case configReload = "config.reload"
     case eventsClear = "events.clear"
     case adminUninstall = "admin.uninstall"
+    case pluginList = "plugin.list"
+    case pluginInfo = "plugin.info"
+    case pluginInstall = "plugin.install"
+    case pluginEnable = "plugin.enable"
+    case pluginDisable = "plugin.disable"
+    case pluginRemove = "plugin.remove"
+    case pluginReorder = "plugin.reorder"
 }
 
 // MARK: - Params
@@ -137,6 +144,25 @@ public struct ConfigSetParams: Codable, Sendable, Equatable {
     }
     public let updates: [Update]
     public init(updates: [Update]) { self.updates = updates }
+}
+
+public struct PluginInstallParams: Codable, Sendable, Equatable {
+    public let path: String
+    public init(path: String) { self.path = path }
+}
+
+public struct PluginIdParams: Codable, Sendable, Equatable {
+    public let id: String
+    public init(id: String) { self.id = id }
+}
+
+public struct PluginReorderParams: Codable, Sendable, Equatable {
+    public let id: String
+    public let index: Int
+    public init(id: String, index: Int) {
+        self.id = id
+        self.index = index
+    }
 }
 
 // MARK: - Results
@@ -277,6 +303,11 @@ public struct AdminUninstallResult: Codable, Sendable, Equatable {
         self.caKeyDeleted = caKeyDeleted
         self.secretsDeleted = secretsDeleted
     }
+}
+
+public struct PluginRemovedResult: Codable, Sendable, Equatable {
+    public let removed: Bool
+    public init(removed: Bool) { self.removed = removed }
 }
 
 // MARK: - Daemon version

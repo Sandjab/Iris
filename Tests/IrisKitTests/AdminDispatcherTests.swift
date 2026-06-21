@@ -54,9 +54,23 @@ final class AdminDispatcherTests: XCTestCase {
             caManager: resolvedCAManager,
             daemon: daemon,
             configStore: configStore,
+            pluginRegistry: Self.makeRegistry(configStore),
             logger: Logger(label: "test")
         )
         return (dispatcher, daemon, eventRing)
+    }
+
+    /// A `PluginRegistry` over a fresh temp plugins directory. Tests that don't
+    /// exercise `plugin.*` only need the dependency to satisfy the dispatcher's
+    /// required `pluginRegistry:` parameter; the empty config means `list()` is
+    /// `[]` and the directory is never touched.
+    private static func makeRegistry(_ configStore: ConfigStore) -> PluginRegistry {
+        PluginRegistry(
+            pluginsDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("iris-test-plugins-\(UUID().uuidString)"),
+            configStore: configStore,
+            logger: Logger(label: "test")
+        )
     }
 
     private func nextID() -> JSONRPCID { .integer(Int64.random(in: 1...1_000_000)) }
@@ -339,6 +353,7 @@ final class AdminDispatcherTests: XCTestCase {
             caManager: caManager,
             daemon: FakeDaemon(),
             configStore: configStore,
+            pluginRegistry: Self.makeRegistry(configStore),
             logger: Logger(label: "test")
         )
 
@@ -466,6 +481,7 @@ final class AdminDispatcherTests: XCTestCase {
             caManager: caManager,
             daemon: FakeDaemon(),
             configStore: configStore,
+            pluginRegistry: Self.makeRegistry(configStore),
             onHostsChanged: { onChangedFlag.withLockedValue { $0 = true } },
             logger: Logger(label: "test")
         )
@@ -638,5 +654,122 @@ final class AdminDispatcherTests: XCTestCase {
         let result = try unwrapResult(response).decode(as: AdminUninstallResult.self)
         XCTAssertFalse(result.caKeyDeleted)
         XCTAssertEqual(result.secretsDeleted, 0)
+    }
+
+    // MARK: - plugin.*
+
+    /// Temp dirs backing a plugin-capable dispatcher, plus the source dir to
+    /// install from. `cleanup()` removes all three.
+    private struct PluginTestContext {
+        let sourceDir: URL
+        let pluginsDir: URL
+        let configPath: URL
+        func cleanup() {
+            try? FileManager.default.removeItem(at: sourceDir)
+            try? FileManager.default.removeItem(at: pluginsDir)
+            try? FileManager.default.removeItem(at: configPath)
+        }
+    }
+
+    /// Builds a dispatcher whose `PluginRegistry` operates over a fresh temp
+    /// plugins directory, plus a ready-to-install source dir holding a minimal
+    /// `org.example.tagger` plugin (manifest + `run`).
+    private func makeDispatcherWithPlugins() async throws -> (AdminDispatcher, PluginTestContext) {
+        let caManager = CAManager(keyStore: InMemoryCAKeyStore())
+        _ = try await caManager.ensureCA()
+
+        let base = FileManager.default.temporaryDirectory
+        let configPath = base.appendingPathComponent("iris-test-config-\(UUID().uuidString).json")
+        let pluginsDir = base.appendingPathComponent("iris-test-plugins-\(UUID().uuidString)")
+        let sourceDir = base.appendingPathComponent("iris-test-src-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: pluginsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+
+        let manifest = #"""
+            { "id": "org.example.tagger", "name": "Tagger", "version": "1.0.0", "api_version": 1,
+              "executable": "run",
+              "hooks": [ { "event": "on_request", "match": { "hosts": ["api.anthropic.com"] }, "mutates": true } ],
+              "capabilities": { "network": [], "filesystem": ["scratch"] } }
+            """#
+        try manifest.write(
+            to: sourceDir.appendingPathComponent("plugin.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "#!/bin/sh\n".write(
+            to: sourceDir.appendingPathComponent("run"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configStore = try ConfigStore(path: configPath, logger: Logger(label: "test"))
+        let registry = PluginRegistry(
+            pluginsDirectory: pluginsDir,
+            configStore: configStore,
+            logger: Logger(label: "test")
+        )
+        let dispatcher = AdminDispatcher(
+            secretStore: InMemorySecretStore(),
+            eventRing: EventRing(capacity: 64),
+            caManager: caManager,
+            daemon: FakeDaemon(),
+            configStore: configStore,
+            pluginRegistry: registry,
+            logger: Logger(label: "test")
+        )
+        let ctx = PluginTestContext(
+            sourceDir: sourceDir,
+            pluginsDir: pluginsDir,
+            configPath: configPath
+        )
+        return (dispatcher, ctx)
+    }
+
+    func testPluginInstallListEnableRemove() async throws {
+        let (dispatcher, ctx) = try await makeDispatcherWithPlugins()
+        defer { ctx.cleanup() }
+
+        // install
+        let installResp = await dispatcher.dispatch(
+            request(
+                .pluginInstall,
+                params: try JSONValue.encoding(PluginInstallParams(path: ctx.sourceDir.path))
+            )
+        )
+        let installed = try unwrapResult(installResp).decode(as: Plugin.self)
+        XCTAssertEqual(installed.manifest.id, "org.example.tagger")
+        XCTAssertFalse(installed.enabled)
+
+        // list
+        let listResp = await dispatcher.dispatch(request(.pluginList))
+        let list = try unwrapResult(listResp).decode(as: [Plugin].self)
+        XCTAssertEqual(list.map(\.manifest.id), ["org.example.tagger"])
+
+        // enable
+        let enableResp = await dispatcher.dispatch(
+            request(
+                .pluginEnable,
+                params: try JSONValue.encoding(PluginIdParams(id: "org.example.tagger"))
+            )
+        )
+        XCTAssertTrue(try unwrapResult(enableResp).decode(as: Plugin.self).enabled)
+
+        // remove
+        let removeResp = await dispatcher.dispatch(
+            request(
+                .pluginRemove,
+                params: try JSONValue.encoding(PluginIdParams(id: "org.example.tagger"))
+            )
+        )
+        XCTAssertTrue(try unwrapResult(removeResp).decode(as: PluginRemovedResult.self).removed)
+    }
+
+    func testPluginUnknownMapsToError() async throws {
+        let (dispatcher, ctx) = try await makeDispatcherWithPlugins()
+        defer { ctx.cleanup() }
+        let resp = await dispatcher.dispatch(
+            request(.pluginInfo, params: try JSONValue.encoding(PluginIdParams(id: "nope")))
+        )
+        XCTAssertNotNil(resp.error)  // unknownPlugin → JSON-RPC error
     }
 }

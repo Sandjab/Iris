@@ -60,6 +60,7 @@ final class DaemonReloadTests: XCTestCase {
             secretBackend: .inMemoryFromEnvironment,
             caBackend: .inMemory,
             caPath: caURL,
+            pluginsDirectory: configURL.deletingLastPathComponent().appendingPathComponent("plugins"),
             logger: Logger(label: "test.daemon.reload")
         )
     }

@@ -34,7 +34,17 @@ final class ConfigReloadDispatcherTests: XCTestCase {
             caManager: caManager,
             daemon: FakeDaemon(),
             configStore: configStore,
+            pluginRegistry: Self.makeRegistry(configStore),
             onConfigReload: onConfigReload,
+            logger: Logger(label: "test")
+        )
+    }
+
+    private static func makeRegistry(_ configStore: ConfigStore) -> PluginRegistry {
+        PluginRegistry(
+            pluginsDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("iris-test-plugins-\(UUID().uuidString)"),
+            configStore: configStore,
             logger: Logger(label: "test")
         )
     }
@@ -96,8 +106,9 @@ final class ConfigReloadDispatcherTests: XCTestCase {
             eventRing: EventRing(capacity: 64),
             caManager: caManager,
             daemon: FakeDaemon(),
-            configStore: configStore
-                // onConfigReload intentionally omitted — uses default
+            configStore: configStore,
+            pluginRegistry: Self.makeRegistry(configStore)
+            // onConfigReload intentionally omitted — uses default
         )
 
         let req = JSONRPCRequest(method: AdminMethod.configReload.rawValue, id: nextID())
