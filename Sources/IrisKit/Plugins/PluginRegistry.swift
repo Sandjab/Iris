@@ -156,6 +156,12 @@ public actor PluginRegistry {
     /// Approves the manifest's declared capabilities and flips `enabled` on.
     /// Refuses if the on-disk content drifted from the pinned hash (TOFU).
     public func enable(id: String) async throws -> Plugin {
+        // A path-unsafe id can't name an installed plugin and must never reach the
+        // filesystem via directory(for:) (defense in depth: P2/P3 derive process and
+        // working dirs from the id).
+        guard PluginManifest.isSafePathComponent(id) else {
+            throw PluginError.unknownPlugin(id)
+        }
         let manifest = try loadManifest(id: id)
         let currentHash = try PluginHasher.hash(directory: directory(for: id))
         let entries = try await configStore.updatePlugins { current in

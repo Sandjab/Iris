@@ -191,6 +191,13 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertEqual(reordered.map(\.order), [0, 1, 2])
     }
 
+    func testEnableRejectsUnsafeId() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        await assertThrowsAsyncError(try await reg.enable(id: "../../etc")) { error in
+            XCTAssertEqual(error as? PluginError, .unknownPlugin("../../etc"))
+        }
+    }
+
     func testReorderClampsPastEnd() async throws {
         let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
         for id in ["a.1", "a.2", "a.3"] {

@@ -65,7 +65,7 @@ public actor ConfigStore {
 
     /// Replaces the whole plugin state array and persists atomically.
     /// The `PluginRegistry` owns the merge logic; the store just writes.
-    public func setPlugins(_ entries: [PluginStateEntry]) throws {
+    func setPlugins(_ entries: [PluginStateEntry]) throws {
         try persist(config.with(plugins: entries))
     }
 
