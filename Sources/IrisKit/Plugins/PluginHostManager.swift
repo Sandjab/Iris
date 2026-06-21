@@ -89,8 +89,12 @@ public actor PluginHostManager {
         let desired = await desiredPlugins()
         let desiredIDs = Set(desired.map(\.manifest.id))
 
-        // Stop hosts no longer desired.
-        for (id, host) in hosts where !desiredIDs.contains(id) {
+        // Stop hosts no longer desired. Collect the ids first, then mutate — the
+        // original loop was already safe (a value-type Dictionary iterates a CoW
+        // snapshot), but the explicit form keeps the mutation plainly separate.
+        let idsToStop = hosts.keys.filter { !desiredIDs.contains($0) }
+        for id in idsToStop {
+            guard let host = hosts[id] else { continue }
             await host.shutdown()
             hosts[id] = nil
         }

@@ -19,8 +19,8 @@ if mode == "crash" {
 
 func emitLine(_ object: [String: Any]) {
     guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
-    FileHandle.standardOutput.write(data)
-    FileHandle.standardOutput.write(Data("\n".utf8))
+    try? FileHandle.standardOutput.write(contentsOf: data)
+    try? FileHandle.standardOutput.write(contentsOf: Data("\n".utf8))
 }
 
 while let line = readLine(strippingNewline: true) {

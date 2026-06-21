@@ -67,9 +67,10 @@ final class PluginLineReader: @unchecked Sendable {
                 onEOF()
                 return
             } else {
-                // n < 0: EAGAIN/EWOULDBLOCK means "drained for now"; anything else
-                // ends the stream.
+                // n < 0: EAGAIN/EWOULDBLOCK means "drained for now"; EINTR means a
+                // signal interrupted the read, so retry; anything else ends the stream.
                 if errno == EAGAIN || errno == EWOULDBLOCK { return }
+                if errno == EINTR { continue }
                 finished = true
                 source?.cancel()
                 source = nil
