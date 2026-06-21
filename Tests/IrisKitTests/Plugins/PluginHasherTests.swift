@@ -32,13 +32,34 @@ final class PluginHasherTests: XCTestCase {
         XCTAssertNotEqual(before, after)
     }
 
-    func testChangesWhenFileAddedOrRenamed() throws {
+    func testChangesWhenFileRenamed() throws {
         let dir = try makeDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try "x".write(to: dir.appendingPathComponent("a"), atomically: true, encoding: .utf8)
+        let a = dir.appendingPathComponent("a")
+        try "x".write(to: a, atomically: true, encoding: .utf8)
         let before = try PluginHasher.hash(directory: dir)
-        try "x".write(to: dir.appendingPathComponent("b"), atomically: true, encoding: .utf8)
+        // True rename: same content, same file count → only the path differs.
+        try FileManager.default.moveItem(at: a, to: dir.appendingPathComponent("b"))
         let after = try PluginHasher.hash(directory: dir)
         XCTAssertNotEqual(before, after)  // path is folded into the digest, not just bytes
+    }
+
+    func testChangesWhenHiddenFileAdded() throws {
+        let dir = try makeDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "x".write(to: dir.appendingPathComponent("run"), atomically: true, encoding: .utf8)
+        let before = try PluginHasher.hash(directory: dir)
+        try "y".write(to: dir.appendingPathComponent(".hidden"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(before, try PluginHasher.hash(directory: dir))
+    }
+
+    func testSameContentSameHashAcrossDifferentBases() throws {
+        let dir1 = try makeDir()
+        defer { try? FileManager.default.removeItem(at: dir1) }
+        let dir2 = try makeDir()
+        defer { try? FileManager.default.removeItem(at: dir2) }
+        try "abc".write(to: dir1.appendingPathComponent("run"), atomically: true, encoding: .utf8)
+        try "abc".write(to: dir2.appendingPathComponent("run"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(try PluginHasher.hash(directory: dir1), try PluginHasher.hash(directory: dir2))
     }
 }
