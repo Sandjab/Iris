@@ -19,6 +19,7 @@ struct IrisCLI: AsyncParsableCommand {
             MCPCommand.self,
             LogsCommand.self,
             DoctorCommand.self,
+            PluginCommand.self,
         ]
     )
 }
