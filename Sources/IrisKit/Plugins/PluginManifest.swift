@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 /// Declarative description of a plugin, parsed from its `plugin.json`.
 /// P1 models the full schema but only `onRequest` is dispatched (P3); response
@@ -210,7 +211,7 @@ extension HookMatch {
             guard methods.contains(where: { $0.lowercased() == m }) else { return false }
         }
         if let pattern = pathRegex, !pattern.isEmpty {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+            guard let regex = Self.compiledRegex(pattern) else { return false }
             let range = NSRange(path.startIndex..<path.endIndex, in: path)
             guard regex.firstMatch(in: path, range: range) != nil else { return false }
         }
@@ -224,6 +225,23 @@ extension HookMatch {
 
     private static func normalizeHost(_ host: String) -> String {
         (host.split(separator: ":", maxSplits: 1).first.map(String.init) ?? host).lowercased()
+    }
+
+    /// Process-wide cache of compiled path regexes, keyed by pattern. `matches`
+    /// runs on the proxy hot path (per request, per active hook); recompiling the
+    /// same `NSRegularExpression` every time would add latency. Patterns are few
+    /// (one per plugin hook) and stable, so a small lock-protected cache
+    /// effectively precompiles them. `NSRegularExpression` is thread-safe for
+    /// matching. An unparseable pattern returns nil (not cached) → fail-closed.
+    private static let regexCache = NIOLockedValueBox<[String: NSRegularExpression]>([:])
+
+    private static func compiledRegex(_ pattern: String) -> NSRegularExpression? {
+        regexCache.withLockedValue { cache in
+            if let cached = cache[pattern] { return cached }
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+            cache[pattern] = regex
+            return regex
+        }
     }
 }
 

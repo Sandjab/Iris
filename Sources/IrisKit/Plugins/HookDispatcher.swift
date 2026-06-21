@@ -98,13 +98,21 @@ public final class HookDispatcher: Sendable {
                 case .pass:
                     continue
                 case .modify:
-                    if result.body != nil, Self.decodeBody(result.body, cap: Self.maxBodyBytes) == nil {
+                    // Decode the modified body once and reuse it in applyModify —
+                    // a 4 MiB body decoded twice is wasted CPU/memory on the hot path.
+                    let decodedBody = Self.decodeBody(result.body, cap: Self.maxBodyBytes)
+                    if result.body != nil, decodedBody == nil {
                         logger.warning(
                             "plugin modify body ignored (over-cap or invalid encoding)",
                             metadata: ["id": "\(entry.pluginId)"]
                         )
                     }
-                    (curHead, curBody) = Self.applyModify(result, to: curHead, body: curBody)
+                    (curHead, curBody) = Self.applyModify(
+                        result,
+                        decodedBody: decodedBody,
+                        to: curHead,
+                        body: curBody
+                    )
                 case .block:
                     return .block(pluginId: entry.pluginId, reason: result.reason)
                 case .respond:
@@ -202,6 +210,7 @@ public final class HookDispatcher: Sendable {
     /// v1. URI and body replacement are independent of the header overlay.
     private static func applyModify(
         _ result: PluginRPC.OnRequestResult,
+        decodedBody: ByteBuffer?,
         to head: HTTPRequestHead,
         body: ByteBuffer?
     ) -> (HTTPRequestHead, ByteBuffer?) {
@@ -213,7 +222,7 @@ public final class HookDispatcher: Sendable {
             }
         }
         var newBody = body
-        if let b = result.body, let decoded = decodeBody(b, cap: maxBodyBytes) {
+        if let decoded = decodedBody {
             newBody = decoded
             if newHead.headers.contains(name: "content-length") {
                 newHead.headers.replaceOrAdd(name: "content-length", value: "\(decoded.readableBytes)")
