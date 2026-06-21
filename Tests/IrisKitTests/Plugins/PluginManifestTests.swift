@@ -89,6 +89,53 @@ final class PluginManifestTests: XCTestCase {
               "hooks": [ { "event": "on_request", "match": {} } ] }
             """#
         )
-        XCTAssertThrowsError(try m.validate())
+        XCTAssertThrowsError(try m.validate()) { error in
+            guard case PluginError.invalidManifest = error else {
+                return XCTFail("expected invalidManifest, got \(error)")
+            }
+        }
+    }
+
+    func testValidateRejectsPathTraversalExecutable() throws {
+        let m = try decode(
+            #"""
+            { "id": "a.b", "name": "B", "version": "1", "api_version": 1,
+              "executable": "bin/../../../etc/passwd",
+              "hooks": [ { "event": "on_request", "match": {} } ] }
+            """#
+        )
+        XCTAssertThrowsError(try m.validate()) { error in
+            guard case PluginError.invalidManifest = error else {
+                return XCTFail("expected invalidManifest, got \(error)")
+            }
+        }
+    }
+
+    func testValidateRejectsEmptyName() throws {
+        let m = try decode(
+            #"""
+            { "id": "a.b", "name": "", "version": "1", "api_version": 1, "executable": "run",
+              "hooks": [ { "event": "on_request", "match": {} } ] }
+            """#
+        )
+        XCTAssertThrowsError(try m.validate()) { error in
+            guard case PluginError.invalidManifest = error else {
+                return XCTFail("expected invalidManifest, got \(error)")
+            }
+        }
+    }
+
+    func testValidateRejectsEmptyVersion() throws {
+        let m = try decode(
+            #"""
+            { "id": "a.b", "name": "B", "version": "", "api_version": 1, "executable": "run",
+              "hooks": [ { "event": "on_request", "match": {} } ] }
+            """#
+        )
+        XCTAssertThrowsError(try m.validate()) { error in
+            guard case PluginError.invalidManifest = error else {
+                return XCTFail("expected invalidManifest, got \(error)")
+            }
+        }
     }
 }

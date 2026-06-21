@@ -1,13 +1,13 @@
 import Foundation
 
-/// Supported plugin API contract version. Iris refuses manifests declaring
-/// any other value (forward/backward incompatibility is explicit, never silent).
-public let pluginSupportedApiVersion = 1
-
 /// Declarative description of a plugin, parsed from its `plugin.json`.
 /// P1 models the full schema but only `onRequest` is dispatched (P3); response
 /// hooks and config schema are reserved for later phases.
 public struct PluginManifest: Codable, Sendable, Hashable {
+    /// Supported plugin API contract version. Iris refuses manifests declaring
+    /// any other value (forward/backward incompatibility is explicit, never silent).
+    public static let supportedApiVersion = 1
+
     public let id: String
     public let name: String
     public let version: String
@@ -28,7 +28,7 @@ public struct PluginManifest: Codable, Sendable, Hashable {
         name: String,
         version: String,
         description: String = "",
-        apiVersion: Int = pluginSupportedApiVersion,
+        apiVersion: Int = PluginManifest.supportedApiVersion,
         executable: String,
         hooks: [PluginHook],
         capabilities: PluginCapabilities = PluginCapabilities()
@@ -67,16 +67,22 @@ public struct PluginManifest: Codable, Sendable, Hashable {
         }
         guard !name.isEmpty else { throw PluginError.invalidManifest("empty name") }
         guard !version.isEmpty else { throw PluginError.invalidManifest("empty version") }
-        guard apiVersion == pluginSupportedApiVersion else {
+        guard apiVersion == Self.supportedApiVersion else {
             throw PluginError.unsupportedApiVersion(apiVersion)
         }
         guard !executable.isEmpty,
-            !executable.hasPrefix("/"),
-            !executable.split(separator: "/").contains("..")
+            executable.split(separator: "/", omittingEmptySubsequences: false)
+                .map(String.init)
+                .allSatisfy(Self.isSafePathComponent)
         else {
             throw PluginError.invalidManifest("invalid executable path: \(executable)")
         }
         guard !hooks.isEmpty else { throw PluginError.invalidManifest("no hooks declared") }
+        for hook in hooks {
+            guard hook.timeoutMs > 0 else {
+                throw PluginError.invalidManifest("timeout_ms must be positive")
+            }
+        }
     }
 
     /// A single, non-traversing, filesystem-safe path component.
@@ -173,7 +179,7 @@ public struct HookMatch: Codable, Sendable, Hashable {
 }
 
 /// Declared sandbox needs. Empty = no egress / no extra filesystem (deny-by-default).
-public struct PluginCapabilities: Codable, Sendable, Hashable, Equatable {
+public struct PluginCapabilities: Codable, Sendable, Hashable {
     public let network: [String]  // host:port allowed for egress
     public let filesystem: [String]  // e.g. ["scratch"]
 
