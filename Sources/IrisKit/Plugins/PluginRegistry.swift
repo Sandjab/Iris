@@ -156,10 +156,13 @@ public actor PluginRegistry {
     /// Approves the manifest's declared capabilities and flips `enabled` on.
     /// Refuses if the on-disk content drifted from the pinned hash (TOFU).
     public func enable(id: String) async throws -> Plugin {
-        // A path-unsafe id can't name an installed plugin and must never reach the
-        // filesystem via directory(for:) (defense in depth: P2/P3 derive process and
-        // working dirs from the id).
-        guard PluginManifest.isSafePathComponent(id) else {
+        // Reject an id that isn't installed up front — uniform with info/disable,
+        // and a clean `unknownPlugin` instead of a filesystem error that leaks the
+        // plugins-directory path. Since every installed id was validated as a safe
+        // path component at install time, this also keeps loadManifest/hash off any
+        // path derived from an untrusted or non-existent id. The authoritative
+        // re-check still lives inside the atomic block below.
+        guard await configStore.plugins().contains(where: { $0.id == id }) else {
             throw PluginError.unknownPlugin(id)
         }
         let manifest = try loadManifest(id: id)

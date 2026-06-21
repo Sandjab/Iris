@@ -198,6 +198,16 @@ final class PluginRegistryTests: XCTestCase {
         }
     }
 
+    func testEnableRejectsUnknownButValidId() async throws {
+        // A well-formed id that simply isn't installed must surface a clean
+        // `unknownPlugin`, never a filesystem `ioError` (which would leak the
+        // plugins-directory path) — uniform with `info`/`disable`.
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        await assertThrowsAsyncError(try await reg.enable(id: "org.not.installed")) { error in
+            XCTAssertEqual(error as? PluginError, .unknownPlugin("org.not.installed"))
+        }
+    }
+
     func testReorderClampsPastEnd() async throws {
         let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
         for id in ["a.1", "a.2", "a.3"] {
