@@ -265,6 +265,12 @@ brut. Le framing est versionné par `apiVersion`, donc réversible. Cycle :
 Le processus reste **chaud** entre les requêtes (pas de spawn par requête). Crash → restart avec
 backoff ; après N échecs → auto-désactivation + alerte via le canal `SystemAlert` existant.
 
+> **P2b** : `initialize` porte aussi `scratch_dir` — le chemin **canonique** (realpath) du scratch privé
+> du plugin ; le cwd du sous-process est positionné sur ce dossier. Le sandbox n'autorise l'écriture
+> que là (cf. `PluginSandboxProfile`, handoff P2a #3). Cycle implémenté P2b : `PluginHost` (un process
+> chaud + handshake/`shutdown`), `PluginHostManager` (boot, `reconcile`, restart/backoff, auto-disable),
+> câblés dans `Daemon` (boot `startEnabled`, `onPluginsChanged` → `reconcile`, `shutdownAll` à l'arrêt).
+
 ---
 
 ## 9. Modèle de données & intégration code
@@ -377,7 +383,10 @@ Toute la vision est spécifiée ici ; **v1** = ce qui est construit/mergé en pr
    `dlopen`).
 3. **Cadrage IPC** (§8) — ✅ **tranché** : NDJSON.
 4. **Cap de buffering** réponse (phase ultérieure) — réutiliser les 4 MiB requête ou un cap distinct.
-5. **Politique de restart/backoff** et seuil d'auto-désactivation après crashes répétés. *(détail P2)*
+5. **Politique de restart/backoff** et seuil d'auto-désactivation — ✅ **tranché P2b** : backoff
+   exponentiel `initial=250 ms ×2`, plafonné à `30 s` ; fenêtre glissante de crashes de `60 s` ;
+   auto-désactivation après `5` crashes dans la fenêtre (`registry.disable` + `SystemAlert` high).
+   Valeurs injectables (`PluginBackoffPolicy` / `PluginHostManager.Configuration`).
 
 ### Décisions du spike P2 (2026-06-21)
 
@@ -421,9 +430,10 @@ Sources : doc Apple « Disable Library Validation Entitlement » et « Configuri
    `(allow network-outbound (remote ip "host:port"))` reste **provisoire** (Seatbelt ne résout pas le
    DNS — seules des IP littérales sont valides en `remote ip`) : à fixer/valider quand un plugin à
    capability réseau sera réellement exercé (P2b/P3). Commentaire `PROVISIONAL` dans le générateur.
-5. **Localisation du shim en prod (P2b).** En test, `ExecutableLocator.sandboxExec` le trouve dans les
-   produits de build. En prod, `PluginSandbox` reçoit un `shimPath` à résoudre (à câbler P2b :
-   probablement à côté de l'exécutable du daemon ; le shim doit être signé dans le `.pkg`).
+5. **Localisation du shim en prod** — ✅ **résolu P2b** : `Daemon.init` reçoit `sandboxExecPath`,
+   défaut = `Bundle.main.executableURL`/`iris-sandbox-exec` (à côté de l'exécutable du daemon) ; les
+   tests injectent `ExecutableLocator.sandboxExec`. Le `.pkg` qui embarque + signe le shim à côté
+   d'`irisd` reste un **suivi Phase 9** (hors P2b ; en dev `swift build` place les deux dans `.build/`).
 
 ### Découvertes durant l'implémentation P1 (à durcir en P2)
 
