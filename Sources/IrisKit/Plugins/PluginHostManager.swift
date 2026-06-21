@@ -107,7 +107,7 @@ public actor PluginHostManager {
         where hosts[plugin.manifest.id] == nil && !restarting.contains(plugin.manifest.id) {
             await startHost(for: plugin)
         }
-        await republishChain()
+        republishChain(desired: desired)
     }
 
     /// Gracefully stops all hosts. Called at daemon shutdown.
@@ -202,7 +202,10 @@ public actor PluginHostManager {
                         "Plugin '\(id)' was auto-disabled after \(times.count) crashes — re-enable it from Settings once fixed."
                 )
             )
-            await republishChain()
+            // No `desired` in hand here; fetch once (after the disable persists, so
+            // the disabled plugin is excluded) before pushing the updated chain.
+            let desired = await desiredPlugins()
+            republishChain(desired: desired)
             return
         }
 
@@ -217,13 +220,15 @@ public actor PluginHostManager {
         let desired = await desiredPlugins()
         guard let plugin = desired.first(where: { $0.manifest.id == id }) else { return }
         await startHost(for: plugin)
-        await republishChain()
+        republishChain(desired: desired)
     }
 
-    /// Ordered chain of running hosts × their onRequest hooks (design §4.4: order
-    /// persisted in config). Rebuilt and pushed whenever the running set changes.
-    private func republishChain() async {
-        let desired = await desiredPlugins()
+    /// Ordered chain of running hosts × their onRequest hooks (design §4.4: chain
+    /// order persisted in config). Rebuilt and pushed whenever the running set
+    /// changes. `desired` is passed in by the caller (which already fetched it) to
+    /// avoid a redundant registry re-hash; the chain is eventually-consistent if
+    /// hosts mutate concurrently — the next republish reconverges.
+    private func republishChain(desired: [Plugin]) {
         var entries: [PluginChainEntry] = []
         for plugin in desired.sorted(by: { $0.order < $1.order }) {
             guard let host = hosts[plugin.manifest.id] else { continue }
