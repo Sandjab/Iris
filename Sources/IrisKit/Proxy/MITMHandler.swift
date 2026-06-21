@@ -83,6 +83,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
             case substituted(names: [String])
             case noMatch(unresolved: [String], nonUtf8: Bool, bodyTooLarge: Bool)
             case blocked(alert: Alert)
+            case pluginBlocked(pluginId: String, reason: String?)
+            case pluginResponded(pluginId: String, status: Int, headers: [(String, String)], body: ByteBuffer?)
         }
     }
 
@@ -122,6 +124,7 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
             let processed = try await Self.processRequest(
                 head: head,
                 body: body,
+                dispatcher: server.hookDispatcher,
                 evaluator: server.exfilRuleEngine,
                 engine: server.placeholderEngine,
                 secretStore: server.secretStore,
@@ -132,18 +135,43 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
             Self.logOutcome(processed.outcome, server: server, host: host, originalURI: originalURI)
             return processed
         }.flatMap { processed -> EventLoopFuture<(ProcessedRequest, StreamOutcome)> in
-            // Stream the response part-by-part to the client at the wire, no
-            // buffering (SPECS §7.3 / §10.12). Resolves at `.end` with the
-            // status captured at the head.
-            server.upstreamClient.stream(
-                head: processed.head,
-                body: processed.body,
-                host: host,
-                port: server.configuration.upstreamPort,
-                to: channel,
-                on: eventLoop,
-                headWritten: headWritten
-            ).map { (processed, $0) }
+            switch processed.outcome {
+            case .pluginBlocked:
+                // A plugin blocked the request: never forward upstream. Return an
+                // empty 403; the block reason is deliberately not exposed (§6.1).
+                return Self.writeSynthetic(
+                    status: 403,
+                    headers: [],
+                    body: nil,
+                    to: channel,
+                    on: eventLoop,
+                    headWritten: headWritten
+                ).map { (processed, $0) }
+            case .pluginResponded(_, let status, let headers, let body):
+                // A plugin returned a synthetic response: relay it verbatim and
+                // never forward upstream (no secret leaves the daemon).
+                return Self.writeSynthetic(
+                    status: status,
+                    headers: headers,
+                    body: body,
+                    to: channel,
+                    on: eventLoop,
+                    headWritten: headWritten
+                ).map { (processed, $0) }
+            default:
+                // Stream the response part-by-part to the client at the wire, no
+                // buffering (SPECS §7.3 / §10.12). Resolves at `.end` with the
+                // status captured at the head.
+                return server.upstreamClient.stream(
+                    head: processed.head,
+                    body: processed.body,
+                    host: host,
+                    port: server.configuration.upstreamPort,
+                    to: channel,
+                    on: eventLoop,
+                    headWritten: headWritten
+                ).map { (processed, $0) }
+            }
         }.whenComplete { result in
             let duration = UInt32(max(0, Date().timeIntervalSince(startTime) * 1_000))
             switch result {
@@ -201,6 +229,43 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         }
     }
 
+    /// Writes a plugin-supplied synthetic response (block/respond) to the client
+    /// and resolves with its status. Routes via `Channel.write` (thread-safe),
+    /// never `context` — this runs in a future callback (the CONNECT-502 lesson).
+    /// Sets `headWritten` so the failure path doesn't double-write. Strips any
+    /// client-supplied content-length/transfer-encoding and sets a correct
+    /// content-length for the synthetic body.
+    private static func writeSynthetic(
+        status: Int,
+        headers: [(String, String)],
+        body: ByteBuffer?,
+        to channel: Channel,
+        on eventLoop: EventLoop,
+        headWritten: NIOLoopBoundBox<Bool>
+    ) -> EventLoopFuture<StreamOutcome> {
+        var h = HTTPHeaders()
+        for (n, v) in headers
+        where n.lowercased() != "content-length" && n.lowercased() != "transfer-encoding" {
+            h.add(name: n, value: v)
+        }
+        h.replaceOrAdd(name: "content-length", value: "\(body?.readableBytes ?? 0)")
+        let respHead = HTTPResponseHead(
+            version: .http1_1,
+            status: HTTPResponseStatus(statusCode: status),
+            headers: h
+        )
+        headWritten.value = true
+        channel.write(HTTPServerResponsePart.head(respHead), promise: nil)
+        if let body, body.readableBytes > 0 {
+            channel.write(HTTPServerResponsePart.body(.byteBuffer(body)), promise: nil)
+        }
+        let promise = eventLoop.makePromise(of: StreamOutcome.self)
+        channel.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { _ in
+            promise.succeed(StreamOutcome(statusCode: status))
+        }
+        return promise.futureResult
+    }
+
     // SPECS §7.2: bodies larger than this are passed through without scanning.
     static let bodyMaxBytes = 4 * 1024 * 1024
 
@@ -217,6 +282,7 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
     private static func processRequest(
         head: HTTPRequestHead,
         body: ByteBuffer?,
+        dispatcher: HookDispatcher,
         evaluator: ExfilRuleEngine,
         engine: PlaceholderEngine,
         secretStore: any SecretStore,
@@ -227,7 +293,54 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         if bypass {
             return makeBypassedRequest(head: head, body: body)
         }
+        // P3: the onRequest plugin chain runs BEFORE the Iris scan/substitution.
+        // Invariant §3: whatever proceeds upstream is still scanned by
+        // `scanAndSubstitute` below; `block`/`respond` never forward upstream (no
+        // secret leaves the daemon), so no scan is needed on those paths.
+        switch await dispatcher.onRequest(head: head, body: body, host: host) {
+        case .block(let pid, let reason):
+            return ProcessedRequest(
+                head: head,
+                body: body,
+                outcome: .pluginBlocked(pluginId: pid, reason: reason)
+            )
+        case .respond(let pid, let status, let headers, let rbody):
+            return ProcessedRequest(
+                head: head,
+                body: body,
+                outcome: .pluginResponded(
+                    pluginId: pid,
+                    status: status,
+                    headers: headers,
+                    body: rbody
+                )
+            )
+        case .proceed(let h, let b):
+            return try await scanAndSubstitute(
+                head: h,
+                body: b,
+                evaluator: evaluator,
+                engine: engine,
+                secretStore: secretStore,
+                logger: logger,
+                host: host
+            )
+        }
+    }
 
+    /// The Iris scan/scoping/substitution stage (SPECS §7). Operates on the
+    /// request as it will be forwarded upstream — for the plugin path, on the
+    /// (possibly modified) request returned by the onRequest chain. Mechanically
+    /// extracted from `processRequest`; the logic is unchanged.
+    private static func scanAndSubstitute(
+        head: HTTPRequestHead,
+        body: ByteBuffer?,
+        evaluator: ExfilRuleEngine,
+        engine: PlaceholderEngine,
+        secretStore: any SecretStore,
+        logger: Logger,
+        host: String
+    ) async throws -> ProcessedRequest {
         // Strip Accept-Encoding (SPECS §7.5).
         var preparedHeaders = HTTPHeaders()
         for (name, value) in head.headers where name.lowercased() != "accept-encoding" {
@@ -476,6 +589,18 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 )
                 server.setPaused(true)
             }
+        case .pluginBlocked(let pluginId, _):
+            // Value-free: id + host only. The block `reason` is NOT logged (§6.1).
+            server.logger.info(
+                "plugin blocked request",
+                metadata: ["host": "\(host)", "plugin": "\(pluginId)"]
+            )
+        case .pluginResponded(let pluginId, let st, _, _):
+            // Value-free: id + host + status only. Headers/body are NOT logged (§6.1).
+            server.logger.info(
+                "plugin responded synthetically",
+                metadata: ["host": "\(host)", "plugin": "\(pluginId)", "status": "\(st)"]
+            )
         case .bypassed, .noMatch:
             break
         }
@@ -536,6 +661,28 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 durationMs: duration,
                 substitutedSecrets: [],
                 alert: alert
+            )
+        case .pluginBlocked(let pluginId, _):
+            return Event(
+                timestamp: startTime,
+                kind: .pluginBlocked,
+                host: host,
+                method: originalMethod,
+                path: originalURI,
+                statusCode: status,
+                durationMs: duration,
+                pluginId: pluginId
+            )
+        case .pluginResponded(let pluginId, _, _, _):
+            return Event(
+                timestamp: startTime,
+                kind: .pluginResponded,
+                host: host,
+                method: originalMethod,
+                path: originalURI,
+                statusCode: status,
+                durationMs: duration,
+                pluginId: pluginId
             )
         }
     }
