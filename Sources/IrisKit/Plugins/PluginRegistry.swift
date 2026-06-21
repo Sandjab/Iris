@@ -11,6 +11,29 @@ public actor PluginRegistry {
     private let logger: Logger
     private let fm = FileManager.default
 
+    /// Memoised content hash per plugin id, keyed on a cheap stat-only signature.
+    /// `view`/`enable` re-hash on every `list`/`info`; the cache returns the pinned
+    /// digest unchanged unless the tree's signature moved (#9). Actor-isolated, so
+    /// no locking. Invalidated on `remove`.
+    private struct CachedHash {
+        let signature: String
+        let value: String
+    }
+    private var hashCache: [String: CachedHash] = [:]
+
+    /// Content hash for `id`, reusing the cache when the stat-only signature is
+    /// unchanged (#9). A moved signature forces a recompute — so a tamper is never
+    /// masked by a stale cache entry.
+    private func currentHash(id: String, directory: URL) throws -> String {
+        let signature = try PluginHasher.signature(directory: directory)
+        if let cached = hashCache[id], cached.signature == signature {
+            return cached.value
+        }
+        let value = try PluginHasher.hash(directory: directory)
+        hashCache[id] = CachedHash(signature: signature, value: value)
+        return value
+    }
+
     public init(pluginsDirectory: URL, configStore: ConfigStore, logger: Logger) {
         self.pluginsDirectory = pluginsDirectory
         self.configStore = configStore
@@ -49,7 +72,7 @@ public actor PluginRegistry {
 
     private func view(for entry: PluginStateEntry) throws -> Plugin {
         let manifest = try loadManifest(id: entry.id)
-        let currentHash = try PluginHasher.hash(directory: directory(for: entry.id))
+        let currentHash = try currentHash(id: entry.id, directory: directory(for: entry.id))
         return Plugin(
             manifest: manifest,
             enabled: entry.enabled,
@@ -176,7 +199,7 @@ public actor PluginRegistry {
             throw PluginError.unknownPlugin(id)
         }
         let manifest = try loadManifest(id: id)
-        let currentHash = try PluginHasher.hash(directory: directory(for: id))
+        let currentHash = try currentHash(id: id, directory: directory(for: id))
         let entries = try await configStore.updatePlugins { current in
             guard let idx = current.firstIndex(where: { $0.id == id }) else {
                 throw PluginError.unknownPlugin(id)
@@ -226,10 +249,11 @@ public actor PluginRegistry {
             }
             return Self.renumber(current.filter { $0.id != id })
         }
+        hashCache[id] = nil  // invalidate any memoised digest for this id
         // State is already committed; a failed directory delete must not throw,
         // but it must not be swallowed silently either (CLAUDE.md §12).
         do {
-            try fm.removeItem(at: directory(for: id))
+            try fm.removeItem(at: try directory(for: id))
         } catch {
             logger.warning(
                 "remove: failed to delete plugin directory",

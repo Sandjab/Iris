@@ -208,6 +208,26 @@ final class PluginRegistryTests: XCTestCase {
         }
     }
 
+    func testCachedHashStillDetectsTamperAfterCleanListing() async throws {
+        // A first listing primes the per-id hash cache with a matching digest. A
+        // later tamper must still flip hashMatches — the cache is keyed on a
+        // stat-only signature that moves when the tree changes (#9), so it cannot
+        // return a stale "matches". A naive id-only cache would fail this.
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let src = try writeSource(id: "cache.id")
+        defer { try? FileManager.default.removeItem(at: src) }
+        _ = try await reg.install(from: src)
+
+        let first = try await reg.list()
+        XCTAssertTrue(first[0].hashMatches)  // primes the cache
+
+        let runFile = root.appendingPathComponent("cache.id/run")
+        try "#!/bin/sh\necho tampered\n".write(to: runFile, atomically: true, encoding: .utf8)
+
+        let second = try await reg.list()
+        XCTAssertFalse(second[0].hashMatches)
+    }
+
     func testInfoRejectsUnsafeIdInConfigWithoutLeakingPath() async throws {
         // Inject a path-traversing id directly into persisted state (simulating a
         // hand-edited config.json). Deriving a filesystem path from it must be

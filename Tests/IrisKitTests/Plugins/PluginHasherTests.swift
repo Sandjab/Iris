@@ -62,4 +62,34 @@ final class PluginHasherTests: XCTestCase {
         try "abc".write(to: dir2.appendingPathComponent("run"), atomically: true, encoding: .utf8)
         XCTAssertEqual(try PluginHasher.hash(directory: dir1), try PluginHasher.hash(directory: dir2))
     }
+
+    func testSignatureStableForUnchangedTree() throws {
+        let dir = try makeDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "hello".write(to: dir.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        let s1 = try PluginHasher.signature(directory: dir)
+        let s2 = try PluginHasher.signature(directory: dir)
+        XCTAssertEqual(s1, s2)
+    }
+
+    func testSignatureChangesWhenContentSizeChanges() throws {
+        let dir = try makeDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let f = dir.appendingPathComponent("a.txt")
+        try "hello".write(to: f, atomically: true, encoding: .utf8)
+        let before = try PluginHasher.signature(directory: dir)
+        try "hello world".write(to: f, atomically: true, encoding: .utf8)
+        let after = try PluginHasher.signature(directory: dir)
+        XCTAssertNotEqual(before, after)
+    }
+
+    func testSignatureChangesWhenFileAdded() throws {
+        let dir = try makeDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "hello".write(to: dir.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        let before = try PluginHasher.signature(directory: dir)
+        try "x".write(to: dir.appendingPathComponent("c.txt"), atomically: true, encoding: .utf8)
+        let after = try PluginHasher.signature(directory: dir)
+        XCTAssertNotEqual(before, after)
+    }
 }
