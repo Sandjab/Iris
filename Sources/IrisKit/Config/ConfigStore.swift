@@ -69,6 +69,17 @@ public actor ConfigStore {
         try persist(config.with(plugins: entries))
     }
 
+    /// Atomically read → transform → validate → persist the plugin-state array
+    /// inside a single actor critical section (no suspension point between read
+    /// and write), so concurrent callers cannot lose or duplicate entries.
+    public func updatePlugins(
+        _ transform: ([PluginStateEntry]) throws -> [PluginStateEntry]
+    ) throws -> [PluginStateEntry] {
+        let updated = try transform(config.plugins)
+        try persist(config.with(plugins: updated))
+        return updated
+    }
+
     // MARK: - Host mutations (back `rule.*`)
 
     @discardableResult

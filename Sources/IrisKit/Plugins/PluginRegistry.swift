@@ -93,35 +93,61 @@ public actor PluginRegistry {
         }
         try manifest.validate()
 
-        var entries = await configStore.plugins()
-        guard !entries.contains(where: { $0.id == manifest.id }) else {
+        // cheap early reject (optimization only; the atomic block below is authoritative)
+        if await configStore.plugins().contains(where: { $0.id == manifest.id }) {
             throw PluginError.duplicateId(manifest.id)
         }
-
         let hash = try PluginHasher.hash(directory: sourceDir)
         let dest = directory(for: manifest.id)
         do {
             try fm.createDirectory(at: pluginsDirectory, withIntermediateDirectories: true)
-            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+            if fm.fileExists(atPath: dest.path) {
+                logger.warning(
+                    "install: removing pre-existing plugin directory with no state entry",
+                    metadata: ["id": "\(manifest.id)"]
+                )
+                try fm.removeItem(at: dest)
+            }
             try fm.copyItem(at: sourceDir, to: dest)
         } catch {
+            try? fm.removeItem(at: dest)  // clean a partial copy
             throw PluginError.ioError("copy plugin \(manifest.id): \(error)")
         }
-
-        let nextOrder = (entries.map(\.order).max() ?? -1) + 1
-        let newEntry = PluginStateEntry(
-            id: manifest.id,
-            enabled: false,
-            order: nextOrder,
-            approvedCapabilities: nil,
-            pinnedHash: hash,
-            configValues: [:]
-        )
-        entries.append(newEntry)
-        do { try await configStore.setPlugins(entries) } catch {
-            try? fm.removeItem(at: dest)  // roll back the copy on persist failure
+        let entries: [PluginStateEntry]
+        do {
+            entries = try await configStore.updatePlugins { current in
+                guard !current.contains(where: { $0.id == manifest.id }) else {
+                    throw PluginError.duplicateId(manifest.id)
+                }
+                let order = (current.map(\.order).max() ?? -1) + 1
+                return current + [
+                    PluginStateEntry(
+                        id: manifest.id,
+                        enabled: false,
+                        order: order,
+                        approvedCapabilities: nil,
+                        pinnedHash: hash,
+                        configValues: [:]
+                    )
+                ]
+            }
+        } catch {
+            try? fm.removeItem(at: dest)  // roll back the copy on persist/dup failure
             throw error
         }
-        return try view(for: newEntry)
+        guard let newEntry = entries.first(where: { $0.id == manifest.id }) else {
+            throw PluginError.ioError("install: entry missing after persist for \(manifest.id)")
+        }
+        // hashMatches is true by construction (we just hashed + pinned the same dir) —
+        // build the view directly, do NOT re-hash via view(for:) (avoids redundant I/O
+        // and a misleading post-persist failure).
+        return Plugin(
+            manifest: manifest,
+            enabled: newEntry.enabled,
+            order: newEntry.order,
+            approvedCapabilities: newEntry.approvedCapabilities,
+            pinnedHash: newEntry.pinnedHash,
+            hashMatches: true
+        )
     }
 }

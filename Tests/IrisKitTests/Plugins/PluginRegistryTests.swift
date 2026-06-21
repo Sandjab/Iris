@@ -74,14 +74,51 @@ final class PluginRegistryTests: XCTestCase {
         let src = try writeSource(id: "dup.id")
         defer { try? FileManager.default.removeItem(at: src) }
         _ = try await reg.install(from: src)
-        await XCTAssertThrowsErrorAsync(try await reg.install(from: src)) { error in
+        await assertThrowsAsyncError(try await reg.install(from: src)) { error in
             XCTAssertEqual(error as? PluginError, .duplicateId("dup.id"))
+        }
+    }
+
+    func testListReportsNeedsReapprovalAfterTamper() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let src = try writeSource(id: "org.example.tagger")
+        defer { try? FileManager.default.removeItem(at: src) }
+        _ = try await reg.install(from: src)
+
+        // Tamper with the installed copy after the pin.
+        let runFile = root.appendingPathComponent("org.example.tagger/run")
+        try "#!/bin/sh\necho tampered\n".write(to: runFile, atomically: true, encoding: .utf8)
+
+        let list = try await reg.list()
+        XCTAssertEqual(list.count, 1)
+        XCTAssertFalse(list[0].hashMatches)
+        XCTAssertEqual(list[0].displayState, .needsReapproval)
+    }
+
+    func testListSkipsBrokenManifest() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let src = try writeSource(id: "org.example.tagger")
+        defer { try? FileManager.default.removeItem(at: src) }
+        _ = try await reg.install(from: src)
+
+        // Corrupt the installed manifest: the entry stays in config but no longer loads.
+        let manifestFile = root.appendingPathComponent("org.example.tagger/plugin.json")
+        try "{ not json".write(to: manifestFile, atomically: true, encoding: .utf8)
+
+        let list = try await reg.list()
+        XCTAssertEqual(list, [])
+    }
+
+    func testInfoThrowsUnknownPlugin() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        await assertThrowsAsyncError(try await reg.info(id: "nope")) { error in
+            XCTAssertEqual(error as? PluginError, .unknownPlugin("nope"))
         }
     }
 }
 
 // Small async-throws assertion helper (place once in the test target if absent).
-func XCTAssertThrowsErrorAsync<T>(
+func assertThrowsAsyncError<T>(
     _ expression: @autoclosure () async throws -> T,
     _ handler: (Error) -> Void = { _ in }
 ) async {
