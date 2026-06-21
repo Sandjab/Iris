@@ -51,7 +51,7 @@ struct PluginsSettingsView: View {
                 )
             } else {
                 List(model.plugins, id: \.manifest.id) { plugin in
-                    let index = model.plugins.firstIndex(of: plugin) ?? 0
+                    let index = model.plugins.firstIndex(where: { $0.manifest.id == plugin.manifest.id }) ?? 0
                     PluginRow(
                         plugin: plugin,
                         canMoveUp: index > 0,
@@ -323,16 +323,22 @@ private struct PluginConsentSheet: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(caps.network, id: \.self) { entry in
-                            Label("Network egress: \(entry)", systemImage: "network")
-                                .font(.callout)
+                    // Bound the height so a manifest declaring many capabilities can't
+                    // grow the sheet past the action buttons / screen bounds.
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(caps.network, id: \.self) { entry in
+                                Label("Network egress: \(entry)", systemImage: "network")
+                                    .font(.callout)
+                            }
+                            ForEach(caps.filesystem, id: \.self) { entry in
+                                Label("Filesystem: \(entry)", systemImage: "folder")
+                                    .font(.callout)
+                            }
                         }
-                        ForEach(caps.filesystem, id: \.self) { entry in
-                            Label("Filesystem: \(entry)", systemImage: "folder")
-                                .font(.callout)
-                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .frame(maxHeight: 150)
                 }
             }
 
