@@ -26,6 +26,9 @@ public struct AdminDispatcher: Sendable {
     /// Owned by the daemon (it has the old snapshot to diff `ignored`); the SIGHUP
     /// path and the RPC `config.reload` path both go through this single closure.
     public let onConfigReload: @Sendable () async throws -> ConfigReloadResult
+    /// Called after any plugin mutation so the host manager can reconcile the
+    /// running set against the persisted enabled set.
+    public let onPluginsChanged: @Sendable () async -> Void
 
     public init(
         secretStore: any SecretStore,
@@ -39,6 +42,7 @@ public struct AdminDispatcher: Sendable {
         onConfigReload: @escaping @Sendable () async throws -> ConfigReloadResult = {
             throw JSONRPCError.internalError
         },
+        onPluginsChanged: @escaping @Sendable () async -> Void = {},
         logger: Logger = Logger(label: "io.iris.admin.dispatcher")
     ) {
         self.secretStore = secretStore
@@ -50,6 +54,7 @@ public struct AdminDispatcher: Sendable {
         self.onHostsChanged = onHostsChanged
         self.onSecurityChanged = onSecurityChanged
         self.onConfigReload = onConfigReload
+        self.onPluginsChanged = onPluginsChanged
         self.logger = logger
     }
 
@@ -269,17 +274,24 @@ public struct AdminDispatcher: Sendable {
             return try JSONValue.encoding(try await pluginRegistry.install(from: url))
         case .pluginEnable:
             let p = try Self.decode(PluginIdParams.self, from: params)
-            return try JSONValue.encoding(try await pluginRegistry.enable(id: p.id))
+            let view = try await pluginRegistry.enable(id: p.id)
+            await onPluginsChanged()
+            return try JSONValue.encoding(view)
         case .pluginDisable:
             let p = try Self.decode(PluginIdParams.self, from: params)
-            return try JSONValue.encoding(try await pluginRegistry.disable(id: p.id))
+            let view = try await pluginRegistry.disable(id: p.id)
+            await onPluginsChanged()
+            return try JSONValue.encoding(view)
         case .pluginRemove:
             let p = try Self.decode(PluginIdParams.self, from: params)
             try await pluginRegistry.remove(id: p.id)
+            await onPluginsChanged()
             return try JSONValue.encoding(PluginRemovedResult(removed: true))
         case .pluginReorder:
             let p = try Self.decode(PluginReorderParams.self, from: params)
-            return try JSONValue.encoding(try await pluginRegistry.reorder(id: p.id, to: p.index))
+            let views = try await pluginRegistry.reorder(id: p.id, to: p.index)
+            await onPluginsChanged()
+            return try JSONValue.encoding(views)
         }
     }
 
