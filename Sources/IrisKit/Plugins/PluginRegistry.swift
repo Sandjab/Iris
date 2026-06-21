@@ -133,15 +133,17 @@ public actor PluginRegistry {
         }
         try manifest.validate()
 
-        // Refuse a source tree with symlinks (unpinned by the hasher) or one that
-        // blows the size/count caps, BEFORE copying anything (#8).
+        // Pre-check the source tree (symlinks, size/count caps) BEFORE copying, so
+        // a manifestly oversized/unsafe source is rejected without copying it (#8,
+        // anti-DoS + fast UX). This is best-effort: the authoritative, fail-closed
+        // check runs on the staged copy below (the source can mutate between here
+        // and the copy — TOCTOU — but the staged copy cannot).
         try PluginSourceValidator.validate(directory: sourceDir, limits: sourceLimits)
 
         // cheap early reject (optimization only; the atomic block below is authoritative)
         if await configStore.plugins().contains(where: { $0.id == manifest.id }) {
             throw PluginError.duplicateId(manifest.id)
         }
-        let hash = try PluginHasher.hash(directory: sourceDir)
 
         // Stage the copy under a unique temp dir INSIDE the plugins dir (same
         // volume → atomic rename later). The state is committed BEFORE the rename,
@@ -152,10 +154,19 @@ public actor PluginRegistry {
             ".staging-\(manifest.id)-\(UUID().uuidString)",
             isDirectory: true
         )
+        let hash: String
         do {
             try fm.copyItem(at: sourceDir, to: staging)
+            // Authoritative validation on the STAGED copy (not sourceDir): it is
+            // immutable under our control, closing the TOCTOU between the pre-check
+            // and the copy (a symlink injected into sourceDir in between would
+            // otherwise be copied and survive, unpinned). Hash the staged tree too,
+            // so pinnedHash is exactly what we install (#8).
+            try PluginSourceValidator.validate(directory: staging, limits: sourceLimits)
+            hash = try PluginHasher.hash(directory: staging)
         } catch {
             try? fm.removeItem(at: staging)
+            if case PluginError.unsafeSource = error { throw error }
             throw PluginError.ioError("stage plugin \(manifest.id): \(error)")
         }
 

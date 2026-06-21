@@ -284,10 +284,15 @@ public struct PluginCapabilities: Codable, Sendable, Hashable {
             }
             let host = String(endpoint[..<colon])
             let portString = String(endpoint[endpoint.index(after: colon)...])
+            // A host containing ':' is only valid as a bracketed IPv6 literal
+            // ([::1]); a bare "::1" splits into host ":" + port "1" and must be
+            // rejected as malformed.
+            let bracketedIPv6 = host.hasPrefix("[") && host.hasSuffix("]")
             guard !host.isEmpty,
                 !host.unicodeScalars.contains(where: {
                     $0 == " " || CharacterSet.controlCharacters.contains($0)
-                })
+                }),
+                !host.contains(":") || bracketedIPv6
             else {
                 throw PluginError.invalidManifest("invalid network host: \(endpoint)")
             }
