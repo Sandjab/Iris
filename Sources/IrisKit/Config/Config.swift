@@ -6,6 +6,7 @@ public struct Config: Codable, Sendable, Hashable {
     public let security: SecurityConfig
     public let backups: BackupsConfig
     public let hosts: [HostEntry]
+    public let plugins: [PluginStateEntry]
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -13,6 +14,7 @@ public struct Config: Codable, Sendable, Hashable {
         case security
         case backups
         case hosts
+        case plugins
     }
 
     public init(
@@ -20,13 +22,28 @@ public struct Config: Codable, Sendable, Hashable {
         broker: BrokerConfig,
         security: SecurityConfig,
         backups: BackupsConfig,
-        hosts: [HostEntry]
+        hosts: [HostEntry],
+        plugins: [PluginStateEntry] = []
     ) {
         self.version = version
         self.broker = broker
         self.security = security
         self.backups = backups
         self.hosts = hosts
+        self.plugins = plugins
+    }
+
+    /// Forward-compatible decode: a `config.json` written before the plugins
+    /// feature has no `plugins` key — default it to `[]` rather than failing
+    /// (same tolerance pattern as `HostEntry.init(from:)`).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.version = try c.decode(Int.self, forKey: .version)
+        self.broker = try c.decode(BrokerConfig.self, forKey: .broker)
+        self.security = try c.decode(SecurityConfig.self, forKey: .security)
+        self.backups = try c.decode(BackupsConfig.self, forKey: .backups)
+        self.hosts = try c.decode([HostEntry].self, forKey: .hosts)
+        self.plugins = try c.decodeIfPresent([PluginStateEntry].self, forKey: .plugins) ?? []
     }
 
     /// Built-in defaults, used to seed `config.json` on first run.
@@ -47,12 +64,32 @@ public struct Config: Codable, Sendable, Hashable {
             maxSubstitutionsPerMinute: 60
         ),
         backups: BackupsConfig(maxCount: 10),
-        hosts: [HostEntry(host: "api.anthropic.com", origin: .builtin, createdAt: Date(timeIntervalSince1970: 0))]
+        hosts: [HostEntry(host: "api.anthropic.com", origin: .builtin, createdAt: Date(timeIntervalSince1970: 0))],
+        plugins: []
     )
 
-    /// Returns a copy with `hosts` replaced.
+    /// Returns a copy with `hosts` replaced, carrying the current `plugins`.
     public func with(hosts: [HostEntry]) -> Config {
-        Config(version: version, broker: broker, security: security, backups: backups, hosts: hosts)
+        Config(
+            version: version,
+            broker: broker,
+            security: security,
+            backups: backups,
+            hosts: hosts,
+            plugins: plugins
+        )
+    }
+
+    /// Returns a copy with `plugins` replaced, carrying the current `hosts`.
+    public func with(plugins: [PluginStateEntry]) -> Config {
+        Config(
+            version: version,
+            broker: broker,
+            security: security,
+            backups: backups,
+            hosts: hosts,
+            plugins: plugins
+        )
     }
 }
 
