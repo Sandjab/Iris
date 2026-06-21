@@ -101,6 +101,17 @@ public actor PluginHost {
         self.process = process
         self.stdinHandle = stdin.fileHandleForWriting
 
+        // A plugin can die while a write to its stdin is in flight (or while a
+        // stale chain entry still points at it during restart backoff). Without
+        // this, that write raises SIGPIPE and kills the whole daemon — a crashed
+        // plugin must only ever degrade per onFailure (design §4.5), never take
+        // irisd down. F_SETNOSIGPIPE makes the write fail with EPIPE instead,
+        // which `send`'s do/catch turns into a throwing error. (swift-nio does the
+        // same per-fd on Darwin.)
+        if fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == -1 {
+            logger.debug("plugin stdin F_SETNOSIGPIPE failed", metadata: ["id": "\(spec.id)"])
+        }
+
         let reader = PluginLineReader(
             fileDescriptor: stdout.fileHandleForReading.fileDescriptor,
             onLine: { [weak self] line in
@@ -266,6 +277,11 @@ public actor PluginHost {
         // once via its startHost catch) — reporting here too would double-count
         // the crash and spawn concurrent restart chains.
         guard started, !stopping else { return }
+        // Subsequent onRequest must fail fast with .notRunning BEFORE attempting a
+        // doomed write to the dead process's stdin (the chain snapshot can still
+        // point here during restart backoff). Reset AFTER the guard so the crash
+        // is still reported exactly once via onUnexpectedExit.
+        started = false
         await onUnexpectedExit(spec.id)
     }
 

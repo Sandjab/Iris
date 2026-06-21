@@ -60,6 +60,13 @@ struct IrisDaemonCLI: AsyncParsableCommand {
         signal(SIGINT, SIG_DFL)
         signal(SIGTERM, SIG_DFL)
 
+        // Never let a broken pipe (e.g. a plugin subprocess that died mid-write)
+        // kill the daemon. Writes to a closed pipe then fail with EPIPE (a
+        // catchable error) instead of raising SIGPIPE. Standard daemon hygiene;
+        // complements the per-fd F_SETNOSIGPIPE on plugin stdin. Set before any
+        // plugin is spawned (Daemon() below builds the plugin host manager).
+        signal(SIGPIPE, SIG_IGN)
+
         let resolvedConfigPath: URL =
             configPath.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
             ?? URL(

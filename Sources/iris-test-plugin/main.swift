@@ -12,8 +12,10 @@ import Foundation
 //                    SIGTERM/SIGKILL path).
 //
 // on_request dispatch is DATA-driven (no argv). Include the request header
-// x-test-action with one of: pass | modify | block | respond | hang.
+// x-test-action with one of: pass | modify | block | respond | hang | exit.
 // "hang" never replies, which drives the host-side per-call timeout test.
+// "exit" dies WITHOUT replying, simulating a plugin crash under live traffic
+// (drives the SIGPIPE/fail-fast regression test).
 
 let mode = CommandLine.arguments.dropFirst().first ?? "ok"
 
@@ -68,6 +70,8 @@ while let line = readLine(strippingNewline: true) {
             ])
         case "hang":
             continue  // never reply → drives the host-side timeout
+        case "exit":
+            exit(0)  // die WITHOUT replying → simulates a plugin crash under traffic
         default:
             emitLine(["jsonrpc": "2.0", "id": id, "result": ["action": "pass"]])
         }
