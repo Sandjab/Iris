@@ -19,6 +19,8 @@ public struct PluginSandbox: Sendable {
         executable: String,
         arguments: [String] = [],
         profile: String,
+        currentDirectory: URL? = nil,
+        standardInput: Pipe? = nil,
         standardOutput: Pipe? = nil,
         standardError: Pipe? = nil
     ) throws -> Process {
@@ -30,6 +32,12 @@ public struct PluginSandbox: Sendable {
         let process = Process()
         process.executableURL = shimPath
         process.arguments = [profileURL.path, executable] + arguments
+        if let currentDirectory {
+            process.currentDirectoryURL = currentDirectory
+        }
+        if let standardInput {
+            process.standardInput = standardInput
+        }
         if let standardOutput {
             process.standardOutput = standardOutput
         }

@@ -32,6 +32,7 @@ public actor Daemon {
     private let configStore: ConfigStore
     private let logger: Logger
     private let proxy: ProxyServer
+    private let pluginHostManager: PluginHostManager
     private let adminServer: AdminServer
     private let eventsServer: EventsServer
     private let eventLoopGroup: EventLoopGroup
@@ -44,6 +45,14 @@ public actor Daemon {
         caBackend: CABackend = .keychain,
         caPath: URL,
         pluginsDirectory: URL,
+        sandboxExecPath: URL = Bundle.main.executableURL?
+            .deletingLastPathComponent()
+            .appendingPathComponent("iris-sandbox-exec")
+            ?? URL(fileURLWithPath: "/usr/local/bin/iris-sandbox-exec"),
+        scratchRoot: URL = URL(
+            fileURLWithPath: ("~/Library/Application Support/iris/plugin-scratch" as NSString)
+                .expandingTildeInPath
+        ),
         logger: Logger
     ) async throws {
         let config = await configStore.current
@@ -155,6 +164,26 @@ public actor Daemon {
             configStore: configStore,
             logger: logger
         )
+        let pluginHostManager = PluginHostManager(
+            registry: pluginRegistry,
+            pluginsDirectory: pluginsDirectory,
+            scratchRoot: scratchRoot,
+            sandbox: PluginSandbox(shimPath: sandboxExecPath),
+            emitSystemAlert: { [proxy] alert in
+                await proxy.eventRing.append(
+                    Event(
+                        timestamp: Date(),
+                        kind: .systemAlert,
+                        host: "plugin",
+                        method: "-",
+                        path: "-",
+                        systemAlert: alert
+                    )
+                )
+            },
+            logger: logger
+        )
+        self.pluginHostManager = pluginHostManager
         let dispatcher = AdminDispatcher(
             secretStore: secretStore,
             eventRing: proxy.eventRing,
@@ -175,6 +204,9 @@ public actor Daemon {
             onConfigReload: { [reloadBox] in
                 let fn = reloadBox.withLockedValue { $0 }
                 return try await fn()
+            },
+            onPluginsChanged: { [pluginHostManager] in
+                await pluginHostManager.reconcile()
             },
             logger: logger
         )
@@ -216,6 +248,7 @@ public actor Daemon {
         _ = try await proxy.start()
         _ = try await adminServer.start()
         _ = try await eventsServer.start()
+        await pluginHostManager.startEnabled()
 
         logger.info(
             "irisd ready",
@@ -239,6 +272,7 @@ public actor Daemon {
     public func stop() async throws {
         try? await eventsServer.stop()
         try? await adminServer.stop()
+        await pluginHostManager.shutdownAll()
         try? await proxy.stop()
         try? await eventLoopGroup.shutdownGracefully()
     }
