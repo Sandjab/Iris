@@ -11,6 +11,13 @@ import Foundation
 /// - deny file *write* except the plugin's private scratch dir;
 /// - deny network by default; allow only the granted `network` endpoints.
 public enum PluginSandboxProfile {
+    /// - Important: `scratchDir` MUST be a canonical (realpath-resolved) path. Seatbelt
+    ///   canonicalises write paths via `realpath(3)` before matching `(subpath ...)`, so a
+    ///   non-canonical path (e.g. `/var/folders/...` instead of `/private/var/folders/...`)
+    ///   silently prevents the plugin from writing to its own scratch dir. macOS's
+    ///   `URL.resolvingSymlinksInPath()` does NOT resolve the APFS `/var` firmlink; use
+    ///   `realpath(3)` (see `PluginSandboxEnforcementTests.scratchDir()`). This function is
+    ///   pure and cannot canonicalise the path itself — that is the caller's responsibility.
     public static func generate(capabilities: PluginCapabilities, scratchDir: String) -> String {
         var lines: [String] = [
             "(version 1)",
