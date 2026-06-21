@@ -176,16 +176,28 @@ Tout interdit par défaut. Le manifest **déclare** ses besoins (`network`, `fil
 L'utilisateur **approuve** ces capabilities **à l'activation** ; le runtime applique un profil sandbox
 au sous-process.
 
-**⚠️ Risque technique à vérifier en planning (sosumi / doc Apple) — ne pas affirmer avant
-vérification :**
+**Mécanisme d'enforcement (tranché — spike 2026-06-21, cf. §14) :** profil **Seatbelt généré +
+exec-shim maison**. App Sandbox est écartée (exige un bundle signé + entitlement
+`com.apple.security.app-sandbox`, inapplicable à un binaire tiers potentiellement non signé — contredit
+D4). Seatbelt (`sandbox_init*` / `sandbox-exec`) est le **seul** mécanisme documenté pour confiner un
+process arbitraire ; il est **déprécié mais sans remplacement Apple** (issue
+`apple/containerization#737` sans réponse) et expédié en prod par Chrome/OpenAI/Anthropic. Comme on ne
+contrôle pas le code du plugin, on applique la sandbox **de l'extérieur** via un mini-lanceur **qu'on
+signe** (modèle Chromium) : il appelle `sandbox_init…()` sur lui-même puis `execv()` le plugin (sandbox
+héritée à travers `exec`), derrière le seam `PluginSandbox` (§9.1). Sous-décision P2 (micro-expérience
+de build) : `sandbox_init(profil)` public-déprécié — scratch dir incrusté dans le profil généré — vs
+SPI `sandbox_init_with_parameters`. **Résidu assumé** : dépendance à un mécanisme déprécié, isolée
+derrière le seam ; risque **borné par l'invariant §3** (la sandbox protège la confidentialité des
+bodies de requête contre un plugin malveillant, **pas** les secrets — jamais vus du plugin — ni le scan
+exfil d'Iris, qui tourne toujours après les plugins). Contrainte induite : **ne jamais App-Sandboxer le
+daemon** (l'empêcherait de spawn).
 
-- Mécanisme exact d'enforcement sur macOS 13+ : `sandbox-exec`/seatbelt (statut de dépréciation
-  flou) **vs** App Sandbox pour un helper non-bundlé **vs** profil seatbelt généré. Décision
-  d'implémentation à trancher après vérification doc.
-- Confirmation que le daemon (hardened runtime, notarisé) peut **spawn** un exécutable séparé sans
-  entitlement particulier (a priori oui : c'est du `posix_spawn`, pas du `dlopen` — donc **aucun**
-  besoin de `com.apple.security.cs.disable-library-validation`, la notarisation n'est pas affaiblie).
-  À confirmer.
+**Spawn sous hardened runtime (confirmé) :** la Library Validation concerne le chargement de code
+*dans* le process (`dyld`), **pas** le `posix_spawn` d'un exécutable séparé (nouvelle évaluation de
+signature, indépendante du parent). Le daemon notarisé peut donc spawn un plugin arbitraire, même non
+signé, **sans entitlement** — aucun `com.apple.security.cs.disable-library-validation` requis. Réserve
+mineure à documenter : un plugin **téléchargé** peut porter `com.apple.quarantine` (Gatekeeper au 1er
+lancement) ; un binaire construit localement passe.
 
 Point d'appui : comme on ne charge **aucun** code dans le binaire signé, on évite par construction le
 conflit Library Validation qui aurait condamné un modèle in-process.
@@ -227,8 +239,10 @@ Dans `config.json` via `ConfigStore`, nouvelle section `plugins`. Par plugin :
 
 ## 8. Protocole IPC (JSON-RPC 2.0 sur stdio)
 
-Daemon = client, plugin = serveur. Cadrage des messages : à trancher en planning
-(newline-delimited JSON **ou** framing `Content-Length`). Cycle :
+Daemon = client, plugin = serveur. Cadrage des messages : **NDJSON** (tranché — spike 2026-06-21,
+§14) — un objet JSON **compact** par ligne, terminé par `\n`, encodage UTF-8. Le risque de newline est
+neutralisé : tout payload binaire/multiligne est porté **base64/utf8 échappé** dans le JSON, jamais
+brut. Le framing est versionné par `apiVersion`, donc réversible. Cycle :
 
 - **`initialize`** (daemon → plugin) au démarrage : `apiVersion`, `configValues`, capabilities
   accordées. Réponse : capacités confirmées par le plugin.
@@ -357,11 +371,31 @@ Toute la vision est spécifiée ici ; **v1** = ce qui est construit/mergé en pr
 
 ## 14. Risques & questions ouvertes (à trancher en planning, après vérification doc)
 
-1. **Enforcement sandbox macOS 13+** (§6) — mécanisme exact, à vérifier via sosumi avant de coder.
-2. **Spawn sous hardened runtime** (§6) — confirmer qu'aucun entitlement n'est requis.
-3. **Cadrage IPC** (§8) — newline-delimited vs `Content-Length`.
+1. **Enforcement sandbox macOS 13+** (§6) — ✅ **tranché** (spike 2026-06-21) : Seatbelt généré +
+   exec-shim maison. Voir §6 et la note ci-dessous.
+2. **Spawn sous hardened runtime** (§6) — ✅ **confirmé** : aucun entitlement requis (`posix_spawn` ≠
+   `dlopen`).
+3. **Cadrage IPC** (§8) — ✅ **tranché** : NDJSON.
 4. **Cap de buffering** réponse (phase ultérieure) — réutiliser les 4 MiB requête ou un cap distinct.
-5. **Politique de restart/backoff** et seuil d'auto-désactivation après crashes répétés.
+5. **Politique de restart/backoff** et seuil d'auto-désactivation après crashes répétés. *(détail P2)*
+
+### Décisions du spike P2 (2026-06-21)
+
+Le spike a fermé les questions 1-3 ci-dessus via la doc Apple et l'état réel de l'écosystème.
+
+- **Sandbox = Seatbelt généré + exec-shim maison** (§6). App Sandbox inapplicable (exige bundle signé
+  + entitlement). Seatbelt = seul mécanisme pour un process arbitraire ; déprécié mais **sans
+  remplacement Apple** (issue `apple/containerization#737` restée sans réponse) et en prod chez
+  Chrome/OpenAI/Anthropic (modèle `sandbox_init_with_parameters` de Chromium). Résidu **assumé**, borné
+  par l'invariant §3, isolé derrière `PluginSandbox`. **Le daemon ne doit jamais être App-Sandboxé.**
+- **Spawn = aucun entitlement** (§6). Library Validation = chargement in-process (`dyld`) ;
+  `posix_spawn` d'un binaire séparé est hors de sa portée. Notarisation non affaiblie. Réserve :
+  quarantine sur un plugin téléchargé.
+- **IPC = NDJSON** (§8). Simplicité polyglotte (snippets triviaux dans tout langage), robustesse
+  suffisante (payloads échappés/base64), réversible via `apiVersion`.
+
+Sources : doc Apple « Disable Library Validation Entitlement » et « Configuring the hardened runtime » ;
+`apple/containerization#737` ; Chromium `sandbox/mac/seatbelt_sandbox_design.md`.
 
 ### Découvertes durant l'implémentation P1 (à durcir en P2)
 
