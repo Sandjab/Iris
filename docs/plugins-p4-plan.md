@@ -18,7 +18,7 @@
 - `Plugin.DisplayState` has exactly **three** cases: `.disabled`, `.enabled`, `.needsReapproval` (hash changed since pin). **There is no `.failed` runtime state** exposed via RPC — the handoff memo's "échec" wording is stale; live source wins. An auto-disabled crash-looping plugin (P2b) surfaces as `enabled=false` → `.disabled`.
 - `PluginCapabilities`: `network: [String]` (host:port egress), `filesystem: [String]` (e.g. `["scratch"]`).
 - The **declared** caps to show in the consent sheet are `plugin.manifest.capabilities` (what the plugin asks for). `approvedCapabilities` is what was granted at the last enable. `list` already returns the full `Plugin` incl. manifest, so **no `pluginInfo` RPC is needed** in the UI.
-- `enable` (PluginRegistry.swift:238): re-pins hash + re-approves `manifest.capabilities`, but **rejects a changed hash** with `pluginHashMismatch` (-32032). ⟹ a `.needsReapproval` plugin **cannot** be enabled; the only path back is reinstalling from source (which re-pins). v1 UI: show the state + disable the Enable button; resolution is the normal Install flow.
+- `enable` (PluginRegistry.swift:238): re-pins hash + re-approves `manifest.capabilities`, but **rejects a changed hash** with `pluginHashMismatch` (-32032). ⟹ a `.needsReapproval` plugin **cannot** be enabled. Note `install` (PluginRegistry.swift:144) **rejects an already-installed id** with `duplicateId` (-32031) — there is **no** in-place re-pin, so the only path back is **Remove then Install** (not a direct reinstall). v1 UI: show the state + disable the Enable button + guide "remove & reinstall to re-approve".
 - RPC mapping (from `PluginCommands.swift`, the reference impl):
   - `pluginList` → `[Plugin]`
   - `pluginInstall` + `PluginInstallParams(path:)` → `Plugin` (installed **disabled**, no approved caps)
@@ -34,7 +34,7 @@
 
 - **Capability consent at enable:** clicking *Enable* opens a **consent sheet** listing the plugin's declared `manifest.capabilities` (network endpoints, filesystem scopes), with an **Approve & Enable** button. If the plugin declares **no** capabilities, the sheet states "No capabilities requested — strict deny-all sandbox" and the same button enables it (uniform, explicit consent — faithful to deny-by-default §7.2).
 - **Reorder mechanism:** per-row **up/down buttons** calling `plugin.reorder(id, index)`. Deterministic, robust, smoke-testable; the chain is short. (Not drag-and-drop.)
-- **`needsReapproval`:** **display only** in v1 (badge "Content changed — reinstall to re-approve", Enable disabled). No in-UI re-pin flow.
+- **`needsReapproval`:** **display only** in v1 (badge "CHANGED — remove & reinstall to re-approve", Enable disabled). No in-UI re-pin flow.
 - **After install:** plugin stays **disabled** (CLI parity); the user then explicitly enables (and consents to caps).
 
 ---
@@ -53,7 +53,7 @@
 **Out of scope (deferred):**
 - Schema-driven config forms (D6, later phase).
 - `onResponse`/`onComplete` UI.
-- In-UI re-approval of a changed plugin (reinstall covers it).
+- In-UI re-approval of a changed plugin (Remove then Install covers it).
 - Any backend change — if a backend gap appears, STOP and surface it (no silent scope widening).
 
 ---
@@ -113,7 +113,7 @@ The IrisApp target is a `PBXFileSystemSynchronizedRootGroup` — adding `Plugins
       `GuidedEmptyState` (symbol `puzzlepiece.extension`, "No plugins yet") when empty; else a `List` of `PluginRow`
       sorted by `order`; `.task { await refresh() }`.
 - [ ] `PluginRow`: name + version; **state badge** (enabled=green, disabled=secondary, needsReapproval=red
-      "Content changed — reinstall to re-approve"); hash chip (`ok` / `CHANGED`); declared capability chips
+      "CHANGED — remove & reinstall to re-approve"); hash chip (`ok` / `CHANGED`); declared capability chips
       (network/filesystem, "none" if empty); buttons — **↑/↓** (reorder; disabled at ends), **Enable** (opens consent
       sheet; hidden when enabled; disabled when `.needsReapproval`), **Disable** (when enabled), **Remove** (destructive
       → `confirmationDialog`).

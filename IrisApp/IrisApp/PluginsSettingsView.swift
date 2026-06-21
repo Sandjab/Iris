@@ -219,7 +219,7 @@ private struct PluginRow: View {
                     .disabled(plugin.displayState == .needsReapproval)
                     .help(
                         plugin.displayState == .needsReapproval
-                            ? "Content changed — reinstall to re-approve"
+                            ? "Content changed — remove and reinstall to re-approve"
                             : "Enable plugin"
                     )
                 }
@@ -246,7 +246,7 @@ private struct PluginRow: View {
                     .font(.caption2.bold())
                     .foregroundStyle(.secondary)
             case .needsReapproval:
-                Text("CHANGED — reinstall to re-approve")
+                Text("CHANGED — remove & reinstall to re-approve")
                     .font(.caption2.bold())
                     .foregroundStyle(.red)
             }
@@ -256,7 +256,7 @@ private struct PluginRow: View {
     private var hashChip: some View {
         // Show the TOFU provenance indicator only in the healthy state (design §10.2).
         // When the content changed, `stateBadge` already shows the red
-        // "CHANGED — reinstall to re-approve"; a second red label here is redundant.
+        // "CHANGED — remove & reinstall to re-approve"; a second red label here is redundant.
         Group {
             if plugin.hashMatches {
                 Text("hash ok")
