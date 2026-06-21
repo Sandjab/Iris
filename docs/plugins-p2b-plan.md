@@ -1145,7 +1145,6 @@ public actor PluginHostManager {
                 .appendingPathComponent(id)
                 .appendingPathComponent(plugin.manifest.executable)
                 .path,
-            arguments: [],
             capabilities: plugin.approvedCapabilities ?? plugin.manifest.capabilities,
             configValues: [:],
             scratchDir: scratch
@@ -1262,11 +1261,10 @@ final class PluginHostManagerTests: XCTestCase {
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
 
-        // Copy the built fixture into the plugin source dir as "bin", and a
-        // wrapper that bakes the mode into argv is unnecessary: we encode the
-        // mode in a sidecar file the fixture ignores — instead we set the mode
-        // through the manifest by shipping a tiny launcher. Simplest robust path:
-        // copy the fixture and select mode via a one-line shell launcher.
+        // PluginSandbox passes no argv to the plugin, so the fixture mode is
+        // selected by an installed `run.sh` launcher that execs the copied
+        // fixture binary with the chosen mode. Both files live in the plugin dir
+        // (read+exec are allowed by the deny-default profile).
         let bin = source.appendingPathComponent("bin")
         try FileManager.default.copyItem(at: ExecutableLocator.testPlugin, to: bin)
         // Launcher script that execs the fixture with the chosen mode.
@@ -1286,7 +1284,7 @@ final class PluginHostManagerTests: XCTestCase {
             to: source.appendingPathComponent("plugin.json"), atomically: true, encoding: .utf8)
 
         let configPath = root.appendingPathComponent("config.json")
-        let store = try await ConfigStore(path: configPath)
+        let store = try ConfigStore(path: configPath, logger: Logger(label: "test"))
         let registry = PluginRegistry(
             pluginsDirectory: pluginsDir, configStore: store, logger: Logger(label: "test"))
         _ = try await registry.install(from: source)
