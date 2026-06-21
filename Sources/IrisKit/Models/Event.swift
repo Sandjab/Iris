@@ -13,6 +13,10 @@ public struct Event: Codable, Sendable, Identifiable, Equatable {
     public let alert: Alert?
     /// Non-nil only for `kind == .systemAlert`. Mutually exclusive with `alert`.
     public let systemAlert: SystemAlert?
+    /// Non-nil when `kind` is `.pluginBlocked` or `.pluginResponded`.
+    /// Identifies the installed plugin that handled the request.
+    /// Never carries a secret value — only the plugin bundle identifier.
+    public let pluginId: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -26,6 +30,7 @@ public struct Event: Codable, Sendable, Identifiable, Equatable {
         case substitutedSecrets = "substituted_secrets"
         case alert
         case systemAlert = "system_alert"
+        case pluginId = "plugin_id"
     }
 
     public enum Kind: String, Codable, Sendable, CaseIterable {
@@ -37,6 +42,12 @@ public struct Event: Codable, Sendable, Identifiable, Equatable {
         /// A daemon-level, non-exfil alert (e.g. degraded boot after config
         /// corruption). Carries a `SystemAlert` payload, never an `Alert`.
         case systemAlert
+        /// Terminal plugin outcome: a plugin blocked the request; it was NOT
+        /// forwarded upstream. `pluginId` identifies the plugin.
+        case pluginBlocked
+        /// Terminal plugin outcome: a plugin returned a synthetic response; the
+        /// request was NOT forwarded upstream. `pluginId` identifies the plugin.
+        case pluginResponded
     }
 
     public init(
@@ -50,7 +61,8 @@ public struct Event: Codable, Sendable, Identifiable, Equatable {
         durationMs: UInt32? = nil,
         substitutedSecrets: [String] = [],
         alert: Alert? = nil,
-        systemAlert: SystemAlert? = nil
+        systemAlert: SystemAlert? = nil,
+        pluginId: String? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -63,5 +75,6 @@ public struct Event: Codable, Sendable, Identifiable, Equatable {
         self.substitutedSecrets = substitutedSecrets
         self.alert = alert
         self.systemAlert = systemAlert
+        self.pluginId = pluginId
     }
 }
