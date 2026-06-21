@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "IrisAppCore", targets: ["IrisAppCore"]),
         .executable(name: "irisd", targets: ["irisd"]),
         .executable(name: "iris", targets: ["iris"]),
+        .executable(name: "iris-sandbox-exec", targets: ["iris-sandbox-exec"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
@@ -60,6 +61,12 @@ let package = Package(
             ],
             swiftSettings: strictConcurrency
         ),
+        .executableTarget(
+            name: "iris-sandbox-exec",
+            linkerSettings: [
+                .linkedLibrary("sandbox")
+            ]
+        ),
         .testTarget(
             name: "IrisKitTests",
             dependencies: [
@@ -75,6 +82,7 @@ let package = Package(
                 "IrisKit",
                 "iris",
                 "irisd",
+                "iris-sandbox-exec",
                 .product(name: "NIO", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
