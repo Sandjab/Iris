@@ -362,3 +362,30 @@ Toute la vision est spécifiée ici ; **v1** = ce qui est construit/mergé en pr
 3. **Cadrage IPC** (§8) — newline-delimited vs `Content-Length`.
 4. **Cap de buffering** réponse (phase ultérieure) — réutiliser les 4 MiB requête ou un cap distinct.
 5. **Politique de restart/backoff** et seuil d'auto-désactivation après crashes répétés.
+
+### Découvertes durant l'implémentation P1 (à durcir en P2)
+
+> P1 (socle de gestion) est livré et mergé-candidat ; ces points sont sortis de la revue
+> holistique et sont **différés à P2** par conception (aucun n'est un bloqueur P1, l'impact étant
+> borné par le socket admin `0600` owner-only et l'absence d'exécution de plugin en P1).
+
+6. **Install non transactionnel FS↔config sous concurrence.** `PluginRegistry.install` copie le
+   dossier **avant** le commit atomique de l'état ; deux `install` concurrents du **même id** peuvent
+   laisser une entrée d'état committée pointant vers un dossier supprimé par le rollback de l'autre.
+   L'invariant du tableau de config reste intact ; c'est la cohérence FS↔config qui manque. Fix P2 :
+   copier vers un chemin de staging puis `rename`-into-place **après** le commit (le rollback ne
+   touche alors jamais un dossier committé), ou sérialiser l'install par un verrou par-id.
+7. **Validation d'id centralisée.** P1 garde `enable` contre un id path-unsafe (le seul qui dérivait
+   un chemin FS avant le check d'appartenance). En P2/P3, dès que le runtime dérive des dossiers de
+   process/travail depuis l'id, **centraliser** la validation `isSafePathComponent` dans
+   `directory(for:)` plutôt que par-méthode.
+8. **Copie verbatim d'un arbre fourni par le client.** `install` recopie le dossier source tel quel :
+   (a) les **symlinks** sont copiés et `PluginHasher` ignore les non-réguliers → un symlink est
+   non-épinglé (sa cible peut changer après install sans changer le hash) ; (b) **aucun cap** de
+   taille / nombre de fichiers. À durcir avant que P2 n'exécute quoi que ce soit depuis ce dossier.
+9. **Coût du re-hash sur `list`/`info`.** `view(for:)` re-hash tout le dossier du plugin à chaque
+   appel. Acceptable à l'échelle P1 ; ajouter un cache invalidé par mtime si le nombre/la taille des
+   plugins croît.
+10. **Validation des `capabilities`.** Les chaînes `network` (`host:port`) / `filesystem` sont
+    stockées mais non validées en P1 (l'enforcement est P2/sandbox) — valider leur forme au moment
+    où le sandbox les consomme.
