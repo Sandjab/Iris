@@ -1,4 +1,5 @@
 import Foundation
+import NIOConcurrencyHelpers
 
 /// Declarative description of a plugin, parsed from its `plugin.json`.
 /// P1 models the full schema but only `onRequest` is dispatched (P3); response
@@ -178,6 +179,69 @@ public struct HookMatch: Codable, Sendable, Hashable {
         self.methods = try c.decodeIfPresent([String].self, forKey: .methods) ?? []
         self.pathRegex = try c.decodeIfPresent(String.self, forKey: .pathRegex)
         self.contentType = try c.decodeIfPresent(String.self, forKey: .contentType)
+    }
+}
+
+extension HookMatch {
+    /// True iff every declared condition matches. Empty/nil condition = wildcard.
+    /// Host is exact, case-insensitive, port-stripped (SPECS §8.2; no glob in MVP).
+    /// An unparseable `pathRegex` matches nothing (fail-closed gating).
+    ///
+    /// Two semantics a plugin author should know:
+    /// - `contentType` is matched as a **case-insensitive substring**, so a hook
+    ///   `contentType: "application/json"` matches a request
+    ///   `content-type: application/json; charset=utf-8`.
+    /// - Host normalization strips a trailing `:port` and lowercases, mirroring
+    ///   `ExfilRuleEngine`'s host normalization. IPv6-literal hosts
+    ///   (`[::1]:443`) are NOT specially handled — intentional, for parity with
+    ///   `ExfilRuleEngine` (IRIS brokers to DNS API hosts). Gating is fail-closed,
+    ///   so an unmatched host merely skips the hook; it is never a security bypass.
+    public func matches(
+        host: String,
+        method: String,
+        path: String,
+        requestContentType: String?
+    ) -> Bool {
+        if !hosts.isEmpty {
+            let normalized = Self.normalizeHost(host)
+            guard hosts.contains(where: { Self.normalizeHost($0) == normalized }) else { return false }
+        }
+        if !methods.isEmpty {
+            let m = method.lowercased()
+            guard methods.contains(where: { $0.lowercased() == m }) else { return false }
+        }
+        if let pattern = pathRegex, !pattern.isEmpty {
+            guard let regex = Self.compiledRegex(pattern) else { return false }
+            let range = NSRange(path.startIndex..<path.endIndex, in: path)
+            guard regex.firstMatch(in: path, range: range) != nil else { return false }
+        }
+        if let want = contentType, !want.isEmpty {
+            guard let have = requestContentType?.lowercased(), have.contains(want.lowercased()) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func normalizeHost(_ host: String) -> String {
+        (host.split(separator: ":", maxSplits: 1).first.map(String.init) ?? host).lowercased()
+    }
+
+    /// Process-wide cache of compiled path regexes, keyed by pattern. `matches`
+    /// runs on the proxy hot path (per request, per active hook); recompiling the
+    /// same `NSRegularExpression` every time would add latency. Patterns are few
+    /// (one per plugin hook) and stable, so a small lock-protected cache
+    /// effectively precompiles them. `NSRegularExpression` is thread-safe for
+    /// matching. An unparseable pattern returns nil (not cached) → fail-closed.
+    private static let regexCache = NIOLockedValueBox<[String: NSRegularExpression]>([:])
+
+    private static func compiledRegex(_ pattern: String) -> NSRegularExpression? {
+        regexCache.withLockedValue { cache in
+            if let cached = cache[pattern] { return cached }
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+            cache[pattern] = regex
+            return regex
+        }
     }
 }
 

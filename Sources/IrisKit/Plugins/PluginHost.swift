@@ -30,6 +30,7 @@ public enum PluginHostError: Error, Equatable {
     case notRunning
     case timeout(String)
     case initializeRejected
+    case malformedResponse
 }
 
 /// Owns a single warm plugin process and its NDJSON IPC channel. Spawns via
@@ -74,7 +75,7 @@ public actor PluginHost {
         self.onUnexpectedExit = onUnexpectedExit
     }
 
-    public var id: String { spec.id }
+    public nonisolated var id: String { spec.id }
 
     /// Spawns the sandboxed process and performs the `initialize` handshake.
     /// Throws (and tears down) if the process fails to start or does not confirm
@@ -99,6 +100,17 @@ public actor PluginHost {
         )
         self.process = process
         self.stdinHandle = stdin.fileHandleForWriting
+
+        // A plugin can die while a write to its stdin is in flight (or while a
+        // stale chain entry still points at it during restart backoff). Without
+        // this, that write raises SIGPIPE and kills the whole daemon — a crashed
+        // plugin must only ever degrade per onFailure (design §4.5), never take
+        // irisd down. F_SETNOSIGPIPE makes the write fail with EPIPE instead,
+        // which `send`'s do/catch turns into a throwing error. (swift-nio does the
+        // same per-fd on Darwin.)
+        if fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == -1 {
+            logger.debug("plugin stdin F_SETNOSIGPIPE failed", metadata: ["id": "\(spec.id)"])
+        }
 
         let reader = PluginLineReader(
             fileDescriptor: stdout.fileHandleForReading.fileDescriptor,
@@ -149,7 +161,8 @@ public actor PluginHost {
                     configValues: spec.configValues,
                     capabilities: spec.capabilities,
                     scratchDir: spec.scratchDir.path
-                )
+                ),
+                timeout: timeouts.initialize
             )
             guard let result = response.result else {
                 throw PluginHostError.initializeRejected
@@ -182,15 +195,30 @@ public actor PluginHost {
         await teardown()  // escalates SIGTERM→SIGKILL if still running
     }
 
+    /// Sends one `on_request` and returns the typed result. Throws
+    /// `PluginHostError.timeout` on deadline, `PluginHostError.notRunning` if the
+    /// process is gone, or the plugin's JSON-RPC error if it reported one.
+    public func onRequest(_ params: PluginRPC.OnRequestParams, timeout: TimeInterval) async throws
+        -> PluginRPC.OnRequestResult
+    {
+        guard started else { throw PluginHostError.notRunning }
+        let response = try await send(method: PluginRPC.Method.onRequest, params: params, timeout: timeout)
+        if let error = response.error { throw error }
+        guard let result = response.result else { throw PluginHostError.malformedResponse }
+        return try result.decode(as: PluginRPC.OnRequestResult.self)
+    }
+
     // MARK: - IPC
 
-    private func send<P: Encodable>(method: String, params: P) async throws -> JSONRPCResponse {
+    private func send<P: Encodable>(method: String, params: P, timeout: TimeInterval) async throws
+        -> JSONRPCResponse
+    {
         let id = nextID
         nextID += 1
         let line = try PluginRPC.encodeRequest(method: method, params: params, id: id)
 
         let timeoutTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(timeouts.initialize * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
             await self?.failPending(id: id, error: PluginHostError.timeout(method))
         }
         defer { timeoutTask.cancel() }
@@ -249,6 +277,11 @@ public actor PluginHost {
         // once via its startHost catch) — reporting here too would double-count
         // the crash and spawn concurrent restart chains.
         guard started, !stopping else { return }
+        // Subsequent onRequest must fail fast with .notRunning BEFORE attempting a
+        // doomed write to the dead process's stdin (the chain snapshot can still
+        // point here during restart backoff). Reset AFTER the guard so the crash
+        // is still reported exactly once via onUnexpectedExit.
+        started = false
         await onUnexpectedExit(spec.id)
     }
 
@@ -286,3 +319,5 @@ public actor PluginHost {
         try? FileManager.default.removeItem(at: spec.scratchDir)
     }
 }
+
+extension PluginHost: PluginInvoking {}

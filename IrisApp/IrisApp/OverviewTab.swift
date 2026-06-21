@@ -129,6 +129,7 @@ struct EventRow: View {
         case .exfilBlocked: return .red
         case .error: return .orange
         case .systemAlert: return .red
+        case .pluginBlocked, .pluginResponded: return .purple
         }
     }
 

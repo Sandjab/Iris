@@ -61,6 +61,7 @@ public final class ProxyServer: @unchecked Sendable {
     let exfilRuleEngine: ExfilRuleEngine
     let leafCertCache: LeafCertCache
     let upstreamClient: UpstreamClient
+    public let hookDispatcher: HookDispatcher
 
     private let group: EventLoopGroup
     private let ownsGroup: Bool
@@ -74,6 +75,7 @@ public final class ProxyServer: @unchecked Sendable {
         secretStore: any SecretStore,
         caManager: CAManager,
         group: EventLoopGroup? = nil,
+        hookDispatcher: HookDispatcher? = nil,
         logger: Logger = Logger(label: "io.iris.proxy")
     ) {
         self.configuration = configuration
@@ -95,6 +97,9 @@ public final class ProxyServer: @unchecked Sendable {
             logger: logger
         )
         self.leafCertCache = LeafCertCache(caManager: caManager)
+        // P3: an empty default dispatcher (no chain) is a no-op — every existing
+        // proxy call site keeps its exact behavior until a chain is pushed.
+        self.hookDispatcher = hookDispatcher ?? HookDispatcher(logger: logger)
         if let group = group {
             self.group = group
             self.ownsGroup = false

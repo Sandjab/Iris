@@ -1,7 +1,7 @@
 import Foundation
 
-// iris-test-plugin — minimal NDJSON plugin server used ONLY by IRIS P2b
-// integration tests. Not shipped (no product entry in Package.swift).
+// iris-test-plugin — minimal NDJSON plugin server used ONLY by IRIS integration
+// tests. Not shipped (no product entry in Package.swift).
 //
 // Reads one JSON object per line from stdin, replies on stdout. Mode comes from
 // argv[1] (default "ok"):
@@ -10,6 +10,12 @@ import Foundation
 //   crash            exits non-zero immediately (drives crash-loop tests).
 //   ignore-shutdown  replies ready but never exits on shutdown (drives the
 //                    SIGTERM/SIGKILL path).
+//
+// on_request dispatch is DATA-driven (no argv). Include the request header
+// x-test-action with one of: pass | modify | block | respond | hang | exit.
+// "hang" never replies, which drives the host-side per-call timeout test.
+// "exit" dies WITHOUT replying, simulating a plugin crash under live traffic
+// (drives the SIGPIPE/fail-fast regression test).
 
 let mode = CommandLine.arguments.dropFirst().first ?? "ok"
 
@@ -39,6 +45,36 @@ while let line = readLine(strippingNewline: true) {
             try? Data("ok".utf8).write(to: URL(fileURLWithPath: marker))
         }
         emitLine(["jsonrpc": "2.0", "id": id, "result": ["ready": true]])
+    case "on_request":
+        let params = object["params"] as? [String: Any]
+        let headers = (params?["headers"] as? [[String]]) ?? []
+        let action =
+            headers.first(where: { $0.count == 2 && $0[0].lowercased() == "x-test-action" })?[1]
+            ?? "pass"
+        switch action {
+        case "modify":
+            emitLine([
+                "jsonrpc": "2.0", "id": id,
+                "result": ["action": "modify", "headers": [["x-iris-plugin", "test"]]],
+            ])
+        case "block":
+            emitLine(["jsonrpc": "2.0", "id": id, "result": ["action": "block", "reason": "test-block"]])
+        case "respond":
+            emitLine([
+                "jsonrpc": "2.0", "id": id,
+                "result": [
+                    "action": "respond", "status": 418,
+                    "headers": [["x-from-plugin", "1"]],
+                    "body": ["encoding": "utf8", "data": "teapot"],
+                ],
+            ])
+        case "hang":
+            continue  // never reply → drives the host-side timeout
+        case "exit":
+            exit(0)  // die WITHOUT replying → simulates a plugin crash under traffic
+        default:
+            emitLine(["jsonrpc": "2.0", "id": id, "result": ["action": "pass"]])
+        }
     case "shutdown":
         if mode == "ignore-shutdown" { continue }
         exit(0)

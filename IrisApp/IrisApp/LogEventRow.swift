@@ -44,6 +44,7 @@ struct LogEventRow: View {
         case .passThrough, .noMatch: return .gray.opacity(0.4)
         case .exfilBlocked, .systemAlert: return .red
         case .error: return .orange
+        case .pluginBlocked, .pluginResponded: return .purple
         }
     }
 

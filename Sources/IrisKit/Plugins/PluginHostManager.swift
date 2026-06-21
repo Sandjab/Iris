@@ -30,6 +30,7 @@ public actor PluginHostManager {
     private let sandbox: PluginSandbox
     private let config: Configuration
     private let emitSystemAlert: @Sendable (SystemAlert) async -> Void
+    private let onChainChanged: @Sendable ([PluginChainEntry]) -> Void
     private let logger: Logger
 
     private var hosts: [String: PluginHost] = [:]
@@ -46,6 +47,7 @@ public actor PluginHostManager {
         sandbox: PluginSandbox,
         config: Configuration = Configuration(),
         emitSystemAlert: @escaping @Sendable (SystemAlert) async -> Void,
+        onChainChanged: @escaping @Sendable ([PluginChainEntry]) -> Void = { _ in },
         logger: Logger
     ) {
         self.registry = registry
@@ -54,6 +56,7 @@ public actor PluginHostManager {
         self.sandbox = sandbox
         self.config = config
         self.emitSystemAlert = emitSystemAlert
+        self.onChainChanged = onChainChanged
         self.logger = logger
     }
 
@@ -104,6 +107,7 @@ public actor PluginHostManager {
         where hosts[plugin.manifest.id] == nil && !restarting.contains(plugin.manifest.id) {
             await startHost(for: plugin)
         }
+        republishChain(desired: desired)
     }
 
     /// Gracefully stops all hosts. Called at daemon shutdown.
@@ -113,6 +117,7 @@ public actor PluginHostManager {
             await host.shutdown()
         }
         hosts.removeAll()
+        onChainChanged([])
     }
 
     // MARK: - Internals
@@ -197,6 +202,10 @@ public actor PluginHostManager {
                         "Plugin '\(id)' was auto-disabled after \(times.count) crashes — re-enable it from Settings once fixed."
                 )
             )
+            // No `desired` in hand here; fetch once (after the disable persists, so
+            // the disabled plugin is excluded) before pushing the updated chain.
+            let desired = await desiredPlugins()
+            republishChain(desired: desired)
             return
         }
 
@@ -211,6 +220,23 @@ public actor PluginHostManager {
         let desired = await desiredPlugins()
         guard let plugin = desired.first(where: { $0.manifest.id == id }) else { return }
         await startHost(for: plugin)
+        republishChain(desired: desired)
+    }
+
+    /// Ordered chain of running hosts × their onRequest hooks (design §4.4: chain
+    /// order persisted in config). Rebuilt and pushed whenever the running set
+    /// changes. `desired` is passed in by the caller (which already fetched it) to
+    /// avoid a redundant registry re-hash; the chain is eventually-consistent if
+    /// hosts mutate concurrently — the next republish reconverges.
+    private func republishChain(desired: [Plugin]) {
+        var entries: [PluginChainEntry] = []
+        for plugin in desired.sorted(by: { $0.order < $1.order }) {
+            guard let host = hosts[plugin.manifest.id] else { continue }
+            for hook in plugin.manifest.hooks where hook.event == .onRequest {
+                entries.append(PluginChainEntry(pluginId: plugin.manifest.id, invoker: host, hook: hook))
+            }
+        }
+        onChainChanged(entries)
     }
 
     /// Creates `scratchRoot/<id>` and returns its canonical (realpath) URL.
