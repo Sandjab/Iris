@@ -94,7 +94,11 @@ final class PluginHostTests: XCTestCase {
             )
             XCTFail("expected timeout")
         } catch let error as PluginHostError {
-            guard case .timeout = error else { return XCTFail("wrong error: \(error)") }
+            if case .timeout = error {
+                // Only the per-call timeout is expected here.
+            } else {
+                XCTFail("wrong error: \(error)")
+            }
         }
         await host.shutdown()
     }

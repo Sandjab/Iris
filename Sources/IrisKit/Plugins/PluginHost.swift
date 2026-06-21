@@ -30,6 +30,7 @@ public enum PluginHostError: Error, Equatable {
     case notRunning
     case timeout(String)
     case initializeRejected
+    case malformedResponse
 }
 
 /// Owns a single warm plugin process and its NDJSON IPC channel. Spawns via
@@ -192,7 +193,7 @@ public actor PluginHost {
         guard started else { throw PluginHostError.notRunning }
         let response = try await send(method: PluginRPC.Method.onRequest, params: params, timeout: timeout)
         if let error = response.error { throw error }
-        guard let result = response.result else { throw PluginHostError.initializeRejected }
+        guard let result = response.result else { throw PluginHostError.malformedResponse }
         return try result.decode(as: PluginRPC.OnRequestResult.self)
     }
 
