@@ -37,6 +37,68 @@ final class PluginHostTests: XCTestCase {
         )
     }
 
+    func testOnRequestPassRoundTrip() async throws {
+        let scratch = try scratchDir()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let host = makeHost(scratch: scratch)
+        try await host.start()
+        let result = try await host.onRequest(
+            PluginRPC.OnRequestParams(
+                method: "POST",
+                uri: "/v1/x",
+                host: "h",
+                headers: [["x-test-action", "pass"]],
+                body: nil
+            ),
+            timeout: 2
+        )
+        XCTAssertEqual(result.action, .pass)
+        await host.shutdown()
+    }
+
+    func testOnRequestModifyAddsHeader() async throws {
+        let scratch = try scratchDir()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let host = makeHost(scratch: scratch)
+        try await host.start()
+        let result = try await host.onRequest(
+            PluginRPC.OnRequestParams(
+                method: "POST",
+                uri: "/v1/x",
+                host: "h",
+                headers: [["x-test-action", "modify"]],
+                body: nil
+            ),
+            timeout: 2
+        )
+        XCTAssertEqual(result.action, .modify)
+        XCTAssertTrue((result.headers ?? []).contains(["x-iris-plugin", "test"]))
+        await host.shutdown()
+    }
+
+    func testOnRequestTimeoutThrows() async throws {
+        let scratch = try scratchDir()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let host = makeHost(scratch: scratch)
+        try await host.start()
+        do {
+            _ = try await host.onRequest(
+                PluginRPC.OnRequestParams(
+                    method: "POST",
+                    uri: "/v1/x",
+                    host: "h",
+                    headers: [["x-test-action", "hang"]],
+                    body: nil
+                ),
+                timeout: 0.3
+            )
+            XCTFail("expected timeout")
+        } catch let error as PluginHostError {
+            guard case .timeout = error else { return XCTFail("wrong error: \(error)") }
+        }
+        await host.shutdown()
+    }
+
     func testInitializeHandshakeAndScratchMarker() async throws {
         let scratch = try scratchDir()
         defer { try? FileManager.default.removeItem(at: scratch) }

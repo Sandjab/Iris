@@ -74,7 +74,7 @@ public actor PluginHost {
         self.onUnexpectedExit = onUnexpectedExit
     }
 
-    public var id: String { spec.id }
+    public nonisolated var id: String { spec.id }
 
     /// Spawns the sandboxed process and performs the `initialize` handshake.
     /// Throws (and tears down) if the process fails to start or does not confirm
@@ -149,7 +149,8 @@ public actor PluginHost {
                     configValues: spec.configValues,
                     capabilities: spec.capabilities,
                     scratchDir: spec.scratchDir.path
-                )
+                ),
+                timeout: timeouts.initialize
             )
             guard let result = response.result else {
                 throw PluginHostError.initializeRejected
@@ -182,15 +183,30 @@ public actor PluginHost {
         await teardown()  // escalates SIGTERM→SIGKILL if still running
     }
 
+    /// Sends one `on_request` and returns the typed result. Throws
+    /// `PluginHostError.timeout` on deadline, `PluginHostError.notRunning` if the
+    /// process is gone, or the plugin's JSON-RPC error if it reported one.
+    public func onRequest(_ params: PluginRPC.OnRequestParams, timeout: TimeInterval) async throws
+        -> PluginRPC.OnRequestResult
+    {
+        guard started else { throw PluginHostError.notRunning }
+        let response = try await send(method: PluginRPC.Method.onRequest, params: params, timeout: timeout)
+        if let error = response.error { throw error }
+        guard let result = response.result else { throw PluginHostError.initializeRejected }
+        return try result.decode(as: PluginRPC.OnRequestResult.self)
+    }
+
     // MARK: - IPC
 
-    private func send<P: Encodable>(method: String, params: P) async throws -> JSONRPCResponse {
+    private func send<P: Encodable>(method: String, params: P, timeout: TimeInterval) async throws
+        -> JSONRPCResponse
+    {
         let id = nextID
         nextID += 1
         let line = try PluginRPC.encodeRequest(method: method, params: params, id: id)
 
         let timeoutTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(timeouts.initialize * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
             await self?.failPending(id: id, error: PluginHostError.timeout(method))
         }
         defer { timeoutTask.cancel() }
@@ -286,3 +302,5 @@ public actor PluginHost {
         try? FileManager.default.removeItem(at: spec.scratchDir)
     }
 }
+
+extension PluginHost: PluginInvoking {}
