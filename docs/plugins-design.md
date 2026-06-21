@@ -397,6 +397,34 @@ Le spike a fermé les questions 1-3 ci-dessus via la doc Apple et l'état réel 
 Sources : doc Apple « Disable Library Validation Entitlement » et « Configuring the hardened runtime » ;
 `apple/containerization#737` ; Chromium `sandbox/mac/seatbelt_sandbox_design.md`.
 
+### Découvertes durant l'implémentation P2a (handoff P2b)
+
+> P2a (socle sandbox) implémenté en subagent-driven sur `feat/plugins-p2a-sandbox` (exec-shim C
+> `iris-sandbox-exec` + `PluginSandboxProfile` + `PluginSandbox.launch` + smoke d'enforcement). Faits
+> empiriques validés sur macOS (Apple Silicon) ; CI macos-15 = juge final.
+
+1. **L'API dépréciée linke et enforce.** `sandbox_init_with_parameters(profile, 0, NULL, &err)` (SPI
+   déclarée en `extern`, `+ .linkedLibrary("sandbox")`) compile, linke et applique le profil ; la
+   sandbox est bien héritée à travers `execv`. Le modèle exec-shim fonctionne.
+2. **Le profil deny-default minimal suffit** pour qu'un binaire dynamique démarre (dyld) : `(deny
+   default)` + `(allow process-fork)` `(allow process-exec*)` `(allow sysctl-read)` `(allow
+   mach-lookup)` `(allow file-read*)`. **Aucune** règle supplémentaire n'a été nécessaire. `(deny
+   file-write*)` (sauf scratch) et `(deny network*)` sont prouvés enforced (smoke `/bin/sh`).
+3. **⚠️ Chemin scratch canonique (piège P2b).** Seatbelt canonicalise les chemins d'écriture via
+   `realpath(3)` avant de matcher `(subpath ...)`. Le générateur incruste le chemin **littéral** (il est
+   pur, sans I/O). Donc **le créateur du scratch dir par-plugin en P2b DOIT passer un chemin
+   `realpath`-résolu** à `generate(scratchDir:)`, sinon le plugin ne peut pas écrire dans son propre
+   scratch (échec **fail-closed**, silencieux côté Swift). Notamment `/var/folders/...` →
+   `/private/var/folders/...` (firmlink APFS) ; `URL.resolvingSymlinksInPath()` ne résout PAS ce
+   firmlink → utiliser `realpath(3)`. Documenté sur l'API `generate` + dans `PluginSandboxEnforcementTests`.
+4. **Réseau-allow SBPL non vérifié.** Seul le **deny-by-default** réseau est prouvé. La forme
+   `(allow network-outbound (remote ip "host:port"))` reste **provisoire** (Seatbelt ne résout pas le
+   DNS — seules des IP littérales sont valides en `remote ip`) : à fixer/valider quand un plugin à
+   capability réseau sera réellement exercé (P2b/P3). Commentaire `PROVISIONAL` dans le générateur.
+5. **Localisation du shim en prod (P2b).** En test, `ExecutableLocator.sandboxExec` le trouve dans les
+   produits de build. En prod, `PluginSandbox` reçoit un `shimPath` à résoudre (à câbler P2b :
+   probablement à côté de l'exécutable du daemon ; le shim doit être signé dans le `.pkg`).
+
 ### Découvertes durant l'implémentation P1 (à durcir en P2)
 
 > P1 (socle de gestion) est livré et mergé-candidat ; ces points sont sortis de la revue
