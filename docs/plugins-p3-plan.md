@@ -29,6 +29,7 @@
 - Plugins UI section (P4) and the shipped example plugin (P5).
 - **Glob host matching** in `HookMatch.hosts`: the existing host logic (`allowed_hosts`, `ExfilRuleEngine`) is exact-only (SPECS §8.2 defers wildcards to v1.1). P3 matches hosts **exactly** (case-insensitive, port-stripped), consistent with the rest of the codebase. Glob is a documented follow-up, not a P3 gap.
 - **Per-invocation "invoked/modified" events:** P3 emits terminal plugin events only (`.pluginBlocked`, `.pluginResponded`). A plugin that modifies a request and proceeds keeps the request's normal terminal event (`.substituted`/`.passThrough`/`.noMatch`); chain errors under `onFailure: skip` are logged value-free, not turned into events. This avoids one-event-per-plugin-per-request spam from an alive-but-flaky plugin. (Deviation from the handoff wishlist "invoqué/modifié"; rationale: noise + scope. Revisit if the UI needs a per-plugin timeline.)
+- **`modify` overlays headers by name** (`replaceOrAdd`): a plugin's returned headers are merged onto the request, so unspecified headers — notably the credential placeholder Iris must still substitute — survive. Header removal is not supported in v1.
 
 ---
 
@@ -642,9 +643,11 @@ public final class HookDispatcher: Sendable {
         var newHead = head
         if let uri = result.uri { newHead.uri = uri }
         if let pairs = result.headers {
-            var h = HTTPHeaders()
-            for p in pairs where p.count == 2 { h.add(name: p[0], value: p[1]) }
-            newHead.headers = h
+            // Overlay by name: unspecified headers (e.g. the credential placeholder
+            // Iris must still substitute) survive. No header removal in v1.
+            for p in pairs where p.count == 2 {
+                newHead.headers.replaceOrAdd(name: p[0], value: p[1])
+            }
         }
         var newBody = body
         if let b = result.body, let decoded = decodeBody(b, cap: maxRespondBodyBytes) {
@@ -716,6 +719,7 @@ final class HookDispatcherTests: XCTestCase {
         let out = await d.onRequest(head: head(), body: nil, host: "h")
         guard case .proceed(let rh, _) = out else { return XCTFail() }
         XCTAssertEqual(rh.headers.first(name: "x-iris-plugin"), "t")
+        XCTAssertEqual(rh.headers.first(name: "content-type"), "application/json", "overlay preserves unspecified headers")
     }
 
     func testBlockShortCircuits() async {

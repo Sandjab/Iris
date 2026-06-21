@@ -63,6 +63,11 @@ public final class HookDispatcher: Sendable {
 
     /// Runs the onRequest chain. `host`/`path` are gating inputs; `head`/`body`
     /// are the request as decrypted (placeholders present, pre-Iris-scan).
+    ///
+    /// A `modify` result *overlays* its returned headers onto the request by name
+    /// (unspecified headers survive, so a tagger plugin never has to echo back the
+    /// `x-api-key: {{kc:...}}` placeholder); replacing the URI/body is independent.
+    /// Header removal is not supported in v1.
     public func onRequest(head: HTTPRequestHead, body: ByteBuffer?, host: String) async -> HookOutcome {
         let chain = chainBox.withLockedValue { $0 }
         if chain.isEmpty { return .proceed(head: head, body: body) }
@@ -150,6 +155,10 @@ public final class HookDispatcher: Sendable {
         return buf
     }
 
+    /// Applies a `modify` result. Headers overlay by name onto the existing set
+    /// via `replaceOrAdd` (unspecified headers are preserved — notably the
+    /// credential placeholder Iris must still substitute); no header removal in
+    /// v1. URI and body replacement are independent of the header overlay.
     static func applyModify(
         _ result: PluginRPC.OnRequestResult,
         to head: HTTPRequestHead,
@@ -158,9 +167,9 @@ public final class HookDispatcher: Sendable {
         var newHead = head
         if let uri = result.uri { newHead.uri = uri }
         if let pairs = result.headers {
-            var h = HTTPHeaders()
-            for p in pairs where p.count == 2 { h.add(name: p[0], value: p[1]) }
-            newHead.headers = h
+            for p in pairs where p.count == 2 {
+                newHead.headers.replaceOrAdd(name: p[0], value: p[1])
+            }
         }
         var newBody = body
         if let b = result.body, let decoded = decodeBody(b, cap: maxRespondBodyBytes) {

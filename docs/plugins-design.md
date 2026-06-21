@@ -259,7 +259,9 @@ brut. Le framing est versionné par `apiVersion`, donc réversible. Cycle :
     "body": { "encoding": "utf8", "data": "..." } }
   ```
   `action` ∈ `pass` | `modify` | `block` (avec `reason`) | `respond` (réponse synthétique : status,
-  headers, body).
+  headers, body). Sur `modify`, les `headers` retournés sont **fusionnés par nom** (overlay) sur la
+  requête : les headers non mentionnés (dont le placeholder de credential que Iris doit encore
+  substituer) sont préservés ; pas de suppression de header en v1.
 - **`shutdown`** (daemon → plugin) à la désactivation : arrêt gracieux puis kill si dépassement.
 
 Le processus reste **chaud** entre les requêtes (pas de spawn par requête). Crash → restart avec

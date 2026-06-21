@@ -82,6 +82,11 @@ final class HookDispatcherTests: XCTestCase {
         let out = await d.onRequest(head: head(), body: nil, host: "h")
         guard case .proceed(let rh, _) = out else { return XCTFail("expected .proceed") }
         XCTAssertEqual(rh.headers.first(name: "x-iris-plugin"), "t")
+        XCTAssertEqual(
+            rh.headers.first(name: "content-type"),
+            "application/json",
+            "overlay preserves unspecified headers"
+        )
     }
 
     func testBlockShortCircuits() async {
