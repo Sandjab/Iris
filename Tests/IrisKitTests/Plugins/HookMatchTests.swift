@@ -23,6 +23,13 @@ final class HookMatchTests: XCTestCase {
         XCTAssertFalse(m.matches(host: "h", method: "GET", path: "/", requestContentType: nil))
     }
 
+    func testMultipleHostsAndMethods() {
+        let m = HookMatch(hosts: ["a.com", "b.com"], methods: ["GET", "POST"])
+        XCTAssertTrue(m.matches(host: "b.com", method: "get", path: "/", requestContentType: nil))
+        XCTAssertFalse(m.matches(host: "c.com", method: "GET", path: "/", requestContentType: nil))
+        XCTAssertFalse(m.matches(host: "a.com", method: "DELETE", path: "/", requestContentType: nil))
+    }
+
     func testPathRegex() {
         let m = HookMatch(pathRegex: "^/v1/")
         XCTAssertTrue(m.matches(host: "h", method: "POST", path: "/v1/messages", requestContentType: nil))

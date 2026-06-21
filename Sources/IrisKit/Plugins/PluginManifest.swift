@@ -185,6 +185,16 @@ extension HookMatch {
     /// True iff every declared condition matches. Empty/nil condition = wildcard.
     /// Host is exact, case-insensitive, port-stripped (SPECS §8.2; no glob in MVP).
     /// An unparseable `pathRegex` matches nothing (fail-closed gating).
+    ///
+    /// Two semantics a plugin author should know:
+    /// - `contentType` is matched as a **case-insensitive substring**, so a hook
+    ///   `contentType: "application/json"` matches a request
+    ///   `content-type: application/json; charset=utf-8`.
+    /// - Host normalization strips a trailing `:port` and lowercases, mirroring
+    ///   `ExfilRuleEngine`'s host normalization. IPv6-literal hosts
+    ///   (`[::1]:443`) are NOT specially handled — intentional, for parity with
+    ///   `ExfilRuleEngine` (IRIS brokers to DNS API hosts). Gating is fail-closed,
+    ///   so an unmatched host merely skips the hook; it is never a security bypass.
     public func matches(
         host: String,
         method: String,
