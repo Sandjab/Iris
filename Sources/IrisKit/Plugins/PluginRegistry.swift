@@ -150,4 +150,107 @@ public actor PluginRegistry {
             hashMatches: true
         )
     }
+
+    // MARK: - Mutations
+
+    /// Approves the manifest's declared capabilities and flips `enabled` on.
+    /// Refuses if the on-disk content drifted from the pinned hash (TOFU).
+    public func enable(id: String) async throws -> Plugin {
+        let manifest = try loadManifest(id: id)
+        let currentHash = try PluginHasher.hash(directory: directory(for: id))
+        let entries = try await configStore.updatePlugins { current in
+            guard let idx = current.firstIndex(where: { $0.id == id }) else {
+                throw PluginError.unknownPlugin(id)
+            }
+            guard currentHash == current[idx].pinnedHash else {
+                throw PluginError.hashMismatch(id)
+            }
+            var copy = current
+            let old = copy[idx]
+            copy[idx] = PluginStateEntry(
+                id: old.id,
+                enabled: true,
+                order: old.order,
+                approvedCapabilities: manifest.capabilities,
+                pinnedHash: old.pinnedHash,
+                configValues: old.configValues
+            )
+            return copy
+        }
+        guard let updated = entries.first(where: { $0.id == id }) else {
+            throw PluginError.unknownPlugin(id)
+        }
+        return try view(for: updated)
+    }
+
+    /// Flips `enabled` off, leaving approved capabilities and pinned hash intact.
+    public func disable(id: String) async throws -> Plugin {
+        let entries = try await configStore.updatePlugins { current in
+            guard let idx = current.firstIndex(where: { $0.id == id }) else {
+                throw PluginError.unknownPlugin(id)
+            }
+            var copy = current
+            let old = copy[idx]
+            copy[idx] = PluginStateEntry(
+                id: old.id,
+                enabled: false,
+                order: old.order,
+                approvedCapabilities: old.approvedCapabilities,
+                pinnedHash: old.pinnedHash,
+                configValues: old.configValues
+            )
+            return copy
+        }
+        guard let updated = entries.first(where: { $0.id == id }) else {
+            throw PluginError.unknownPlugin(id)
+        }
+        return try view(for: updated)
+    }
+
+    /// Removes the plugin state entry and deletes the installed directory.
+    public func remove(id: String) async throws {
+        _ = try await configStore.updatePlugins { current in
+            guard current.contains(where: { $0.id == id }) else {
+                throw PluginError.unknownPlugin(id)
+            }
+            return Self.renumber(current.filter { $0.id != id })
+        }
+        try? fm.removeItem(at: directory(for: id))
+    }
+
+    /// Moves `id` to `index` in the chain and renumbers `order` densely (0..<n).
+    public func reorder(id: String, to index: Int) async throws -> [Plugin] {
+        let entries = try await configStore.updatePlugins { current in
+            let sorted = current.sorted { $0.order < $1.order }
+            guard let from = sorted.firstIndex(where: { $0.id == id }) else {
+                throw PluginError.unknownPlugin(id)
+            }
+            var arr = sorted
+            let moved = arr.remove(at: from)
+            let clamped = max(0, min(index, arr.count))
+            arr.insert(moved, at: clamped)
+            return Self.renumber(arr)
+        }
+        var out: [Plugin] = []
+        for entry in entries.sorted(by: { $0.order < $1.order }) {
+            do { out.append(try view(for: entry)) } catch {
+                logger.warning("plugin skipped", metadata: ["id": "\(entry.id)"])
+            }
+        }
+        return out
+    }
+
+    /// Reassigns dense `order` values following array position.
+    private static func renumber(_ entries: [PluginStateEntry]) -> [PluginStateEntry] {
+        entries.enumerated().map { i, e in
+            PluginStateEntry(
+                id: e.id,
+                enabled: e.enabled,
+                order: i,
+                approvedCapabilities: e.approvedCapabilities,
+                pinnedHash: e.pinnedHash,
+                configValues: e.configValues
+            )
+        }
+    }
 }

@@ -115,6 +115,67 @@ final class PluginRegistryTests: XCTestCase {
             XCTAssertEqual(error as? PluginError, .unknownPlugin("nope"))
         }
     }
+
+    func testEnableApprovesCapabilitiesAndSetsFlag() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let src = try writeSource(id: "org.example.tagger")
+        defer { try? FileManager.default.removeItem(at: src) }
+        _ = try await reg.install(from: src)
+
+        let enabled = try await reg.enable(id: "org.example.tagger")
+        XCTAssertTrue(enabled.enabled)
+        XCTAssertEqual(enabled.displayState, .enabled)
+        // Declared capabilities are now the approved ones.
+        XCTAssertEqual(enabled.approvedCapabilities, PluginCapabilities(network: [], filesystem: ["scratch"]))
+    }
+
+    func testEnableThrowsOnHashMismatch() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let src = try writeSource(id: "org.example.tagger")
+        defer { try? FileManager.default.removeItem(at: src) }
+        _ = try await reg.install(from: src)
+        // Tamper with the installed copy after the pin.
+        let runFile = root.appendingPathComponent("org.example.tagger/run")
+        try "#!/bin/sh\necho tampered\n".write(to: runFile, atomically: true, encoding: .utf8)
+
+        await assertThrowsAsyncError(try await reg.enable(id: "org.example.tagger")) { error in
+            XCTAssertEqual(error as? PluginError, .hashMismatch("org.example.tagger"))
+        }
+    }
+
+    func testDisable() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let src = try writeSource(id: "p.id")
+        defer { try? FileManager.default.removeItem(at: src) }
+        _ = try await reg.install(from: src)
+        _ = try await reg.enable(id: "p.id")
+        let disabled = try await reg.disable(id: "p.id")
+        XCTAssertFalse(disabled.enabled)
+    }
+
+    func testRemoveDeletesDirAndState() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        let src = try writeSource(id: "p.id")
+        defer { try? FileManager.default.removeItem(at: src) }
+        _ = try await reg.install(from: src)
+        try await reg.remove(id: "p.id")
+        let remainingCount = await store.plugins().count
+        XCTAssertEqual(remainingCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("p.id").path))
+    }
+
+    func testReorderRenumbersByPosition() async throws {
+        let reg = PluginRegistry(pluginsDirectory: root, configStore: store, logger: logger)
+        for id in ["a.1", "a.2", "a.3"] {
+            let src = try writeSource(id: id)
+            _ = try await reg.install(from: src)
+            try? FileManager.default.removeItem(at: src)
+        }
+        // Move a.3 to the front.
+        let reordered = try await reg.reorder(id: "a.3", to: 0)
+        XCTAssertEqual(reordered.map(\.manifest.id), ["a.3", "a.1", "a.2"])
+        XCTAssertEqual(reordered.map(\.order), [0, 1, 2])
+    }
 }
 
 // Small async-throws assertion helper (place once in the test target if absent).
