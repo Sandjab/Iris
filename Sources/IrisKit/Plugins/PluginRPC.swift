@@ -47,10 +47,87 @@ public enum PluginRPC {
         }
     }
 
+    /// Request/response body envelope. `encoding` is "utf8" for valid UTF-8 text,
+    /// "base64" for arbitrary bytes (newline-safe NDJSON, design §8).
+    public struct Body: Codable, Sendable, Equatable {
+        public let encoding: String
+        public let data: String
+
+        public init(encoding: String, data: String) {
+            self.encoding = encoding
+            self.data = data
+        }
+    }
+
+    /// `on_request` params (daemon → plugin). Headers are [[name, value], ...] —
+    /// the exact wire tuple shape from design §8. Carries placeholders only; the
+    /// plugin never sees a resolved secret (invariant §3).
+    public struct OnRequestParams: Codable, Sendable, Equatable {
+        public let method: String
+        public let uri: String
+        public let host: String
+        public let headers: [[String]]
+        public let body: Body?
+
+        public init(method: String, uri: String, host: String, headers: [[String]], body: Body?) {
+            self.method = method
+            self.uri = uri
+            self.host = host
+            self.headers = headers
+            self.body = body
+        }
+    }
+
+    /// `on_request` result (plugin → daemon). Flat, action-driven: which fields are
+    /// meaningful depends on `action`.
+    ///   pass     → (no other fields)
+    ///   modify   → `uri` (optional), `headers` (request headers, optional), `body` (optional)
+    ///   block    → `reason` (optional)
+    ///   respond  → `status` (required), `headers` (response headers, optional), `body` (optional)
+    public struct OnRequestResult: Codable, Sendable, Equatable {
+        public enum Action: String, Codable, Sendable { case pass, modify, block, respond }
+        public let action: Action
+        public let uri: String?
+        public let headers: [[String]]?
+        public let body: Body?
+        public let reason: String?
+        public let status: Int?
+
+        enum CodingKeys: String, CodingKey { case action, uri, headers, body, reason, status }
+
+        public init(
+            action: Action,
+            uri: String? = nil,
+            headers: [[String]]? = nil,
+            body: Body? = nil,
+            reason: String? = nil,
+            status: Int? = nil
+        ) {
+            self.action = action
+            self.uri = uri
+            self.headers = headers
+            self.body = body
+            self.reason = reason
+            self.status = status
+        }
+
+        // Tolerant decode: only `action` is required.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.action = try c.decode(Action.self, forKey: .action)
+            self.uri = try c.decodeIfPresent(String.self, forKey: .uri)
+            self.headers = try c.decodeIfPresent([[String]].self, forKey: .headers)
+            self.body = try c.decodeIfPresent(Body.self, forKey: .body)
+            self.reason = try c.decodeIfPresent(String.self, forKey: .reason)
+            self.status = try c.decodeIfPresent(Int.self, forKey: .status)
+        }
+    }
+
     /// Methods spoken on the channel. P2b uses `initialize` (request) and
     /// `shutdown` (notification); `onRequest` lands in P3.
     public enum Method {
         public static let initialize = "initialize"
+        public static let onRequest = "on_request"
         public static let shutdown = "shutdown"
     }
 

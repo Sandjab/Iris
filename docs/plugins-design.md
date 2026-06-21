@@ -253,9 +253,9 @@ brut. Le framing est versionné par `apiVersion`, donc réversible. Cycle :
     "host": "api.anthropic.com",
     "body": { "encoding": "utf8", "data": "..." } }
   ```
-  Réponse :
+  Réponse (forme **plate**, pilotée par `action` — les champs significatifs dépendent de l'action) :
   ```json
-  { "action": "modify", "head": { "headers": [...], "uri": "..." },
+  { "action": "modify", "uri": "...", "headers": [...],
     "body": { "encoding": "utf8", "data": "..." } }
   ```
   `action` ∈ `pass` | `modify` | `block` (avec `reason`) | `respond` (réponse synthétique : status,
