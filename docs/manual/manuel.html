@@ -463,6 +463,9 @@ h2:hover .anchor, h3:hover .anchor { opacity: 1; }
       <li><a href="#troubleshoot"><span class="num">21.</span><span class="lang-fr">Dépannage</span><span class="lang-en">Troubleshooting</span></a></li>
       <li><a href="#faq"><span class="num">22.</span><span class="lang-fr">FAQ</span><span class="lang-en">FAQ</span></a></li>
 
+      <li class="group"><span class="lang-fr">Partie VI — Extensibilité</span><span class="lang-en">Part VI — Extensibility</span></li>
+      <li><a href="#plugins"><span class="num">23.</span><span class="lang-fr">Plugins</span><span class="lang-en">Plugins</span></a></li>
+
       <li class="group"><span class="lang-fr">Annexes</span><span class="lang-en">Appendices</span></li>
       <li><a href="#annex-status"><span class="num">A.</span><span class="lang-fr">État d'implémentation</span><span class="lang-en">Implementation status</span></a></li>
       <li><a href="#annex-usage-limits"><span class="num">B.</span><span class="lang-fr">Limites d'usage</span><span class="lang-en">Usage limits</span></a></li>
@@ -573,6 +576,7 @@ files only ever contain inert placeholders.
   <li><strong>Partie III</strong> — la ligne de commande <code>iris</code>.</li>
   <li><strong>Partie IV</strong> — l'application menu-bar.</li>
   <li><strong>Partie V</strong> — exploitation : démarrage automatique, distribution, désinstallation, dépannage.</li>
+  <li><strong>Partie VI</strong> — extensibilité : écrire et gérer des plugins.</li>
 </ul>
 <ul class="lang-en">
   <li><strong>Part I</strong> — understand the model (concepts, architecture, flow, threat).</li>
@@ -580,6 +584,7 @@ files only ever contain inert placeholders.
   <li><strong>Part III</strong> — the <code>iris</code> command line.</li>
   <li><strong>Part IV</strong> — the menu bar app.</li>
   <li><strong>Part V</strong> — operations: auto-start, distribution, uninstall, troubleshooting.</li>
+  <li><strong>Part VI</strong> — extensibility: writing and managing plugins.</li>
 </ul>
 
 <p class="lang-fr">
@@ -3430,6 +3435,265 @@ signature. Would require an SDK wrapper or a SigV4-aware reverse proxy.<br>
 HTTP/2 support ships; the official SDK favors gRPC, which requires h2 and is therefore not
 intercepted in the MVP. <strong>Gemini AI Studio</strong> (<code>generativelanguage.googleapis.com</code>)
 does work today — REST + flat token in <code>x-goog-api-key</code>.</p>
+
+<!-- ============================================================ -->
+<!-- 23. PLUGINS -->
+<!-- ============================================================ -->
+<h2 id="plugins"><span class="chapnum">23</span><span class="lang-fr">Plugins</span><span class="lang-en">Plugins</span><a class="anchor" href="#plugins">¶</a></h2>
+
+<p class="lang-fr">
+Un plugin IRIS est un programme externe qui s'insère dans le flux d'une requête (cf. <a href="#flow">chapitre 4</a>),
+<strong>avant</strong> le scan d'exfiltration et la substitution d'IRIS. Il tourne hors-process, dans une
+sandbox, et dialogue avec le daemon par un protocole JSON sur stdio. Cas d'usage typiques : taguer ou
+réécrire des requêtes, appliquer une politique (laisser passer / bloquer), ou renvoyer une réponse
+synthétique — le tout <strong>sans jamais voir vos secrets</strong>.
+</p>
+<p class="lang-en">
+An IRIS plugin is an external program that inserts itself into the request flow (see
+<a href="#flow">chapter 4</a>), <strong>before</strong> IRIS's exfiltration scan and substitution. It runs
+out-of-process, in a sandbox, and talks to the daemon over a JSON-on-stdio protocol. Typical uses: tag
+or rewrite requests, enforce a policy (pass / block), or return a synthetic response — all
+<strong>without ever seeing your secrets</strong>.
+</p>
+
+<h3 class="lang-fr">Modèle de sécurité</h3>
+<h3 class="lang-en">Security model</h3>
+
+<div class="callout callout-err">
+  <div class="icon">⚠</div>
+  <div class="body">
+    <p class="lang-fr"><strong>Invariant : un plugin ne voit jamais la valeur d'un secret.</strong> Au moment du hook
+    (<code>on_request</code>), la requête ne contient que les placeholders <code>{{kc:NAME}}</code> ; IRIS
+    substitue les vraies valeurs <strong>après</strong> le passage de tous les plugins. Le scan
+    d'exfiltration et le scoping <code>allowed_hosts</code> tournent eux aussi toujours après les plugins,
+    et ne sont jamais désactivables par un plugin.</p>
+    <p class="lang-en"><strong>Invariant: a plugin never sees a secret's value.</strong> At hook time
+    (<code>on_request</code>), the request carries only <code>{{kc:NAME}}</code> placeholders; IRIS
+    substitutes the real values <strong>after</strong> all plugins have run. The exfiltration scan and
+    <code>allowed_hosts</code> scoping likewise always run after plugins, and can never be disabled by a
+    plugin.</p>
+  </div>
+</div>
+
+<ul class="lang-fr">
+  <li><strong>Sandbox deny-default</strong> : le sous-process n'a aucun accès réseau ni fichier par défaut.</li>
+  <li><strong>Capabilities</strong> : le manifest <strong>déclare</strong> ses besoins (<code>network</code>,
+  <code>filesystem</code>) ; vous les <strong>approuvez</strong> explicitement à l'activation.</li>
+  <li><strong>Provenance (TOFU)</strong> : un hash du contenu du dossier est épinglé à l'installation.
+  Toute modification ultérieure du plugin → état <em>ré-approbation requise</em>, plugin suspendu.</li>
+</ul>
+<ul class="lang-en">
+  <li><strong>Deny-default sandbox</strong>: the subprocess gets no network and no filesystem access by default.</li>
+  <li><strong>Capabilities</strong>: the manifest <strong>declares</strong> its needs (<code>network</code>,
+  <code>filesystem</code>); you <strong>approve</strong> them explicitly at enable time.</li>
+  <li><strong>Provenance (TOFU)</strong>: a content hash of the plugin directory is pinned at install time.
+  Any later change to the plugin → <em>re-approval required</em> state, plugin suspended.</li>
+</ul>
+
+<h3 class="lang-fr">Gérer les plugins — application</h3>
+<h3 class="lang-en">Managing plugins — app</h3>
+
+<p class="lang-fr">
+Dans la fenêtre Réglages, la section <strong>Plugins</strong> permet, sans la ligne de commande :
+installer depuis un dossier, activer (avec un <strong>consentement explicite des capabilities</strong>),
+désactiver, réordonner la chaîne avec les boutons ↑/↓, et supprimer. Chaque plugin affiche son
+<strong>état</strong> (activé / désactivé / ré-approbation requise), ses capabilities déclarées et son
+empreinte de provenance (TOFU).
+</p>
+<p class="lang-en">
+In the Settings window, the <strong>Plugins</strong> section lets you, without the command line: install
+from a directory, enable (with <strong>explicit capability consent</strong>), disable, reorder the chain
+with ↑/↓ buttons, and remove. Each plugin shows its <strong>state</strong> (enabled / disabled /
+re-approval required), its declared capabilities and its provenance fingerprint (TOFU).
+</p>
+
+<h3 class="lang-fr">Gérer les plugins — CLI</h3>
+<h3 class="lang-en">Managing plugins — CLI</h3>
+
+<pre class="lang-fr"><code>iris plugin list                    # plugins installés + état
+iris plugin install &lt;dossier&gt;       # valide, montre les capabilities, installe (désactivé), épingle le hash
+iris plugin info &lt;id&gt;               # manifest, capabilities, hash, état
+iris plugin enable &lt;id&gt;             # approuve les capabilities + active
+iris plugin disable &lt;id&gt;            # désactive
+iris plugin rm &lt;id&gt;                 # supprime
+iris plugin reorder &lt;id&gt; &lt;index&gt;    # position dans la chaîne de hooks (index base 0)</code></pre>
+<pre class="lang-en"><code>iris plugin list                    # installed plugins + state
+iris plugin install &lt;dir&gt;           # validate, show capabilities, install (disabled), pin the hash
+iris plugin info &lt;id&gt;               # manifest, capabilities, hash, state
+iris plugin enable &lt;id&gt;             # approve capabilities + enable
+iris plugin disable &lt;id&gt;            # disable
+iris plugin rm &lt;id&gt;                 # remove
+iris plugin reorder &lt;id&gt; &lt;index&gt;    # position in the hook chain (0-based)</code></pre>
+
+<h3 class="lang-fr">Écrire un plugin — le manifest</h3>
+<h3 class="lang-en">Writing a plugin — the manifest</h3>
+
+<p class="lang-fr">
+Chaque plugin est un dossier contenant un <code>plugin.json</code> et un exécutable. Exemple
+(<code>examples/plugins/header-tagger</code>) :
+</p>
+<p class="lang-en">
+Each plugin is a directory containing a <code>plugin.json</code> and an executable. Example
+(<code>examples/plugins/header-tagger</code>):
+</p>
+
+<pre><code>{
+  "id": "org.iris.example.header-tagger",
+  "name": "Header Tagger",
+  "version": "1.0.0",
+  "description": "Adds an X-Iris-Plugin header to matched requests (example plugin).",
+  "api_version": 1,
+  "executable": ".build/release/header-tagger",
+  "hooks": [
+    { "event": "on_request",
+      "match": { "hosts": ["api.anthropic.com"], "methods": ["POST"], "path_regex": "^/v1/" },
+      "mutates": true, "on_failure": "skip", "timeout_ms": 200 }
+  ],
+  "capabilities": { "network": [], "filesystem": [] }
+}</code></pre>
+
+<ul class="lang-fr">
+  <li><code>id</code> : identifiant unique (reverse-DNS recommandé). <code>executable</code> : chemin
+  <strong>relatif</strong> au dossier du plugin.</li>
+  <li><code>api_version</code> : version du contrat IPC ; IRIS refuse une version non supportée.</li>
+  <li><code>hooks[].event</code> : <code>on_request</code> (seul événement en v1).</li>
+  <li><code>hooks[].match</code> : conditions de déclenchement — <code>hosts</code> (correspondance
+  <strong>exacte</strong>, pas de glob), <code>methods</code>, <code>path_regex</code>. Vide = tout.</li>
+  <li><code>mutates</code> : le hook peut-il modifier la requête. <code>on_failure</code> :
+  <code>skip</code> (ignorer le plugin, continuer) ou <code>block</code> (échec fermé).</li>
+  <li><code>timeout_ms</code> : délai par appel, plafonné par IRIS à 5 s.</li>
+  <li><code>capabilities.network</code> : liste de <code>host:port</code> autorisés en sortie ; vide = aucune
+  sortie réseau. <code>capabilities.filesystem</code> : <code>["scratch"]</code> = un dossier de travail
+  dédié ; vide = aucun accès fichier.</li>
+</ul>
+<ul class="lang-en">
+  <li><code>id</code>: unique identifier (reverse-DNS recommended). <code>executable</code>:
+  path <strong>relative</strong> to the plugin directory.</li>
+  <li><code>api_version</code>: IPC contract version; IRIS rejects an unsupported version.</li>
+  <li><code>hooks[].event</code>: <code>on_request</code> (the only event in v1).</li>
+  <li><code>hooks[].match</code>: trigger conditions — <code>hosts</code> (<strong>exact</strong> match, no
+  glob), <code>methods</code>, <code>path_regex</code>. Empty = everything.</li>
+  <li><code>mutates</code>: whether the hook may modify the request. <code>on_failure</code>:
+  <code>skip</code> (ignore the plugin, continue) or <code>block</code> (fail closed).</li>
+  <li><code>timeout_ms</code>: per-call deadline, capped by IRIS at 5 s.</li>
+  <li><code>capabilities.network</code>: list of allowed <code>host:port</code> egress; empty = no network.
+  <code>capabilities.filesystem</code>: <code>["scratch"]</code> = a dedicated working directory; empty = no
+  filesystem access.</li>
+</ul>
+
+<h3 class="lang-fr">Écrire un plugin — le protocole</h3>
+<h3 class="lang-en">Writing a plugin — the protocol</h3>
+
+<p class="lang-fr">
+IRIS (le daemon) est le <strong>client</strong> ; le plugin est le <strong>serveur</strong>. Cadrage
+<strong>NDJSON</strong> : un objet JSON compact par ligne, sur stdin (requêtes) et stdout (réponses). Le
+plugin doit <strong>renvoyer l'<code>id</code> reçu</strong>. Trois méthodes sur la durée de vie d'un plugin :
+</p>
+<p class="lang-en">
+IRIS (the daemon) is the <strong>client</strong>; the plugin is the <strong>server</strong>.
+<strong>NDJSON</strong> framing: one compact JSON object per line, on stdin (requests) and stdout
+(replies). The plugin must <strong>echo back the received <code>id</code></strong>. Three methods over a
+plugin's lifetime:
+</p>
+
+<ul class="lang-fr">
+  <li><code>initialize</code> (au démarrage) → répondre une fois <code>{"result":{"ready":true}}</code>.</li>
+  <li><code>on_request</code> (par requête matchée) → répondre un <code>action</code> :
+    <ul>
+      <li><code>pass</code> — ne rien changer ;</li>
+      <li><code>modify</code> — fournir <code>headers</code> / <code>uri</code> / <code>body</code>. Les
+      headers sont <strong>fusionnés par nom</strong> (overlay) : ceux non mentionnés (dont le placeholder
+      de credential qu'IRIS doit encore substituer) sont préservés ; pas de suppression en v1 ;</li>
+      <li><code>block</code> — avec <code>reason</code> : requête bloquée (403), rien n'est forwardé ;</li>
+      <li><code>respond</code> — réponse synthétique (<code>status</code>, <code>headers</code>,
+      <code>body</code>) : rien n'est forwardé.</li>
+    </ul>
+  </li>
+  <li><code>shutdown</code> (à la désactivation) → sortir proprement.</li>
+</ul>
+<ul class="lang-en">
+  <li><code>initialize</code> (at startup) → reply once with <code>{"result":{"ready":true}}</code>.</li>
+  <li><code>on_request</code> (per matched request) → reply an <code>action</code>:
+    <ul>
+      <li><code>pass</code> — change nothing;</li>
+      <li><code>modify</code> — provide <code>headers</code> / <code>uri</code> / <code>body</code>. Headers
+      are <strong>merged by name</strong> (overlay): unspecified ones (including the credential placeholder
+      IRIS still has to substitute) are preserved; no removal in v1;</li>
+      <li><code>block</code> — with <code>reason</code>: request blocked (403), nothing forwarded;</li>
+      <li><code>respond</code> — synthetic response (<code>status</code>, <code>headers</code>,
+      <code>body</code>): nothing forwarded.</li>
+    </ul>
+  </li>
+  <li><code>shutdown</code> (at disable) → exit gracefully.</li>
+</ul>
+
+<p class="lang-fr">Exemple d'échange <code>on_request</code> (daemon → plugin, puis plugin → daemon) :</p>
+<p class="lang-en">Example <code>on_request</code> exchange (daemon → plugin, then plugin → daemon):</p>
+
+<pre><code>// daemon → plugin
+{"jsonrpc":"2.0","id":7,"method":"on_request","params":{
+  "method":"POST","uri":"/v1/messages","host":"api.anthropic.com",
+  "headers":[["x-api-key","{{kc:anthropic_api_key}}"],["content-type","application/json"]],
+  "body":{"encoding":"utf8","data":"{\"prompt\":\"hi\"}"}}}
+
+// plugin → daemon
+{"jsonrpc":"2.0","id":7,"result":{"action":"modify",
+  "headers":[["X-Iris-Plugin","header-tagger"]]}}</code></pre>
+
+<h3 class="lang-fr">Exemple complet</h3>
+<h3 class="lang-en">Complete example</h3>
+
+<p class="lang-fr">
+L'exemple <code>examples/plugins/header-tagger</code> est un plugin complet et fonctionnel (Swift,
+Foundation seul, ~40 lignes). Son cœur :
+</p>
+<p class="lang-en">
+The <code>examples/plugins/header-tagger</code> example is a complete, working plugin (Swift,
+Foundation-only, ~40 lines). Its core:
+</p>
+
+<pre><code>while let line = readLine(strippingNewline: true) {
+    guard let data = line.data(using: .utf8),
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { continue }
+    let id = object["id"] ?? NSNull()  // echo the request id back
+
+    switch object["method"] as? String {
+    case "initialize":
+        emitLine(["jsonrpc": "2.0", "id": id, "result": ["ready": true]])
+    case "on_request":
+        emitLine(["jsonrpc": "2.0", "id": id,
+            "result": ["action": "modify", "headers": [["X-Iris-Plugin", "header-tagger"]]]])
+    case "shutdown":
+        exit(0)
+    default:
+        break
+    }
+}</code></pre>
+
+<pre class="lang-fr"><code># Construire, installer, activer
+swift build -c release
+iris plugin install examples/plugins/header-tagger
+iris plugin enable org.iris.example.header-tagger</code></pre>
+<pre class="lang-en"><code># Build, install, enable
+swift build -c release
+iris plugin install examples/plugins/header-tagger
+iris plugin enable org.iris.example.header-tagger</code></pre>
+
+<div class="callout callout-warn">
+  <div class="icon">!</div>
+  <div class="body">
+    <p class="lang-fr">Le hash est épinglé à l'installation (TOFU). Si vous reconstruisez le binaire après
+    coup, le contenu change et IRIS marque le plugin <em>ré-approbation requise</em> : supprimez puis
+    réinstallez pour ré-épingler (<code>iris plugin rm &lt;id&gt;</code> puis <code>install</code> — il n'y a
+    pas de réinstallation en place). La référence complète du protocole est dans
+    <code>docs/plugins-design.md §8</code>.</p>
+    <p class="lang-en">The hash is pinned at install time (TOFU). If you rebuild the binary afterwards, the
+    content changes and IRIS marks the plugin <em>re-approval required</em>: remove then reinstall to
+    re-pin (<code>iris plugin rm &lt;id&gt;</code> then <code>install</code> — there is no in-place
+    reinstall). The full protocol reference lives in <code>docs/plugins-design.md §8</code>.</p>
+  </div>
+</div>
 
 <!-- ============================================================ -->
 <!-- ANNEXES -->
