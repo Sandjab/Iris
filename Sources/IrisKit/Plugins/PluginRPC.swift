@@ -123,11 +123,37 @@ public enum PluginRPC {
         }
     }
 
+    /// `on_complete` params (daemon → plugin), a NOTIFICATION (no reply expected).
+    /// HTTP-level metadata only — never a body or header (invariant §7.2/§6.1). The
+    /// `uri` is the ORIGINAL request URI (placeholder-form), never a resolved secret.
+    public struct OnCompleteParams: Codable, Sendable, Equatable {
+        public let method: String
+        public let uri: String
+        public let host: String
+        /// Upstream HTTP status, or 0 when the request errored before/mid response.
+        public let status: Int
+        public let durationMs: Int
+
+        enum CodingKeys: String, CodingKey {
+            case method, uri, host, status
+            case durationMs = "duration_ms"
+        }
+
+        public init(method: String, uri: String, host: String, status: Int, durationMs: Int) {
+            self.method = method
+            self.uri = uri
+            self.host = host
+            self.status = status
+            self.durationMs = durationMs
+        }
+    }
+
     /// Methods spoken on the channel. P2b uses `initialize` (request) and
-    /// `shutdown` (notification); `onRequest` lands in P3.
+    /// `shutdown` (notification); `onRequest` lands in P3; `onComplete` in P6.
     public enum Method {
         public static let initialize = "initialize"
         public static let onRequest = "on_request"
+        public static let onComplete = "on_complete"
         public static let shutdown = "shutdown"
     }
 
@@ -152,6 +178,17 @@ public enum PluginRPC {
         let object = JSONValue.object([
             "jsonrpc": .string(JSONRPCRequest.version),
             "method": .string(method),
+        ])
+        return try line(from: object)
+    }
+
+    /// Encodes a notification WITH params (no `id`, no response expected) as one
+    /// NDJSON line. Used by `on_complete`.
+    public static func encodeNotification<P: Encodable>(method: String, params: P) throws -> String {
+        let object = JSONValue.object([
+            "jsonrpc": .string(JSONRPCRequest.version),
+            "method": .string(method),
+            "params": try JSONValue.encoding(params),
         ])
         return try line(from: object)
     }

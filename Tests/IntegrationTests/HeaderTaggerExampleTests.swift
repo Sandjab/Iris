@@ -75,6 +75,43 @@ final class HeaderTaggerExampleTests: XCTestCase {
         XCTAssertTrue(tagged, "modify result must add X-Iris-Plugin: header-tagger")
     }
 
+    /// Real delivery: a started host receives an `on_complete` NOTIFICATION and the
+    /// plugin records it in its scratch dir. Proves PluginHost.onComplete writes the
+    /// notification and the example plugin handles it (no reply expected).
+    func testHeaderTaggerRecordsOnCompleteToScratch() async throws {
+        let scratch = try scratchDir()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let host = makeHost(scratch: scratch)
+        try await host.start()
+
+        try await host.onComplete(
+            PluginRPC.OnCompleteParams(
+                method: "POST",
+                uri: "/v1/messages",
+                host: "api.anthropic.com",
+                status: 200,
+                durationMs: 7
+            )
+        )
+
+        // The notification is async; poll the scratch log up to ~2s.
+        let logURL = scratch.appendingPathComponent("on_complete.log")
+        var contents = ""
+        for _ in 0..<100 {
+            if let data = try? Data(contentsOf: logURL), let s = String(data: data, encoding: .utf8) {
+                contents = s
+                if contents.contains("200") { break }
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        await host.shutdown()
+
+        XCTAssertTrue(
+            contents.contains("POST") && contents.contains("200") && contents.contains("/v1/messages"),
+            "plugin must record the completion line; got: \(contents.debugDescription)"
+        )
+    }
+
     /// Integration with the real HookDispatcher: the overlay merge adds the tag and
     /// PRESERVES the credential placeholder (so Iris can substitute it afterwards).
     func testHeaderTaggerOverlayPreservesCredentialPlaceholder() async throws {

@@ -25,6 +25,24 @@ private actor MockInvoker: PluginInvoking {
     }
 
     var callCount: Int { calls }
+
+    private var completeRecords: [PluginRPC.OnCompleteParams] = []
+    private var completeError: Error?
+    private var blockOnComplete = false
+    private var released = false
+    func setOnCompleteThrows(_ error: Error) { completeError = error }
+    func setBlocksOnComplete() { blockOnComplete = true }
+    func releaseOnComplete() { released = true }
+    func onComplete(_ params: PluginRPC.OnCompleteParams) async throws {
+        if let completeError { throw completeError }
+        // Block until released (models a slow/blocked sink). Each `await` suspends
+        // the actor, so `releaseOnComplete()` can still run while we spin here.
+        while blockOnComplete && !released {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        completeRecords.append(params)
+    }
+    var completeCalls: [PluginRPC.OnCompleteParams] { completeRecords }
 }
 
 final class HookDispatcherTests: XCTestCase {
@@ -54,6 +72,14 @@ final class HookDispatcherTests: XCTestCase {
                 onFailure: onFailure,
                 timeoutMs: 1000
             )
+        )
+    }
+
+    private func completeEntry(_ inv: any PluginInvoking, match: HookMatch = HookMatch()) -> PluginChainEntry {
+        PluginChainEntry(
+            pluginId: inv.id,
+            invoker: inv,
+            hook: PluginHook(event: .onComplete, match: match, mutates: false, onFailure: .skip, timeoutMs: 1000)
         )
     }
 
@@ -179,5 +205,101 @@ final class HookDispatcherTests: XCTestCase {
         let out = await d.onRequest(head: head(headers: []), body: nil, host: "h")
         guard case .proceed(let rh, _) = out else { return XCTFail("expected .proceed") }
         XCTAssertEqual(rh.headers.first(name: "x"), "ab")
+    }
+
+    func testOnCompleteDeliversParamsToMatchingPlugin() async {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        let d = HookDispatcher()
+        d.updateCompleteChain([completeEntry(inv, match: HookMatch(hosts: ["api.anthropic.com"]))])
+        await d.onComplete(
+            method: "POST",
+            uri: "/v1/messages",
+            host: "api.anthropic.com",
+            contentType: "application/json",
+            status: 200,
+            durationMs: 12
+        )
+        let records = await inv.completeCalls
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.status, 200)
+        XCTAssertEqual(records.first?.uri, "/v1/messages")
+    }
+
+    func testOnCompleteSkipsNonMatchingPlugin() async {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        let d = HookDispatcher()
+        d.updateCompleteChain([completeEntry(inv, match: HookMatch(status: [500]))])
+        await d.onComplete(
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil,
+            status: 200,
+            durationMs: 1
+        )
+        let records = await inv.completeCalls
+        XCTAssertTrue(records.isEmpty, "status condition [500] must not match a 200 completion")
+    }
+
+    func testOnCompleteEmptyChainIsNoop() async {
+        // A plugin present in the onRequest chain must NOT be invoked by onComplete
+        // when the onComplete chain is empty — the two chains are independent.
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        let d = HookDispatcher()
+        d.updateChain([entry(inv)])
+        await d.onComplete(
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil,
+            status: 0,
+            durationMs: 1
+        )
+        let calls = await inv.completeCalls
+        XCTAssertTrue(calls.isEmpty, "onComplete must read its own chain, not the onRequest chain")
+    }
+
+    func testOnCompleteSwallowsPluginErrors() async {
+        struct Boom: Error {}
+        let bad = MockInvoker(id: "bad") { _ in .init(action: .pass) }
+        await bad.setOnCompleteThrows(Boom())
+        let d = HookDispatcher()
+        d.updateCompleteChain([completeEntry(bad)])
+        // Must not throw / crash — onComplete is fire-and-forget; errors are logged.
+        await d.onComplete(method: "GET", uri: "/x", host: "h", contentType: nil, status: 0, durationMs: 1)
+    }
+
+    func testOnCompleteDispatchesConcurrentlyAcrossPlugins() async {
+        // A blocks until released; B records immediately. Concurrent dispatch delivers
+        // to B even while A is blocked. A SEQUENTIAL dispatch (A is first in the chain)
+        // would block B behind A → B would never record until A is released, and this
+        // test would fail. This guards the design-C8 "independent per plugin" property.
+        let a = MockInvoker(id: "a") { _ in .init(action: .pass) }
+        let b = MockInvoker(id: "b") { _ in .init(action: .pass) }
+        await a.setBlocksOnComplete()
+        let d = HookDispatcher()
+        // A is first: a sequential loop would head-of-line block on it.
+        d.updateCompleteChain([completeEntry(a), completeEntry(b)])
+
+        let dispatch = Task {
+            await d.onComplete(method: "GET", uri: "/x", host: "h", contentType: nil, status: 200, durationMs: 1)
+        }
+
+        var bRecorded = false
+        for _ in 0..<400 {
+            if await !b.completeCalls.isEmpty {
+                bRecorded = true
+                break
+            }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let aRecordedWhileBlocked = await !a.completeCalls.isEmpty
+        XCTAssertTrue(bRecorded, "B is delivered concurrently while A is still blocked")
+        XCTAssertFalse(aRecordedWhileBlocked, "A is still blocked, so it has not recorded yet")
+
+        await a.releaseOnComplete()
+        await dispatch.value
+        let aRecorded = await !a.completeCalls.isEmpty
+        XCTAssertTrue(aRecorded, "A records once released (it was dispatched, not dropped)")
     }
 }

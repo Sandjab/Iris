@@ -31,6 +31,7 @@ public actor PluginHostManager {
     private let config: Configuration
     private let emitSystemAlert: @Sendable (SystemAlert) async -> Void
     private let onChainChanged: @Sendable ([PluginChainEntry]) -> Void
+    private let onCompleteChainChanged: @Sendable ([PluginChainEntry]) -> Void
     private let logger: Logger
 
     private var hosts: [String: PluginHost] = [:]
@@ -48,6 +49,7 @@ public actor PluginHostManager {
         config: Configuration = Configuration(),
         emitSystemAlert: @escaping @Sendable (SystemAlert) async -> Void,
         onChainChanged: @escaping @Sendable ([PluginChainEntry]) -> Void = { _ in },
+        onCompleteChainChanged: @escaping @Sendable ([PluginChainEntry]) -> Void = { _ in },
         logger: Logger
     ) {
         self.registry = registry
@@ -57,6 +59,7 @@ public actor PluginHostManager {
         self.config = config
         self.emitSystemAlert = emitSystemAlert
         self.onChainChanged = onChainChanged
+        self.onCompleteChainChanged = onCompleteChainChanged
         self.logger = logger
     }
 
@@ -118,6 +121,7 @@ public actor PluginHostManager {
         }
         hosts.removeAll()
         onChainChanged([])
+        onCompleteChainChanged([])
     }
 
     // MARK: - Internals
@@ -230,20 +234,26 @@ public actor PluginHostManager {
         republishChain(desired: desired)
     }
 
-    /// Ordered chain of running hosts × their onRequest hooks (design §4.4: chain
-    /// order persisted in config). Rebuilt and pushed whenever the running set
-    /// changes. `desired` is passed in by the caller (which already fetched it) to
-    /// avoid a redundant registry re-hash; the chain is eventually-consistent if
-    /// hosts mutate concurrently — the next republish reconverges.
+    /// Ordered chains of running hosts × their hooks (design §4.4: chain order
+    /// persisted in config). Rebuilt and pushed whenever the running set changes.
+    /// `desired` is passed in by the caller (which already fetched it) to avoid a
+    /// redundant registry re-hash; the chains are eventually-consistent if hosts
+    /// mutate concurrently — the next republish reconverges.
     private func republishChain(desired: [Plugin]) {
-        var entries: [PluginChainEntry] = []
+        var requestEntries: [PluginChainEntry] = []
+        var completeEntries: [PluginChainEntry] = []
         for plugin in desired.sorted(by: { $0.order < $1.order }) {
             guard let host = hosts[plugin.manifest.id] else { continue }
-            for hook in plugin.manifest.hooks where hook.event == .onRequest {
-                entries.append(PluginChainEntry(pluginId: plugin.manifest.id, invoker: host, hook: hook))
+            for hook in plugin.manifest.hooks {
+                let entry = PluginChainEntry(pluginId: plugin.manifest.id, invoker: host, hook: hook)
+                switch hook.event {
+                case .onRequest: requestEntries.append(entry)
+                case .onComplete: completeEntries.append(entry)
+                }
             }
         }
-        onChainChanged(entries)
+        onChainChanged(requestEntries)
+        onCompleteChainChanged(completeEntries)
     }
 
     /// Creates `scratchRoot/<id>` and returns its canonical (realpath) URL.

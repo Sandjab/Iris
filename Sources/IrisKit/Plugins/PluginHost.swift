@@ -195,6 +195,16 @@ public actor PluginHost {
         await teardown()  // escalates SIGTERM→SIGKILL if still running
     }
 
+    /// Sends one `on_complete` NOTIFICATION (fire-and-forget; no reply, no pending
+    /// continuation). Throws `.notRunning` if the process is gone, or rethrows a
+    /// write failure (EPIPE on a dead plugin — F_SETNOSIGPIPE makes it throw, not
+    /// signal). The dispatcher swallows these; a sink failure never affects traffic.
+    public func onComplete(_ params: PluginRPC.OnCompleteParams) async throws {
+        guard started, let stdinHandle else { throw PluginHostError.notRunning }
+        let line = try PluginRPC.encodeNotification(method: PluginRPC.Method.onComplete, params: params)
+        try stdinHandle.write(contentsOf: Data(line.utf8))
+    }
+
     /// Sends one `on_request` and returns the typed result. Throws
     /// `PluginHostError.timeout` on deadline, `PluginHostError.notRunning` if the
     /// process is gone, or the plugin's JSON-RPC error if it reported one.

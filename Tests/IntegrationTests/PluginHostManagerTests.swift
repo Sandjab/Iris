@@ -37,7 +37,8 @@ final class PluginHostManagerTests: XCTestCase {
         let manifest = """
             { "id": "test.mgr.plugin", "name": "Mgr Fixture", "version": "1.0.0",
               "api_version": 1, "executable": "run.sh",
-              "hooks": [ { "event": "on_request", "match": {}, "timeout_ms": 200 } ],
+              "hooks": [ { "event": "on_request", "match": {}, "timeout_ms": 200 },
+                         { "event": "on_complete", "match": {}, "timeout_ms": 200 } ],
               "capabilities": { "network": [], "filesystem": [] } }
             """
         try manifest.write(
@@ -63,7 +64,8 @@ final class PluginHostManagerTests: XCTestCase {
         scratch: URL,
         registry: PluginRegistry,
         alerts: AlertCollector,
-        onChainChanged: @escaping @Sendable ([PluginChainEntry]) -> Void = { _ in }
+        onChainChanged: @escaping @Sendable ([PluginChainEntry]) -> Void = { _ in },
+        onCompleteChainChanged: @escaping @Sendable ([PluginChainEntry]) -> Void = { _ in }
     ) -> PluginHostManager {
         PluginHostManager(
             registry: registry,
@@ -77,6 +79,7 @@ final class PluginHostManagerTests: XCTestCase {
             ),
             emitSystemAlert: { alert in await alerts.append(alert) },
             onChainChanged: onChainChanged,
+            onCompleteChainChanged: onCompleteChainChanged,
             logger: Logger(label: "test")
         )
     }
@@ -142,6 +145,29 @@ final class PluginHostManagerTests: XCTestCase {
 
         await manager.shutdownAll()
         XCTAssertTrue(pushed.withLockedValue { $0 }.isEmpty, "shutdown clears the chain")
+    }
+
+    func testReconcilePublishesOnCompleteChain() async throws {
+        let env = try await makeRegistryWithEnabledFixture(mode: "ok")
+        let alerts = AlertCollector()
+        let completePushed = NIOLockedValueBox<[PluginChainEntry]>([])
+        let manager = makeManager(
+            plugins: env.plugins,
+            scratch: env.scratch,
+            registry: env.registry,
+            alerts: alerts,
+            onCompleteChainChanged: { chain in completePushed.withLockedValue { $0 = chain } }
+        )
+
+        await manager.startEnabled()
+        let chain = completePushed.withLockedValue { $0 }
+        XCTAssertTrue(
+            chain.contains { $0.hook.event == .onComplete },
+            "an installed on_complete hook must be published to the onComplete chain"
+        )
+
+        await manager.shutdownAll()
+        XCTAssertTrue(completePushed.withLockedValue { $0 }.isEmpty, "shutdown clears the complete chain")
     }
 
     // MARK: - Helpers

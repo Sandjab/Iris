@@ -2,13 +2,16 @@
   "id": "org.iris.example.header-tagger",
   "name": "Header Tagger",
   "version": "1.0.0",
-  "description": "Adds an X-Iris-Plugin header to matched requests (example plugin).",
+  "description": "Adds an X-Iris-Plugin header to matched requests and logs completions (example plugin).",
   "api_version": 1,
   "executable": ".build/release/header-tagger",
   "hooks": [
     { "event": "on_request",
       "match": { "hosts": ["api.anthropic.com"], "methods": ["POST"], "path_regex": "^/v1/" },
-      "mutates": true, "on_failure": "skip", "timeout_ms": 200 }
+      "mutates": true, "on_failure": "skip", "timeout_ms": 200 },
+    { "event": "on_complete",
+      "match": { "hosts": ["api.anthropic.com"], "methods": ["POST"], "path_regex": "^/v1/" },
+      "mutates": false, "on_failure": "skip", "timeout_ms": 200 }
   ],
-  "capabilities": { "network": [], "filesystem": [] }
+  "capabilities": { "network": [], "filesystem": ["scratch"] }
 }

@@ -8,7 +8,7 @@ import Foundation
 //
 // IPC protocol (NDJSON / JSON-RPC 2.0 over stdio — see docs/plugins-design.md §8):
 // Iris (the daemon) is the CLIENT: it writes one compact JSON object per line to
-// our stdin and we reply with one compact JSON object per line on stdout. Three
+// our stdin and we reply with one compact JSON object per line on stdout. Four
 // methods arrive over a plugin's lifetime:
 //
 //   initialize  -> reply {"result":{"ready":true}} once, at startup.
@@ -17,6 +17,10 @@ import Foundation
 //                  headers by name onto the real request, so unspecified headers
 //                  (notably the `{{kc:...}}` credential placeholder Iris must
 //                  still substitute) are preserved — we never echo them back.
+//   on_complete -> notification (no reply). Appends "METHOD STATUS URI" to
+//                  `on_complete.log` in scratch (read-only observability). The
+//                  daemon sets our cwd to the sandbox-writable scratch dir so a
+//                  relative path resolves correctly.
 //   shutdown    -> exit gracefully.
 //
 // The request we see at `on_request` carries credential PLACEHOLDERS
@@ -32,6 +36,20 @@ func emitLine(_ object: [String: Any]) {
     guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
     try? FileHandle.standardOutput.write(contentsOf: data)
     try? FileHandle.standardOutput.write(contentsOf: Data("\n".utf8))
+}
+
+/// Appends one line to `on_complete.log` in the plugin's scratch dir. The daemon
+/// sets our cwd to the (sandbox-writable) scratch dir, so a relative path is fine.
+func appendCompletionLog(_ line: String) {
+    let url = URL(fileURLWithPath: "on_complete.log")  // cwd == scratch dir
+    let data = Data((line + "\n").utf8)
+    if let handle = try? FileHandle(forWritingTo: url) {
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: data)
+    } else {
+        try? data.write(to: url)
+    }
 }
 
 // One JSON request per line on stdin; reply (or stay silent) per method.
@@ -50,6 +68,14 @@ while let line = readLine(strippingNewline: true) {
             "jsonrpc": "2.0", "id": id,
             "result": ["action": "modify", "headers": [["X-Iris-Plugin", "header-tagger"]]],
         ])
+    case "on_complete":
+        // Notification: no reply. Record HTTP-level metadata to scratch.
+        if let params = object["params"] as? [String: Any] {
+            let method = params["method"] as? String ?? "?"
+            let status = params["status"] as? Int ?? -1
+            let uri = params["uri"] as? String ?? "?"
+            appendCompletionLog("\(method) \(status) \(uri)")
+        }
     case "shutdown":
         exit(0)
     default:
