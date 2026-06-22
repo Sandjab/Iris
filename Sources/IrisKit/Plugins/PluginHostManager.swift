@@ -32,6 +32,7 @@ public actor PluginHostManager {
     private let emitSystemAlert: @Sendable (SystemAlert) async -> Void
     private let onChainChanged: @Sendable ([PluginChainEntry]) -> Void
     private let onCompleteChainChanged: @Sendable ([PluginChainEntry]) -> Void
+    private let onResponseChainChanged: @Sendable ([PluginChainEntry]) -> Void
     private let logger: Logger
 
     private var hosts: [String: PluginHost] = [:]
@@ -50,6 +51,7 @@ public actor PluginHostManager {
         emitSystemAlert: @escaping @Sendable (SystemAlert) async -> Void,
         onChainChanged: @escaping @Sendable ([PluginChainEntry]) -> Void = { _ in },
         onCompleteChainChanged: @escaping @Sendable ([PluginChainEntry]) -> Void = { _ in },
+        onResponseChainChanged: @escaping @Sendable ([PluginChainEntry]) -> Void = { _ in },
         logger: Logger
     ) {
         self.registry = registry
@@ -60,6 +62,7 @@ public actor PluginHostManager {
         self.emitSystemAlert = emitSystemAlert
         self.onChainChanged = onChainChanged
         self.onCompleteChainChanged = onCompleteChainChanged
+        self.onResponseChainChanged = onResponseChainChanged
         self.logger = logger
     }
 
@@ -122,6 +125,7 @@ public actor PluginHostManager {
         hosts.removeAll()
         onChainChanged([])
         onCompleteChainChanged([])
+        onResponseChainChanged([])
     }
 
     // MARK: - Internals
@@ -241,6 +245,7 @@ public actor PluginHostManager {
     /// mutate concurrently — the next republish reconverges.
     private func republishChain(desired: [Plugin]) {
         var requestEntries: [PluginChainEntry] = []
+        var responseEntries: [PluginChainEntry] = []
         var completeEntries: [PluginChainEntry] = []
         for plugin in desired.sorted(by: { $0.order < $1.order }) {
             guard let host = hosts[plugin.manifest.id] else { continue }
@@ -248,11 +253,13 @@ public actor PluginHostManager {
                 let entry = PluginChainEntry(pluginId: plugin.manifest.id, invoker: host, hook: hook)
                 switch hook.event {
                 case .onRequest: requestEntries.append(entry)
+                case .onResponse: responseEntries.append(entry)
                 case .onComplete: completeEntries.append(entry)
                 }
             }
         }
         onChainChanged(requestEntries)
+        onResponseChainChanged(responseEntries)
         onCompleteChainChanged(completeEntries)
     }
 

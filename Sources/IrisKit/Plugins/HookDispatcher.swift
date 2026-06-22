@@ -15,10 +15,20 @@ public protocol PluginInvoking: Sendable {
     /// Fire-and-forget completion notification. Read-only; no return value. Default
     /// is a no-op so conformers that declare no onComplete hook need not implement it.
     func onComplete(_ params: PluginRPC.OnCompleteParams) async throws
+    /// Runs the onResponse hook (metadata mode): observe/overlay response headers.
+    /// Default is a no-op `pass` so conformers declaring no onResponse hook need
+    /// not implement it.
+    func onResponse(_ params: PluginRPC.OnResponseParams, timeout: TimeInterval) async throws
+        -> PluginRPC.OnResponseResult
 }
 
 extension PluginInvoking {
     public func onComplete(_ params: PluginRPC.OnCompleteParams) async throws {}
+    public func onResponse(_ params: PluginRPC.OnResponseParams, timeout: TimeInterval) async throws
+        -> PluginRPC.OnResponseResult
+    {
+        .init(action: .pass)
+    }
 }
 
 // MARK: - PluginChainEntry
@@ -61,6 +71,7 @@ public final class HookDispatcher: Sendable {
 
     private let chainBox = NIOLockedValueBox<[PluginChainEntry]>([])
     private let completeChainBox = NIOLockedValueBox<[PluginChainEntry]>([])
+    private let responseChainBox = NIOLockedValueBox<[PluginChainEntry]>([])
     private let logger: Logger
 
     public init(logger: Logger = Logger(label: "io.iris.plugins.dispatch")) {
@@ -75,6 +86,11 @@ public final class HookDispatcher: Sendable {
     /// Pushed by `PluginHostManager` after each reconcile (onComplete chain).
     public func updateCompleteChain(_ chain: [PluginChainEntry]) {
         completeChainBox.withLockedValue { $0 = chain }
+    }
+
+    /// Pushed by `PluginHostManager` after each reconcile (onResponse chain).
+    public func updateResponseChain(_ chain: [PluginChainEntry]) {
+        responseChainBox.withLockedValue { $0 = chain }
     }
 
     /// Test-only: number of entries in the current chain snapshot. Production code

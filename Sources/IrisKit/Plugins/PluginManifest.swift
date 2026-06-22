@@ -83,6 +83,11 @@ public struct PluginManifest: Codable, Sendable, Hashable {
             guard hook.timeoutMs > 0 else {
                 throw PluginError.invalidManifest("timeout_ms must be positive")
             }
+            // A response already exists when an onResponse hook runs, so "block"
+            // (fail the request closed) is meaningless — reject it (design R4).
+            if hook.event == .onResponse, hook.onFailure == .block {
+                throw PluginError.invalidManifest("on_response hooks do not support on_failure: block")
+            }
         }
         try capabilities.validate()
     }
@@ -111,8 +116,8 @@ public struct PluginHook: Codable, Sendable, Hashable {
 
     public enum HookEvent: String, Codable, Sendable, CaseIterable {
         case onRequest = "on_request"
+        case onResponse = "on_response"
         case onComplete = "on_complete"
-        // on_response reserved for a later phase (PR 2).
     }
 
     public enum FailureMode: String, Codable, Sendable, CaseIterable {
