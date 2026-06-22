@@ -18,4 +18,5 @@ enum ExecutableLocator {
     static var irisd: URL { url(forProduct: "irisd") }
     static var sandboxExec: URL { url(forProduct: "iris-sandbox-exec") }
     static var testPlugin: URL { url(forProduct: "iris-test-plugin") }
+    static var headerTagger: URL { url(forProduct: "header-tagger") }
 }

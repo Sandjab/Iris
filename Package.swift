@@ -71,6 +71,11 @@ let package = Package(
             name: "iris-test-plugin",
             swiftSettings: strictConcurrency
         ),
+        .executableTarget(
+            name: "header-tagger",
+            path: "examples/plugins/header-tagger/Sources/header-tagger",
+            swiftSettings: strictConcurrency
+        ),
         .testTarget(
             name: "IrisKitTests",
             dependencies: [
@@ -88,6 +93,7 @@ let package = Package(
                 "irisd",
                 "iris-sandbox-exec",
                 "iris-test-plugin",
+                "header-tagger",
                 .product(name: "NIO", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
