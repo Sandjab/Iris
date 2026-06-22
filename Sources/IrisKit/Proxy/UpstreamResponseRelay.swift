@@ -45,6 +45,13 @@ final class UpstreamResponseRelay: ChannelDuplexHandler, @unchecked Sendable {
     /// the head is relayed immediately (byte-for-byte the v1 path).
     private let responseHeadHook: (@Sendable (HTTPResponseHead) -> EventLoopFuture<HTTPResponseHead>)?
     private var headHookInFlight = false
+    /// Parts that arrived while the head hook was in flight, drained in order once
+    /// the resolved head is written. NOTE: the class invariant "memory bounded by
+    /// the client watermark" is SUSPENDED during this timeout-bounded window —
+    /// nothing is written to the client while the hook runs, so it stays writable
+    /// and upstream keeps delivering into this queue. Bound = hook-timeout ×
+    /// upstream throughput (negligible for metadata/SSE; a hung plugin on a large
+    /// matched response is the pathological ceiling).
     private var queuedParts: [HTTPClientResponsePart] = []
     private var status: Int = 0
     private var done = false
@@ -80,7 +87,13 @@ final class UpstreamResponseRelay: ChannelDuplexHandler, @unchecked Sendable {
             // the EventLoop, then drain anything that arrived meanwhile.
             headHookInFlight = true
             hook(head).hop(to: clientChannel.eventLoop).whenComplete { [weak self] result in
-                guard let self = self else { return }
+                // `!done`: if the stream terminally failed during the hook window
+                // (upstream RST before `.end` → channelInactive → finish(.failure)),
+                // MITMHandler already wrote a 502 to the client. Skip relaying the
+                // late-resolving head so we never write a SECOND head onto that
+                // channel. In the happy path `.end` is still queued here (not
+                // relayed), so `done` is false → a valid head is never skipped.
+                guard let self = self, !self.done else { return }
                 let resolved: HTTPResponseHead
                 switch result {
                 case .success(let h): resolved = h
