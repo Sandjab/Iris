@@ -223,4 +223,18 @@ final class PluginManifestTests: XCTestCase {
         )
         XCTAssertNoThrow(try m.validate())
     }
+
+    func testDecodesOnCompleteHook() throws {
+        let json = """
+            {"id":"org.x.sink","name":"Sink","version":"1.0.0","api_version":1,
+             "executable":"bin/sink",
+             "hooks":[{"event":"on_complete","match":{"hosts":["api.anthropic.com"],"status":[500,502]},
+                       "timeout_ms":1000}]}
+            """
+        let manifest = try JSONDecoder().decode(PluginManifest.self, from: Data(json.utf8))
+        try manifest.validate()
+        XCTAssertEqual(manifest.hooks.count, 1)
+        XCTAssertEqual(manifest.hooks[0].event, .onComplete)
+        XCTAssertEqual(manifest.hooks[0].match.status, [500, 502])
+    }
 }

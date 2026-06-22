@@ -111,7 +111,8 @@ public struct PluginHook: Codable, Sendable, Hashable {
 
     public enum HookEvent: String, Codable, Sendable, CaseIterable {
         case onRequest = "on_request"
-        // on_response / on_complete reserved for later phases.
+        case onComplete = "on_complete"
+        // on_response reserved for a later phase (PR 2).
     }
 
     public enum FailureMode: String, Codable, Sendable, CaseIterable {
