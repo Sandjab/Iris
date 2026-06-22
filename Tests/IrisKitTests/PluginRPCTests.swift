@@ -134,4 +134,31 @@ final class PluginRPCTests: XCTestCase {
         let back = try JSONDecoder().decode(PluginRPC.OnCompleteParams.self, from: data)
         XCTAssertEqual(back, params)
     }
+
+    func testEncodeOnResponseRequestLine() throws {
+        let params = PluginRPC.OnResponseParams(
+            method: "POST",
+            uri: "/v1/messages",
+            host: "api.anthropic.com",
+            status: 200,
+            headers: [["content-type", "text/event-stream"]]
+        )
+        let line = try PluginRPC.encodeRequest(method: PluginRPC.Method.onResponse, params: params, id: 7)
+        XCTAssertTrue(line.hasSuffix("\n"))
+        XCTAssertFalse(line.dropLast().contains("\n"), "compact single-line NDJSON")
+        XCTAssertTrue(line.contains("\"method\":\"on_response\""))
+        XCTAssertTrue(line.contains("\"status\":200"))
+    }
+
+    func testDecodeOnResponseResultPassAndModify() throws {
+        let passLine = #"{"jsonrpc":"2.0","id":7,"result":{"action":"pass"}}"#
+        let pass = try PluginRPC.decodeResponse(passLine).result!.decode(as: PluginRPC.OnResponseResult.self)
+        XCTAssertEqual(pass.action, .pass)
+        XCTAssertNil(pass.headers)
+
+        let modLine = #"{"jsonrpc":"2.0","id":7,"result":{"action":"modify","headers":[["x-iris-tagged","1"]]}}"#
+        let mod = try PluginRPC.decodeResponse(modLine).result!.decode(as: PluginRPC.OnResponseResult.self)
+        XCTAssertEqual(mod.action, .modify)
+        XCTAssertEqual(mod.headers ?? [], [["x-iris-tagged", "1"]])
+    }
 }

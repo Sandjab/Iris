@@ -148,12 +148,56 @@ public enum PluginRPC {
         }
     }
 
+    /// `on_response` params (daemon → plugin), request/response (reply expected).
+    /// METADATA MODE: status + response headers only — never a response body
+    /// (SPECS §7.2 bodies untouched). `uri` is the ORIGINAL request URI
+    /// (placeholder-form), never a resolved secret (§6.1).
+    public struct OnResponseParams: Codable, Sendable, Equatable {
+        public let method: String
+        public let uri: String
+        public let host: String
+        public let status: Int
+        public let headers: [[String]]
+
+        public init(method: String, uri: String, host: String, status: Int, headers: [[String]]) {
+            self.method = method
+            self.uri = uri
+            self.host = host
+            self.status = status
+            self.headers = headers
+        }
+    }
+
+    /// `on_response` result (plugin → daemon). Flat, action-driven.
+    ///   pass   → (no other fields) — relay the head unchanged
+    ///   modify → `headers` (overlaid by name onto the response head; status never modified)
+    public struct OnResponseResult: Codable, Sendable, Equatable {
+        public enum Action: String, Codable, Sendable { case pass, modify }
+        public let action: Action
+        public let headers: [[String]]?
+
+        enum CodingKeys: String, CodingKey { case action, headers }
+
+        public init(action: Action, headers: [[String]]? = nil) {
+            self.action = action
+            self.headers = headers
+        }
+
+        // Tolerant decode: only `action` is required.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.action = try c.decode(Action.self, forKey: .action)
+            self.headers = try c.decodeIfPresent([[String]].self, forKey: .headers)
+        }
+    }
+
     /// Methods spoken on the channel. P2b uses `initialize` (request) and
     /// `shutdown` (notification); `onRequest` lands in P3; `onComplete` in P6.
     public enum Method {
         public static let initialize = "initialize"
         public static let onRequest = "on_request"
         public static let onComplete = "on_complete"
+        public static let onResponse = "on_response"
         public static let shutdown = "shutdown"
     }
 
