@@ -114,11 +114,13 @@ final class HeaderTaggerExampleTests: XCTestCase {
             return
         }
         XCTAssertEqual(
-            outHead.headers.first(name: "x-iris-plugin"), "header-tagger",
+            outHead.headers.first(name: "x-iris-plugin"),
+            "header-tagger",
             "the tag header must reach the forwarded request"
         )
         XCTAssertEqual(
-            outHead.headers.first(name: "x-api-key"), "{{kc:anthropic_api_key}}",
+            outHead.headers.first(name: "x-api-key"),
+            "{{kc:anthropic_api_key}}",
             "the credential placeholder must survive the overlay so Iris can substitute it"
         )
     }
