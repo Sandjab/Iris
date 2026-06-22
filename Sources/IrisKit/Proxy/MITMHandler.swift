@@ -118,6 +118,10 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         // SQLite — violating CLAUDE.md §6.1.
         let originalURI = head.uri
         let originalMethod = head.method.rawValue
+        // Request content-type, captured here so onComplete gating still has it at
+        // completion (the head is gone by then). Like originalURI, this is request
+        // metadata — placeholder-form, never a resolved secret.
+        let originalContentType = head.headers.first(name: "content-type")
         // Tracks whether the response head has been relayed yet, so a stream
         // failure can choose between a 502 (nothing sent) and a truncated close
         // (head already on the wire). EL-confined to the client/upstream loop.
@@ -190,6 +194,17 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 )
                 let ring = server.eventRing
                 Task { await ring.append(event) }
+                // Fire-and-forget observability: never on the response-critical path.
+                Task {
+                    await server.hookDispatcher.onComplete(
+                        method: originalMethod,
+                        uri: originalURI,
+                        host: host,
+                        contentType: originalContentType,
+                        status: outcome.statusCode,
+                        durationMs: Int(duration)
+                    )
+                }
             case .failure(let error):
                 let event = Event(
                     timestamp: startTime,
@@ -201,6 +216,17 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                 )
                 let ring = server.eventRing
                 Task { await ring.append(event) }
+                // status=0 sentinel: errored before/mid response (design C5).
+                Task {
+                    await server.hookDispatcher.onComplete(
+                        method: originalMethod,
+                        uri: originalURI,
+                        host: host,
+                        contentType: originalContentType,
+                        status: 0,
+                        durationMs: Int(duration)
+                    )
+                }
                 server.logger.warning(
                     "Upstream stream failed",
                     metadata: ["host": "\(host)", "error": "\(error)"]
