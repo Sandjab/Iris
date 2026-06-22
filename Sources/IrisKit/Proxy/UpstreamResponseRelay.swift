@@ -39,37 +39,80 @@ final class UpstreamResponseRelay: ChannelDuplexHandler, @unchecked Sendable {
     /// it on stream failure to choose between a `502` (no head yet) and a
     /// truncated close (head already sent). EL-confined to the shared loop.
     private let headWritten: NIOLoopBoundBox<Bool>
+    /// Optional metadata-mode onResponse hook. When set, the head is held until the
+    /// hook resolves the (possibly header-overlaid) head; body/end parts that arrive
+    /// during that timeout-bounded window are queued, then drained in order. nil →
+    /// the head is relayed immediately (byte-for-byte the v1 path).
+    private let responseHeadHook: (@Sendable (HTTPResponseHead) -> EventLoopFuture<HTTPResponseHead>)?
+    private var headHookInFlight = false
+    private var queuedParts: [HTTPClientResponsePart] = []
     private var status: Int = 0
     private var done = false
 
     init(
         clientChannel: Channel,
         completion: EventLoopPromise<StreamOutcome>,
-        headWritten: NIOLoopBoundBox<Bool>
+        headWritten: NIOLoopBoundBox<Bool>,
+        responseHeadHook: (@Sendable (HTTPResponseHead) -> EventLoopFuture<HTTPResponseHead>)? = nil
     ) {
         self.clientChannel = clientChannel
         self.completion = completion
         self.headWritten = headWritten
+        self.responseHeadHook = responseHeadHook
     }
 
     // MARK: - Inbound: relay response parts to the client
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        switch unwrapInboundIn(data) {
+        let part = unwrapInboundIn(data)
+        // Head hook pending: hold body/end until the resolved head is on the wire.
+        if headHookInFlight {
+            queuedParts.append(part)
+            return
+        }
+        switch part {
         case .head(let head):
-            status = Int(head.status.code)
-            headWritten.value = true
-            // Route via `clientChannel` (typed Channel.write overload, preferred
-            // per ConnectHandler): the response traverses the client pipeline's
-            // HTTPResponseEncoder. Written unflushed; `channelReadComplete`
-            // coalesces the flush (one flush per upstream read cycle — still one
-            // flush per SSE event, far fewer syscalls than per-part).
-            let outHead = HTTPResponseHead(
-                version: head.version,
-                status: head.status,
-                headers: head.headers
-            )
-            clientChannel.write(HTTPServerResponsePart.head(outHead), promise: nil)
+            guard let hook = responseHeadHook else {
+                relayHead(head)
+                return
+            }
+            // Hold the head; run the metadata-mode hook; relay the resolved head on
+            // the EventLoop, then drain anything that arrived meanwhile.
+            headHookInFlight = true
+            hook(head).hop(to: clientChannel.eventLoop).whenComplete { [weak self] result in
+                guard let self = self else { return }
+                let resolved: HTTPResponseHead
+                switch result {
+                case .success(let h): resolved = h
+                case .failure: resolved = head  // defensive: hook never fails (R4 skip)
+                }
+                self.relayHead(resolved)
+                self.clientChannel.flush()  // off a read cycle → channelReadComplete won't flush
+                self.headHookInFlight = false
+                self.drainQueued()
+            }
+        case .body, .end:
+            relayPart(part)
+        }
+    }
+
+    /// Relays the response head to the client. Routed via `clientChannel` (typed
+    /// Channel.write overload, preferred per ConnectHandler): the response
+    /// traverses the client pipeline's HTTPResponseEncoder. Written unflushed: on a
+    /// read cycle, `channelReadComplete` coalesces the flush (the v1 behavior — one
+    /// flush per upstream read cycle, far fewer syscalls than per-part). The hook
+    /// path flushes explicitly (it runs off a read cycle).
+    private func relayHead(_ head: HTTPResponseHead) {
+        status = Int(head.status.code)
+        headWritten.value = true
+        let outHead = HTTPResponseHead(version: head.version, status: head.status, headers: head.headers)
+        clientChannel.write(HTTPServerResponsePart.head(outHead), promise: nil)
+    }
+
+    private func relayPart(_ part: HTTPClientResponsePart) {
+        switch part {
+        case .head(let head):
+            relayHead(head)
         case .body(let buffer):
             clientChannel.write(HTTPServerResponsePart.body(.byteBuffer(buffer)), promise: nil)
         case .end(let trailers):
@@ -83,6 +126,14 @@ final class UpstreamResponseRelay: ChannelDuplexHandler, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// Drains parts queued during the head hook, in arrival order, then flushes.
+    private func drainQueued() {
+        let parts = queuedParts
+        queuedParts.removeAll()
+        for part in parts { relayPart(part) }
+        clientChannel.flush()
     }
 
     func channelReadComplete(context: ChannelHandlerContext) {
