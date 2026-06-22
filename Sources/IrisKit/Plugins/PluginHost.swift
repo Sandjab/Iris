@@ -218,6 +218,19 @@ public actor PluginHost {
         return try result.decode(as: PluginRPC.OnRequestResult.self)
     }
 
+    /// Sends one `on_response` and returns the typed result. Same request/response
+    /// path as `onRequest`: throws `.timeout` on deadline, `.notRunning` if the
+    /// process is gone, or the plugin's JSON-RPC error.
+    public func onResponse(_ params: PluginRPC.OnResponseParams, timeout: TimeInterval) async throws
+        -> PluginRPC.OnResponseResult
+    {
+        guard started else { throw PluginHostError.notRunning }
+        let response = try await send(method: PluginRPC.Method.onResponse, params: params, timeout: timeout)
+        if let error = response.error { throw error }
+        guard let result = response.result else { throw PluginHostError.malformedResponse }
+        return try result.decode(as: PluginRPC.OnResponseResult.self)
+    }
+
     // MARK: - IPC
 
     private func send<P: Encodable>(method: String, params: P, timeout: TimeInterval) async throws
