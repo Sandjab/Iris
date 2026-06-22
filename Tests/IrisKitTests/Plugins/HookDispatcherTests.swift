@@ -233,9 +233,21 @@ final class HookDispatcherTests: XCTestCase {
     }
 
     func testOnCompleteEmptyChainIsNoop() async {
+        // A plugin present in the onRequest chain must NOT be invoked by onComplete
+        // when the onComplete chain is empty — the two chains are independent.
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
         let d = HookDispatcher()
-        await d.onComplete(method: "GET", uri: "/x", host: "h", contentType: nil, status: 0, durationMs: 1)
-        XCTAssertEqual(d.chainCountForTesting, 0)
+        d.updateChain([entry(inv)])
+        await d.onComplete(
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil,
+            status: 0,
+            durationMs: 1
+        )
+        let calls = await inv.completeCalls
+        XCTAssertTrue(calls.isEmpty, "onComplete must read its own chain, not the onRequest chain")
     }
 
     func testOnCompleteSwallowsPluginErrors() async {

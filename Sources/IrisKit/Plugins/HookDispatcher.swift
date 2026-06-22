@@ -23,12 +23,14 @@ extension PluginInvoking {
 
 // MARK: - PluginChainEntry
 
-/// One running plugin + the `onRequest` hook it declared, in chain order. Built
-/// by `PluginHostManager` after reconcile and pushed to the dispatcher.
+/// One running plugin + a hook it declared, in chain order. Built by
+/// `PluginHostManager` after reconcile and pushed to the dispatcher. A single
+/// entry belongs to either the onRequest chain or the onComplete chain depending
+/// on the hook's `event`; the struct itself is event-agnostic.
 public struct PluginChainEntry: Sendable {
     public let pluginId: String
     public let invoker: any PluginInvoking
-    public let hook: PluginHook  // event == .onRequest
+    public let hook: PluginHook
 
     public init(pluginId: String, invoker: any PluginInvoking, hook: PluginHook) {
         self.pluginId = pluginId
