@@ -145,9 +145,11 @@ final class PluginRPCTests: XCTestCase {
         )
         let line = try PluginRPC.encodeRequest(method: PluginRPC.Method.onResponse, params: params, id: 7)
         XCTAssertTrue(line.hasSuffix("\n"))
-        XCTAssertFalse(line.dropLast().contains("\n"), "compact single-line NDJSON")
+        XCTAssertEqual(line.filter { $0 == "\n" }.count, 1)
         XCTAssertTrue(line.contains("\"method\":\"on_response\""))
         XCTAssertTrue(line.contains("\"status\":200"))
+        XCTAssertTrue(line.contains("api.anthropic.com"), "host encoded")
+        XCTAssertTrue(line.contains("text/event-stream"), "response header survives encoding")
     }
 
     func testDecodeOnResponseResultPassAndModify() throws {

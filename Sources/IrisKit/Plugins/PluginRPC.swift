@@ -192,7 +192,8 @@ public enum PluginRPC {
     }
 
     /// Methods spoken on the channel. P2b uses `initialize` (request) and
-    /// `shutdown` (notification); `onRequest` lands in P3; `onComplete` in P6.
+    /// `shutdown` (notification); `onRequest` lands in P3; `onComplete` in P6;
+    /// `onResponse` (metadata mode) follows.
     public enum Method {
         public static let initialize = "initialize"
         public static let onRequest = "on_request"
