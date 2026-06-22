@@ -283,7 +283,11 @@ public final class HookDispatcher: Sendable {
         let (path, _) = PlaceholderScanner.splitURI(uri)
         let applicable = chain.filter {
             $0.hook.match.matches(
-                host: host, method: method, path: path, requestContentType: contentType, status: status
+                host: host,
+                method: method,
+                path: path,
+                requestContentType: contentType,
+                status: status
             )
         }
         if applicable.isEmpty { return headers }
@@ -291,7 +295,10 @@ public final class HookDispatcher: Sendable {
         var current = headers
         for entry in applicable {
             let params = PluginRPC.OnResponseParams(
-                method: method, uri: uri, host: host, status: status,
+                method: method,
+                uri: uri,
+                host: host,
+                status: status,
                 headers: current.map { [$0.0, $0.1] }
             )
             // Clamp: validate() rejects timeoutMs<=0 for installed plugins, but a
@@ -309,15 +316,16 @@ public final class HookDispatcher: Sendable {
                     "plugin onResponse failed (skipped)",
                     metadata: ["id": "\(entry.pluginId)", "error": "\(error)"]
                 )
-                continue
             }
         }
         return current
     }
 
-    /// Overlay by name (case-insensitive), mirroring `onRequest`'s `replaceOrAdd`:
-    /// unspecified headers are preserved, no removal in v1. Order is stable —
-    /// replaced headers keep position; new headers append.
+    /// Overlay by name (case-insensitive): replaces the first occurrence by name,
+    /// any later duplicate entries are preserved — correct for response headers
+    /// where duplicate names are meaningful (e.g. `Set-Cookie`). No removal in v1.
+    /// Unspecified headers are preserved. Order is stable — replaced headers keep
+    /// position; new headers append.
     private static func overlayResponseHeaders(
         _ pairs: [[String]],
         onto current: [(String, String)]

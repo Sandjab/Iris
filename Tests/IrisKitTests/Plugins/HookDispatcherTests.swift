@@ -305,11 +305,15 @@ final class HookDispatcherTests: XCTestCase {
         let out = await d.onResponse(
             status: 200,
             headers: [("content-type", "text/event-stream")],
-            method: "POST", uri: "/v1/messages", host: "h", contentType: "application/json"
+            method: "POST",
+            uri: "/v1/messages",
+            host: "h",
+            contentType: "application/json"
         )
         XCTAssertEqual(out.first(where: { $0.0 == "x-iris-tagged" })?.1, "1")
         XCTAssertEqual(
-            out.first(where: { $0.0 == "content-type" })?.1, "text/event-stream",
+            out.first(where: { $0.0 == "content-type" })?.1,
+            "text/event-stream",
             "overlay preserves unspecified headers"
         )
     }
@@ -320,8 +324,12 @@ final class HookDispatcherTests: XCTestCase {
         let d = HookDispatcher()
         d.updateResponseChain([responseEntry(inv)])
         let out = await d.onResponse(
-            status: 200, headers: [("a", "1")],
-            method: "GET", uri: "/x", host: "h", contentType: nil
+            status: 200,
+            headers: [("a", "1")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
         )
         XCTAssertEqual(out.map { $0.0 }, ["a"])
         XCTAssertEqual(out.first?.1, "1")
@@ -333,8 +341,12 @@ final class HookDispatcherTests: XCTestCase {
         let d = HookDispatcher()
         d.updateResponseChain([responseEntry(inv, match: HookMatch(status: [500]))])
         let out = await d.onResponse(
-            status: 200, headers: [("a", "1")],
-            method: "GET", uri: "/x", host: "h", contentType: nil
+            status: 200,
+            headers: [("a", "1")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
         )
         let calls = await inv.responseCallCount
         XCTAssertEqual(calls, 0, "status [500] must not match a 200 response")
@@ -352,8 +364,12 @@ final class HookDispatcherTests: XCTestCase {
         let d = HookDispatcher()
         d.updateResponseChain([responseEntry(a), responseEntry(b)])
         let out = await d.onResponse(
-            status: 200, headers: [],
-            method: "GET", uri: "/x", host: "h", contentType: nil
+            status: 200,
+            headers: [],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
         )
         XCTAssertEqual(out.first(where: { $0.0 == "x" })?.1, "ab")
     }
@@ -365,13 +381,20 @@ final class HookDispatcherTests: XCTestCase {
         let b = MockInvoker(id: "b") { _ in .init(action: .pass) }
         await b.setOnResponse { _ in .init(action: .modify, headers: [["x-b", "1"]]) }
         let d = HookDispatcher()
-        d.updateResponseChain([responseEntry(a, onFailure: .skip), responseEntry(b)])
+        // onFailure is ignored for onResponse; the manifest rejects `block` for
+        // response hooks, so a throwing response plugin can only ever be skipped.
+        d.updateResponseChain([responseEntry(a), responseEntry(b)])
         let out = await d.onResponse(
-            status: 200, headers: [],
-            method: "GET", uri: "/x", host: "h", contentType: nil
+            status: 200,
+            headers: [],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
         )
         XCTAssertEqual(
-            out.first(where: { $0.0 == "x-b" })?.1, "1",
+            out.first(where: { $0.0 == "x-b" })?.1,
+            "1",
             "a throwing plugin is skipped; chain continues"
         )
     }
@@ -386,6 +409,31 @@ final class HookDispatcherTests: XCTestCase {
         XCTAssertFalse(
             d.hasResponseHook(method: "POST", uri: "/v1/messages", host: "other.com", contentType: nil)
         )
+    }
+
+    func testHasResponseHookIgnoresStatus() async {
+        // The pre-gate deliberately OVER-INCLUDES: response status is unknown at
+        // request time, so a status-restricted hook must still arm the response
+        // path. The full status filter then rejects the non-matching response.
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in .init(action: .modify, headers: [["x", "1"]]) }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv, match: HookMatch(status: [500]))])
+        XCTAssertTrue(
+            d.hasResponseHook(method: "GET", uri: "/x", host: "h", contentType: nil),
+            "pre-gate ignores status (unknown at request time) — must arm the response path"
+        )
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("a", "1")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        let calls = await inv.responseCallCount
+        XCTAssertEqual(calls, 0, "the full status filter rejects a 200 against status [500]")
+        XCTAssertEqual(out.map { $0.0 }, ["a"], "non-matching status leaves headers unchanged")
     }
 
     func testOnCompleteDispatchesConcurrentlyAcrossPlugins() async {
