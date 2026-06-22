@@ -11,7 +11,10 @@
       "mutates": true, "on_failure": "skip", "timeout_ms": 200 },
     { "event": "on_complete",
       "match": { "hosts": ["api.anthropic.com"], "methods": ["POST"], "path_regex": "^/v1/" },
-      "mutates": false, "on_failure": "skip", "timeout_ms": 200 }
+      "mutates": false, "on_failure": "skip", "timeout_ms": 200 },
+    { "event": "on_response",
+      "match": { "hosts": ["api.anthropic.com"], "methods": ["POST"], "path_regex": "^/v1/" },
+      "mutates": true, "on_failure": "skip", "timeout_ms": 200 }
   ],
   "capabilities": { "network": [], "filesystem": ["scratch"] }
 }
