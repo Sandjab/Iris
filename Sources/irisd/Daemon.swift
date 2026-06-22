@@ -188,6 +188,7 @@ public actor Daemon {
                 )
             },
             onChainChanged: { [hookDispatcher] chain in hookDispatcher.updateChain(chain) },
+            onCompleteChainChanged: { [hookDispatcher] chain in hookDispatcher.updateCompleteChain(chain) },
             logger: logger
         )
         self.pluginHostManager = pluginHostManager
