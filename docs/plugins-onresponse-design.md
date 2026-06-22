@@ -221,9 +221,10 @@ contrainte de design — forme exacte tranchée au plan — est :
 
 `PluginInvoking` gagne `func onResponse(_ params:, timeout:) async throws -> OnResponseResult`.
 `republishChain` construit désormais **trois** listes homogènes (filtrées par `event` :
-`onRequest`/`onResponse`/`onComplete`) et les pousse **atomiquement** (pas de fenêtre où l'une
-est neuve et l'autre périmée). Un plugin déclarant plusieurs hooks produit une entrée par
-chaîne.
+`onRequest`/`onResponse`/`onComplete`) et les publie **séquentiellement** (trois écrits
+`NIOLockedValueBox` indépendants) ; inoffensif car aucun observateur ne lit les trois chaînes
+ensemble — chaque requête lit chaque box à un point de cycle de vie distinct. Un plugin
+déclarant plusieurs hooks produit une entrée par chaîne.
 
 ---
 

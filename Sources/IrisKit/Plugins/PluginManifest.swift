@@ -2,8 +2,8 @@ import Foundation
 import NIOConcurrencyHelpers
 
 /// Declarative description of a plugin, parsed from its `plugin.json`.
-/// P1 models the full schema but only `onRequest` is dispatched (P3); response
-/// hooks and config schema are reserved for later phases.
+/// `onRequest`, `onResponse`, and `onComplete` hooks are all dispatched.
+/// Config schema-driven configuration (D6) remains reserved for a later phase.
 public struct PluginManifest: Codable, Sendable, Hashable {
     /// Supported plugin API contract version. Iris refuses manifests declaring
     /// any other value (forward/backward incompatibility is explicit, never silent).

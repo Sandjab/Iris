@@ -436,6 +436,66 @@ final class HookDispatcherTests: XCTestCase {
         XCTAssertEqual(out.map { $0.0 }, ["a"], "non-matching status leaves headers unchanged")
     }
 
+    func testOnResponseIgnoresFramingHeaderOverlay() async {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in
+            .init(action: .modify, headers: [["content-length", "999"], ["x-iris-tagged", "1"]])
+        }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv)])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("content-length", "2"), ("content-type", "application/json")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        XCTAssertEqual(
+            out.first(where: { $0.0.lowercased() == "content-length" })?.1,
+            "2",
+            "a plugin must not overwrite the upstream content-length (framing protection)"
+        )
+        XCTAssertEqual(out.first(where: { $0.0 == "x-iris-tagged" })?.1, "1", "non-framing overlay still applies")
+    }
+
+    func testOnResponseOverlayPreservesDuplicateHeaders() async {
+        // Response headers may legally repeat (Set-Cookie). The overlay must not collapse them.
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in .init(action: .modify, headers: [["x-iris-tagged", "1"]]) }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv)])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("set-cookie", "a=1"), ("set-cookie", "b=2"), ("content-type", "text/html")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        let cookies = out.filter { $0.0.lowercased() == "set-cookie" }.map { $0.1 }
+        XCTAssertEqual(cookies, ["a=1", "b=2"], "duplicate Set-Cookie headers are preserved through the overlay")
+        XCTAssertEqual(out.first(where: { $0.0 == "x-iris-tagged" })?.1, "1")
+    }
+
+    func testOnResponseOverlayReplaceIsCaseInsensitive() async {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in .init(action: .modify, headers: [["Content-Type", "text/plain"]]) }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv)])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("content-type", "text/html")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        let cts = out.filter { $0.0.lowercased() == "content-type" }
+        XCTAssertEqual(cts.count, 1, "case-insensitive replace must not duplicate the header")
+        XCTAssertEqual(cts.first?.1, "text/plain")
+    }
+
     func testOnCompleteDispatchesConcurrentlyAcrossPlugins() async {
         // A blocks until released; B records immediately. Concurrent dispatch delivers
         // to B even while A is blocked. A SEQUENTIAL dispatch (A is first in the chain)

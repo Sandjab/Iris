@@ -321,17 +321,32 @@ public final class HookDispatcher: Sendable {
         return current
     }
 
+    /// Framing/hop-by-hop names a plugin must never overwrite (RFC 7230 §6.1).
+    /// Mirrors the set stripped by `MITMHandler.writeSynthetic` — verbatim copy
+    /// so any future additions remain consistent.
+    private static let framingHeaders: Set<String> = [
+        "content-length", "transfer-encoding", "connection", "keep-alive",
+        "upgrade", "te", "trailer", "proxy-authenticate", "proxy-authorization",
+        "proxy-connection",
+    ]
+
     /// Overlay by name (case-insensitive): replaces the first occurrence by name,
     /// any later duplicate entries are preserved — correct for response headers
     /// where duplicate names are meaningful (e.g. `Set-Cookie`). No removal in v1.
     /// Unspecified headers are preserved. Order is stable — replaced headers keep
     /// position; new headers append.
+    ///
+    /// Framing/hop-by-hop names (`content-length`, `transfer-encoding`, `connection`,
+    /// etc. — see `framingHeaders`) are silently skipped: a plugin cannot corrupt the
+    /// upstream's own response framing. The upstream's framing headers in `current`
+    /// pass through untouched.
     private static func overlayResponseHeaders(
         _ pairs: [[String]],
         onto current: [(String, String)]
     ) -> [(String, String)] {
         var result = current
         for p in pairs where p.count == 2 {
+            guard !framingHeaders.contains(p[0].lowercased()) else { continue }
             if let idx = result.firstIndex(where: { $0.0.lowercased() == p[0].lowercased() }) {
                 result[idx] = (p[0], p[1])
             } else {
