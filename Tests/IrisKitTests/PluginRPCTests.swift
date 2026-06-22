@@ -103,4 +103,35 @@ final class PluginRPCTests: XCTestCase {
         XCTAssertNil(pass.status)
         XCTAssertNil(pass.uri)
     }
+
+    func testEncodeOnCompleteNotificationHasNoIdAndCarriesParams() throws {
+        let params = PluginRPC.OnCompleteParams(
+            method: "POST",
+            uri: "/v1/messages",
+            host: "api.anthropic.com",
+            status: 200,
+            durationMs: 1342
+        )
+        let line = try PluginRPC.encodeNotification(method: PluginRPC.Method.onComplete, params: params)
+        XCTAssertTrue(line.hasSuffix("\n"))
+        XCTAssertEqual(line.filter { $0 == "\n" }.count, 1)
+        XCTAssertFalse(line.contains("\"id\""), "a notification carries no id")
+        XCTAssertTrue(line.contains("\"method\":\"on_complete\""))
+        XCTAssertTrue(line.contains("\"status\":200"))
+        XCTAssertTrue(line.contains("\"duration_ms\":1342"))
+        XCTAssertTrue(line.contains("\"host\":\"api.anthropic.com\""))
+    }
+
+    func testOnCompleteParamsRoundTrips() throws {
+        let params = PluginRPC.OnCompleteParams(
+            method: "GET",
+            uri: "/v1/x",
+            host: "h",
+            status: 0,
+            durationMs: 5
+        )
+        let data = try JSONEncoder().encode(params)
+        let back = try JSONDecoder().decode(PluginRPC.OnCompleteParams.self, from: data)
+        XCTAssertEqual(back, params)
+    }
 }
