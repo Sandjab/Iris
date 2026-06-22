@@ -41,6 +41,7 @@ final class HeaderTaggerExampleTests: XCTestCase {
     /// with a `modify` action carrying the tag header.
     func testHeaderTaggerReturnsModifyWithTagHeader() async throws {
         let scratch = try scratchDir()
+        defer { try? FileManager.default.removeItem(at: scratch) }
         let host = makeHost(scratch: scratch)
         try await host.start()
 
@@ -64,7 +65,6 @@ final class HeaderTaggerExampleTests: XCTestCase {
             caught = error
         }
         await host.shutdown()
-        try? FileManager.default.removeItem(at: scratch)
         if let caught = caught { throw caught }
 
         XCTAssertEqual(result?.action, .modify, "header-tagger must return a modify action")
@@ -79,6 +79,7 @@ final class HeaderTaggerExampleTests: XCTestCase {
     /// PRESERVES the credential placeholder (so Iris can substitute it afterwards).
     func testHeaderTaggerOverlayPreservesCredentialPlaceholder() async throws {
         let scratch = try scratchDir()
+        defer { try? FileManager.default.removeItem(at: scratch) }
         let host = makeHost(scratch: scratch)
         try await host.start()
 
@@ -107,7 +108,6 @@ final class HeaderTaggerExampleTests: XCTestCase {
 
         let outcome = await dispatcher.onRequest(head: head, body: nil, host: "api.anthropic.com")
         await host.shutdown()
-        try? FileManager.default.removeItem(at: scratch)
 
         guard case .proceed(let outHead, _) = outcome else {
             XCTFail("expected .proceed, got \(outcome)")
