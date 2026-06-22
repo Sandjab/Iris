@@ -88,6 +88,30 @@ extension AdminClient: AdminCalling {
         )
     }
 
+    public func listPlugins() async throws -> [Plugin] {
+        try await call(.pluginList, returning: [Plugin].self)
+    }
+
+    public func installPlugin(path: String) async throws -> Plugin {
+        try await call(.pluginInstall, params: PluginInstallParams(path: path), returning: Plugin.self)
+    }
+
+    public func enablePlugin(id: String) async throws -> Plugin {
+        try await call(.pluginEnable, params: PluginIdParams(id: id), returning: Plugin.self)
+    }
+
+    public func disablePlugin(id: String) async throws -> Plugin {
+        try await call(.pluginDisable, params: PluginIdParams(id: id), returning: Plugin.self)
+    }
+
+    public func removePlugin(id: String) async throws {
+        _ = try await call(.pluginRemove, params: PluginIdParams(id: id), returning: PluginRemovedResult.self)
+    }
+
+    public func reorderPlugin(id: String, index: Int) async throws -> [Plugin] {
+        try await call(.pluginReorder, params: PluginReorderParams(id: id, index: index), returning: [Plugin].self)
+    }
+
     public func fetchConfig() async throws -> Config {
         try await call(.configGet, returning: Config.self)
     }

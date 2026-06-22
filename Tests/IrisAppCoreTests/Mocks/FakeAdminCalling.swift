@@ -17,6 +17,7 @@ final class FakeAdminCalling: AdminCalling, @unchecked Sendable {
     var shouldThrow: Error?
     var stubSecrets: [Secret] = []
     var stubRules: [MITMRule] = []
+    var stubPlugins: [Plugin] = []
     var stubConfig: Config = .default
     var stubCATrusted: Bool = false
     var stubConfigPath: String = "/tmp/iris/config.json"
@@ -132,6 +133,106 @@ final class FakeAdminCalling: AdminCalling, @unchecked Sendable {
         calls.append("deleteRule(\(host))")
         if let e = shouldThrow { throw e }
         stubRules.removeAll { $0.host == host }
+    }
+
+    func listPlugins() async throws -> [Plugin] {
+        calls.append("listPlugins")
+        if let e = shouldThrow { throw e }
+        return stubPlugins
+    }
+
+    func installPlugin(path: String) async throws -> Plugin {
+        calls.append("installPlugin(\(path))")
+        if let e = shouldThrow { throw e }
+        let id = path.split(separator: "/").last.map(String.init) ?? path
+        let manifest = PluginManifest(
+            id: id,
+            name: id,
+            version: "0.0.1",
+            executable: "plugin",
+            hooks: [PluginHook(event: .onRequest, match: HookMatch())]
+        )
+        let plugin = Plugin(
+            manifest: manifest,
+            enabled: false,
+            order: stubPlugins.count,
+            approvedCapabilities: nil,
+            pinnedHash: "hash",
+            hashMatches: true
+        )
+        stubPlugins.append(plugin)
+        return plugin
+    }
+
+    func enablePlugin(id: String) async throws -> Plugin {
+        calls.append("enablePlugin(\(id))")
+        if let e = shouldThrow { throw e }
+        if let idx = stubPlugins.firstIndex(where: { $0.manifest.id == id }) {
+            let existing = stubPlugins[idx]
+            let updated = Plugin(
+                manifest: existing.manifest,
+                enabled: true,
+                order: existing.order,
+                approvedCapabilities: existing.manifest.capabilities,
+                pinnedHash: existing.pinnedHash,
+                hashMatches: existing.hashMatches
+            )
+            stubPlugins[idx] = updated
+            return updated
+        }
+        // No match: the real daemon throws for an unknown id — fail loud, never
+        // silently succeed (a no-op re-fetch would mask a wrong RPC in tests).
+        throw JSONRPCError.pluginUnknown
+    }
+
+    func disablePlugin(id: String) async throws -> Plugin {
+        calls.append("disablePlugin(\(id))")
+        if let e = shouldThrow { throw e }
+        if let idx = stubPlugins.firstIndex(where: { $0.manifest.id == id }) {
+            let existing = stubPlugins[idx]
+            let updated = Plugin(
+                manifest: existing.manifest,
+                enabled: false,
+                order: existing.order,
+                approvedCapabilities: existing.approvedCapabilities,
+                pinnedHash: existing.pinnedHash,
+                hashMatches: existing.hashMatches
+            )
+            stubPlugins[idx] = updated
+            return updated
+        }
+        // No match: the real daemon throws for an unknown id — fail loud, never
+        // silently succeed (a no-op re-fetch would mask a wrong RPC in tests).
+        throw JSONRPCError.pluginUnknown
+    }
+
+    func removePlugin(id: String) async throws {
+        calls.append("removePlugin(\(id))")
+        if let e = shouldThrow { throw e }
+        stubPlugins.removeAll { $0.manifest.id == id }
+    }
+
+    func reorderPlugin(id: String, index: Int) async throws -> [Plugin] {
+        calls.append("reorderPlugin(\(id),\(index))")
+        if let e = shouldThrow { throw e }
+        guard let src = stubPlugins.firstIndex(where: { $0.manifest.id == id }) else {
+            return stubPlugins
+        }
+        var list = stubPlugins
+        let plugin = list.remove(at: src)
+        let dst = min(max(index, 0), list.count)
+        list.insert(plugin, at: dst)
+        stubPlugins = list.enumerated().map { i, p in
+            Plugin(
+                manifest: p.manifest,
+                enabled: p.enabled,
+                order: i,
+                approvedCapabilities: p.approvedCapabilities,
+                pinnedHash: p.pinnedHash,
+                hashMatches: p.hashMatches
+            )
+        }
+        return stubPlugins
     }
 
     func fetchConfig() async throws -> Config {

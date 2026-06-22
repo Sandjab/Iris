@@ -10,7 +10,7 @@ struct SettingsWindow: View {
 
     /// Nommé `Pane` (pas `Section`) pour ne pas ombrer `SwiftUI.Section`, utilisé plus bas.
     enum Pane: String, CaseIterable, Identifiable, Hashable {
-        case general, certificate, integration, advanced, uninstall
+        case general, certificate, integration, advanced, plugins, uninstall
         var id: Self { self }
         var title: String {
             switch self {
@@ -18,6 +18,7 @@ struct SettingsWindow: View {
             case .certificate: return "Certificate"
             case .integration: return "Integration"
             case .advanced: return "Advanced"
+            case .plugins: return "Plugins"
             case .uninstall: return "Uninstall"
             }
         }
@@ -27,6 +28,7 @@ struct SettingsWindow: View {
             case .certificate: return "lock.shield"
             case .integration: return "terminal"
             case .advanced: return "slider.horizontal.3"
+            case .plugins: return "puzzlepiece.extension"
             case .uninstall: return "trash"
             }
         }
@@ -37,7 +39,7 @@ struct SettingsWindow: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
-                ForEach([Pane.general, .certificate, .integration, .advanced]) { pane in
+                ForEach([Pane.general, .certificate, .integration, .advanced, .plugins]) { pane in
                     Label(pane.title, systemImage: pane.symbol).tag(pane)
                 }
                 // Action destructive isolée en bas de la sidebar (Section visuelle SwiftUI).
@@ -70,6 +72,7 @@ struct SettingsWindow: View {
         case .certificate: CertificateSettingsView(admin: admin)
         case .integration: IntegrationSettingsView()
         case .advanced: AdvancedSettingsView(admin: admin)
+        case .plugins: PluginsSettingsView(admin: admin)
         case .uninstall: UninstallSettingsView(admin: admin)
         }
     }

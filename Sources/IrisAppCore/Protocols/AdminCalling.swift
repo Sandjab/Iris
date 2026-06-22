@@ -46,6 +46,26 @@ public protocol AdminCalling: Sendable {
     /// Delete a runtime MITM rule.
     func deleteRule(host: String) async throws
 
+    // MARK: - Plugins
+
+    /// List all installed plugins.
+    func listPlugins() async throws -> [Plugin]
+
+    /// Install a plugin from a directory on disk. Returns the created Plugin (disabled).
+    func installPlugin(path: String) async throws -> Plugin
+
+    /// Approve capabilities and enable a plugin. Returns the updated Plugin.
+    func enablePlugin(id: String) async throws -> Plugin
+
+    /// Disable a plugin. Returns the updated Plugin.
+    func disablePlugin(id: String) async throws -> Plugin
+
+    /// Remove an installed plugin.
+    func removePlugin(id: String) async throws
+
+    /// Move a plugin to a target position in the hook chain. Returns the reordered list.
+    func reorderPlugin(id: String, index: Int) async throws -> [Plugin]
+
     /// Fetch the full config snapshot (broker/security/backups/hosts).
     func fetchConfig() async throws -> Config
 
