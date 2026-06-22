@@ -16,8 +16,8 @@ public protocol PluginInvoking: Sendable {
     /// is a no-op so conformers that declare no onComplete hook need not implement it.
     func onComplete(_ params: PluginRPC.OnCompleteParams) async throws
     /// Runs the onResponse hook (metadata mode): observe/overlay response headers.
-    /// Default is a no-op `pass` so conformers declaring no onResponse hook need
-    /// not implement it.
+    /// Default returns `.pass` — effectively a no-op — so conformers declaring no
+    /// onResponse hook need not implement it.
     func onResponse(_ params: PluginRPC.OnResponseParams, timeout: TimeInterval) async throws
         -> PluginRPC.OnResponseResult
 }
@@ -35,8 +35,8 @@ extension PluginInvoking {
 
 /// One running plugin + a hook it declared, in chain order. Built by
 /// `PluginHostManager` after reconcile and pushed to the dispatcher. A single
-/// entry belongs to either the onRequest chain or the onComplete chain depending
-/// on the hook's `event`; the struct itself is event-agnostic.
+/// entry belongs to the onRequest, onResponse, or onComplete chain depending on
+/// the hook's `event`; the struct itself is event-agnostic.
 public struct PluginChainEntry: Sendable {
     public let pluginId: String
     public let invoker: any PluginInvoking
@@ -70,8 +70,8 @@ public final class HookDispatcher: Sendable {
     static let maxBodyBytes = 4 * 1024 * 1024
 
     private let chainBox = NIOLockedValueBox<[PluginChainEntry]>([])
-    private let completeChainBox = NIOLockedValueBox<[PluginChainEntry]>([])
     private let responseChainBox = NIOLockedValueBox<[PluginChainEntry]>([])
+    private let completeChainBox = NIOLockedValueBox<[PluginChainEntry]>([])
     private let logger: Logger
 
     public init(logger: Logger = Logger(label: "io.iris.plugins.dispatch")) {
@@ -83,14 +83,14 @@ public final class HookDispatcher: Sendable {
         chainBox.withLockedValue { $0 = chain }
     }
 
-    /// Pushed by `PluginHostManager` after each reconcile (onComplete chain).
-    public func updateCompleteChain(_ chain: [PluginChainEntry]) {
-        completeChainBox.withLockedValue { $0 = chain }
-    }
-
     /// Pushed by `PluginHostManager` after each reconcile (onResponse chain).
     public func updateResponseChain(_ chain: [PluginChainEntry]) {
         responseChainBox.withLockedValue { $0 = chain }
+    }
+
+    /// Pushed by `PluginHostManager` after each reconcile (onComplete chain).
+    public func updateCompleteChain(_ chain: [PluginChainEntry]) {
+        completeChainBox.withLockedValue { $0 = chain }
     }
 
     /// Test-only: number of entries in the current chain snapshot. Production code

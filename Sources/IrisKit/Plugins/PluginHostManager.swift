@@ -124,8 +124,8 @@ public actor PluginHostManager {
         }
         hosts.removeAll()
         onChainChanged([])
-        onCompleteChainChanged([])
         onResponseChainChanged([])
+        onCompleteChainChanged([])
     }
 
     // MARK: - Internals
