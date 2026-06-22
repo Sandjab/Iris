@@ -902,11 +902,11 @@ for the three CLI/daemon binaries, plus an Xcode project for the app target (the
   "daemon": {
     "fr": {
       "title": "Daemon irisd",
-      "body": "Process unique par session utilisateur. Trois listeners : proxy MITM (8888), SSE events (8899), Unix socket admin (0600). I/O 100% async via swift-nio. État en mémoire : map des secrets + LRU des valeurs (TTL 5min, 32 entrées max) + ring buffer 10k events. Persistance : SQLite pour l'historique (métadonnées uniquement)."
+      "body": "Process unique par session utilisateur. Trois listeners : proxy MITM (8888), SSE events (8899), Unix socket admin (0600). I/O 100% async via swift-nio. État en mémoire : map des secrets + LRU des valeurs (TTL 5min, 32 entrées max) + ring buffer 10k events. Persistance : SQLite pour l'historique (métadonnées uniquement). Point d'extension optionnel : des plugins hors-process et sandboxés peuvent s'insérer sur le flux des requêtes, avant le scan d'exfiltration (chapitre 23)."
     },
     "en": {
       "title": "irisd daemon",
-      "body": "A single process per user session. Three listeners: MITM proxy (8888), SSE events (8899), admin Unix socket (0600). 100% async I/O via swift-nio. In-memory state: a map of secrets + an LRU of values (5-min TTL, 32 entries max) + a 10k-event ring buffer. Persistence: SQLite for history (metadata only)."
+      "body": "A single process per user session. Three listeners: MITM proxy (8888), SSE events (8899), admin Unix socket (0600). 100% async I/O via swift-nio. In-memory state: a map of secrets + an LRU of values (5-min TTL, 32 entries max) + a 10k-event ring buffer. Persistence: SQLite for history (metadata only). Optional extension point: out-of-process sandboxed plugins can hook into the request flow, before the exfiltration scan (chapter 23)."
     }
   },
   "keychain": {
@@ -952,6 +952,13 @@ for the three CLI/daemon binaries, plus an Xcode project for the app target (the
 }
 </script>
 
+<p class="lang-fr">Un point d'extension optionnel complète ce schéma : des <a href="#plugins">plugins</a> hors-process et
+sandboxés peuvent s'insérer dans le daemon, sur le flux des requêtes, <strong>avant</strong> le scan
+d'exfiltration et la substitution — sans jamais accéder aux secrets.</p>
+<p class="lang-en">One optional extension point completes this picture: out-of-process, sandboxed
+<a href="#plugins">plugins</a> can hook into the daemon, on the request flow, <strong>before</strong> the
+exfiltration scan and substitution — without ever accessing secrets.</p>
+
 <h3 class="lang-fr">Structure du repo</h3>
 <h3 class="lang-en">Repo structure</h3>
 
@@ -996,12 +1003,13 @@ successful substitution. Move between the steps to follow the mechanics.
     <button data-step="2">2. CONNECT</button>
     <button data-step="3">3. Whitelist</button>
     <button data-step="4">4. TLS MITM</button>
-    <button data-step="5">5. Scan</button>
-    <button data-step="6">6. Scoping</button>
-    <button data-step="7">7. Exfil checks</button>
-    <button data-step="8">8. Substitute</button>
-    <button data-step="9">9. Forward</button>
-    <button data-step="10">10. Event</button>
+    <button data-step="5">5. Plugins</button>
+    <button data-step="6">6. Scan</button>
+    <button data-step="7">7. Scoping</button>
+    <button data-step="8">8. Exfil checks</button>
+    <button data-step="9">9. Substitute</button>
+    <button data-step="10">10. Forward</button>
+    <button data-step="11">11. Event</button>
   </div>
 
   <div class="stepper-step active" data-step="1">
@@ -1068,8 +1076,31 @@ Host: api.anthropic.com:443</code></pre>
 
   <div class="stepper-step" data-step="5">
     <div class="stepper-text">
-      <h4 class="lang-fr">Étape 5 — Scan de la requête déchiffrée</h4>
-      <h4 class="lang-en">Step 5 — Scanning the decrypted request</h4>
+      <h4 class="lang-fr">Étape 5 — Plugins (onRequest)</h4>
+      <h4 class="lang-en">Step 5 — Plugins (onRequest)</h4>
+      <p class="lang-fr">Si des plugins sont activés, la requête déchiffrée (toujours avec ses placeholders)
+      traverse la chaîne ordonnée des plugins dont le <code>match</code> correspond, <strong>avant</strong> le
+      scan. Chaque plugin peut laisser passer, modifier, bloquer ou répondre — sans jamais voir de secret.
+      Voir le <a href="#plugins">chapitre 23</a>.</p>
+      <p class="lang-en">If plugins are enabled, the decrypted request (still carrying its placeholders) runs
+      through the ordered chain of plugins whose <code>match</code> applies, <strong>before</strong> the scan.
+      Each plugin may pass, modify, block or respond — never seeing a secret. See
+      <a href="#plugins">chapter 23</a>.</p>
+      <p class="lang-fr">L'invariant : le scan d'exfiltration et la substitution d'IRIS tournent
+      <strong>toujours après</strong> les plugins, donc un plugin ne peut ni les contourner ni exfiltrer une
+      valeur.</p>
+      <p class="lang-en">The invariant: IRIS's exfiltration scan and substitution <strong>always run after</strong>
+      plugins, so a plugin can neither bypass them nor exfiltrate a value.</p>
+    </div>
+<pre><code>request (placeholders) → [plugin A → plugin B → …] → scan + substitute → upstream
+                          gating: match host / method / path
+                          action: pass | modify | block | respond</code></pre>
+  </div>
+
+  <div class="stepper-step" data-step="6">
+    <div class="stepper-text">
+      <h4 class="lang-fr">Étape 6 — Scan de la requête déchiffrée</h4>
+      <h4 class="lang-en">Step 6 — Scanning the decrypted request</h4>
       <p class="lang-fr">Le <code>PlaceholderEngine</code> scanne la requête maintenant claire (côté daemon) :
       headers (nom + valeur), URL+query, body (si UTF-8 et &lt; 4 MiB). Regex
       <code>\{\{kc:([a-zA-Z0-9_-]{1,64})\}\}</code>.</p>
@@ -1084,10 +1115,10 @@ path:    /v1/messages                          no-match
 body:    {…} (application/json, 412 B)         no-match</code></pre>
   </div>
 
-  <div class="stepper-step" data-step="6">
+  <div class="stepper-step" data-step="7">
     <div class="stepper-text">
-      <h4 class="lang-fr">Étape 6 — Vérification du scoping</h4>
-      <h4 class="lang-en">Step 6 — Scoping check</h4>
+      <h4 class="lang-fr">Étape 7 — Vérification du scoping</h4>
+      <h4 class="lang-en">Step 7 — Scoping check</h4>
       <p class="lang-fr">Le secret <code>anthropic_api_key</code> a <code>allowed_hosts = ["api.anthropic.com"]</code>.
       La requête va vers <code>api.anthropic.com</code> → <strong>match</strong>. Le daemon peut résoudre la valeur
       via le <code>SecretStore</code> (hit dans le cache LRU, sinon Keychain).</p>
@@ -1107,10 +1138,10 @@ request host = "api.anthropic.com"
 → ALLOWED</code></pre>
   </div>
 
-  <div class="stepper-step" data-step="7">
+  <div class="stepper-step" data-step="8">
     <div class="stepper-text">
-      <h4 class="lang-fr">Étape 7 — Checks d'exfiltration (R2–R5)</h4>
-      <h4 class="lang-en">Step 7 — Exfiltration checks (R2–R5)</h4>
+      <h4 class="lang-fr">Étape 8 — Checks d'exfiltration (R2–R5)</h4>
+      <h4 class="lang-en">Step 8 — Exfiltration checks (R2–R5)</h4>
       <p class="lang-fr">Avant de substituer, le moteur vérifie les autres règles : localisation canonique (R2),
       nombre de secrets distincts (R3), suspicion content-type (R4), volume rolling (R5).</p>
       <p class="lang-en">Before substituting, the engine checks the other rules: canonical location (R2),
@@ -1124,10 +1155,10 @@ R4 content-type: application/json + /v1  OK
 R5 rate:         12 / min &lt; 60           OK</code></pre>
   </div>
 
-  <div class="stepper-step" data-step="8">
+  <div class="stepper-step" data-step="9">
     <div class="stepper-text">
-      <h4 class="lang-fr">Étape 8 — Substitution</h4>
-      <h4 class="lang-en">Step 8 — Substitution</h4>
+      <h4 class="lang-fr">Étape 9 — Substitution</h4>
+      <h4 class="lang-en">Step 9 — Substitution</h4>
       <p class="lang-fr">Remplacement byte-level du placeholder par la vraie valeur. Le buffer du body (ou la chaîne
       du header) est réécrit en place. La valeur n'apparaît jamais en logs, ni dans les events, ni
       dans le stream SSE.</p>
@@ -1139,10 +1170,10 @@ R5 rate:         12 / min &lt; 60           OK</code></pre>
 after:  x-api-key: sk-ant-api03-XXXXXXXXXX…</code></pre>
   </div>
 
-  <div class="stepper-step" data-step="9">
+  <div class="stepper-step" data-step="10">
     <div class="stepper-text">
-      <h4 class="lang-fr">Étape 9 — Forward upstream</h4>
-      <h4 class="lang-en">Step 9 — Forward upstream</h4>
+      <h4 class="lang-fr">Étape 10 — Forward upstream</h4>
+      <h4 class="lang-en">Step 10 — Forward upstream</h4>
       <p class="lang-fr">La requête modifiée part vers <code>api.anthropic.com</code> via la connexion TLS upstream
       déjà établie. La réponse (potentiellement streamée en SSE) est forwardée verbatim vers l'agent,
       sans buffering, sans scan.</p>
@@ -1155,10 +1186,10 @@ after:  x-api-key: sk-ant-api03-XXXXXXXXXX…</code></pre>
 agent ← irisd (verbatim, no scan)</code></pre>
   </div>
 
-  <div class="stepper-step" data-step="10">
+  <div class="stepper-step" data-step="11">
     <div class="stepper-text">
-      <h4 class="lang-fr">Étape 10 — Émission d'event</h4>
-      <h4 class="lang-en">Step 10 — Event emission</h4>
+      <h4 class="lang-fr">Étape 11 — Émission d'event</h4>
+      <h4 class="lang-en">Step 11 — Event emission</h4>
       <p class="lang-fr">À la complétion, un <code>Event</code> est émis vers le ring buffer in-memory, persisté en
       SQLite et diffusé à tous les souscripteurs SSE. Métadonnées uniquement — jamais la valeur.</p>
       <p class="lang-en">On completion, an <code>Event</code> is emitted to the in-memory ring buffer, persisted to
@@ -1179,12 +1210,12 @@ agent ← irisd (verbatim, no scan)</code></pre>
   <div class="icon">i</div>
   <div class="body">
     <p class="lang-fr">Pour une <strong>tentative d'exfiltration</strong> (ex. agent qui POST son env vers <code>api.github.com/issues</code>),
-    l'étape 6 échoue : <code>allowed_hosts</code> ne contient pas <code>api.github.com</code>. Le daemon
+    l'étape 7 échoue : <code>allowed_hosts</code> ne contient pas <code>api.github.com</code>. Le daemon
     ne substitue pas, forwarde la requête telle quelle (avec le placeholder littéral, inerte), et émet
     un event <code>exfilBlocked</code>. GitHub recevra une issue contenant la chaîne brute
     <code>{{kc:anthropic_api_key}}</code> — aucune fuite.</p>
     <p class="lang-en">For an <strong>exfiltration attempt</strong> (e.g. an agent POSTing its env to <code>api.github.com/issues</code>),
-    step 6 fails: <code>allowed_hosts</code> does not contain <code>api.github.com</code>. The daemon
+    step 7 fails: <code>allowed_hosts</code> does not contain <code>api.github.com</code>. The daemon
     does not substitute, forwards the request as-is (with the literal, inert placeholder), and emits
     an <code>exfilBlocked</code> event. GitHub will receive an issue containing the raw string
     <code>{{kc:anthropic_api_key}}</code> — no leak.</p>
@@ -3490,6 +3521,36 @@ or rewrite requests, enforce a policy (pass / block), or return a synthetic resp
   Any later change to the plugin → <em>re-approval required</em> state, plugin suspended.</li>
 </ul>
 
+<h3 class="lang-fr">Le pipeline en détail</h3>
+<h3 class="lang-en">The pipeline in detail</h3>
+
+<p class="lang-fr">Les plugins activés forment une <strong>chaîne ordonnée</strong> (champ <code>order</code>). Pour chaque
+requête déchiffrée (placeholders only), IRIS évalue le <code>match</code> de chaque plugin ; les plugins
+applicables sont invoqués dans l'ordre. Un plugin peut court-circuiter la chaîne (<code>block</code> ou
+<code>respond</code>). Quoi qu'il arrive, le scan d'exfiltration, le scoping et la substitution d'IRIS
+s'exécutent <strong>ensuite</strong> — jamais avant, jamais contournés (invariant §3).</p>
+<p class="lang-en">Enabled plugins form an <strong>ordered chain</strong> (the <code>order</code> field). For each decrypted
+request (placeholders only), IRIS evaluates each plugin's <code>match</code>; applicable plugins are
+invoked in order. A plugin may short-circuit the chain (<code>block</code> or <code>respond</code>).
+Either way, IRIS's exfiltration scan, scoping and substitution run <strong>afterwards</strong> — never
+before, never bypassed (invariant §3).</p>
+
+<pre><code>  decrypted request  (placeholders {{kc:…}})
+        │
+        ▼
+  plugin chain, evaluated in `order`:
+        plugin A   ─ match? ─▶ on_request ─▶ action
+        plugin B   ─ match? ─▶ on_request ─▶ action
+        …
+        action ∈ { pass | modify | block | respond }
+        block / respond  ⇒  short-circuit, nothing forwarded upstream
+        │
+        ▼
+  IRIS exfil scan · scoping · substitution     (ALWAYS runs after plugins)
+        │
+        ▼
+  upstream</code></pre>
+
 <h3 class="lang-fr">Gérer les plugins — application</h3>
 <h3 class="lang-en">Managing plugins — app</h3>
 
@@ -3581,6 +3642,87 @@ Each plugin is a directory containing a <code>plugin.json</code> and an executab
   filesystem access.</li>
 </ul>
 
+<h3 class="lang-fr">Hooks, conditions et codes retour</h3>
+<h3 class="lang-en">Hooks, conditions and return codes</h3>
+
+<p class="lang-fr"><strong>Événements</strong> (<code>hooks[].event</code>)</p>
+<p class="lang-en"><strong>Events</strong> (<code>hooks[].event</code>)</p>
+<table class="lang-fr">
+  <thead><tr><th>Événement</th><th>Statut</th><th>Déclenchement</th></tr></thead>
+  <tbody>
+    <tr><td><code>on_request</code></td><td>v1</td><td>Sur chaque requête sortante matchée, avant le scan.</td></tr>
+    <tr><td><code>on_response</code></td><td>à venir</td><td>Sur la réponse upstream (roadmap).</td></tr>
+    <tr><td><code>on_complete</code></td><td>à venir</td><td>À la fin de l'échange (roadmap).</td></tr>
+  </tbody>
+</table>
+<table class="lang-en">
+  <thead><tr><th>Event</th><th>Status</th><th>Fires</th></tr></thead>
+  <tbody>
+    <tr><td><code>on_request</code></td><td>v1</td><td>On each matched outgoing request, before the scan.</td></tr>
+    <tr><td><code>on_response</code></td><td>planned</td><td>On the upstream response (roadmap).</td></tr>
+    <tr><td><code>on_complete</code></td><td>planned</td><td>At the end of the exchange (roadmap).</td></tr>
+  </tbody>
+</table>
+
+<p class="lang-fr"><strong>Conditions de déclenchement</strong> (<code>hooks[].match</code>)</p>
+<p class="lang-en"><strong>Trigger conditions</strong> (<code>hooks[].match</code>)</p>
+<table class="lang-fr">
+  <thead><tr><th>Champ</th><th>Type</th><th>Sémantique</th></tr></thead>
+  <tbody>
+    <tr><td><code>hosts</code></td><td>[string]</td><td>Hôtes ciblés, correspondance <strong>exacte</strong> (pas de glob). Vide = tous.</td></tr>
+    <tr><td><code>methods</code></td><td>[string]</td><td>Méthodes HTTP (ex. <code>POST</code>). Vide = toutes.</td></tr>
+    <tr><td><code>path_regex</code></td><td>string?</td><td>Regex sur le chemin (ex. <code>^/v1/</code>). Absent = tous.</td></tr>
+    <tr><td><code>content_type</code></td><td>string?</td><td>Filtre sur le <code>Content-Type</code>. Absent = tous.</td></tr>
+  </tbody>
+</table>
+<table class="lang-en">
+  <thead><tr><th>Field</th><th>Type</th><th>Semantics</th></tr></thead>
+  <tbody>
+    <tr><td><code>hosts</code></td><td>[string]</td><td>Target hosts, <strong>exact</strong> match (no glob). Empty = all.</td></tr>
+    <tr><td><code>methods</code></td><td>[string]</td><td>HTTP methods (e.g. <code>POST</code>). Empty = all.</td></tr>
+    <tr><td><code>path_regex</code></td><td>string?</td><td>Regex on the path (e.g. <code>^/v1/</code>). Absent = all.</td></tr>
+    <tr><td><code>content_type</code></td><td>string?</td><td>Filter on the <code>Content-Type</code>. Absent = all.</td></tr>
+  </tbody>
+</table>
+
+<p class="lang-fr"><strong>Codes retour</strong> (<code>action</code> de la réponse <code>on_request</code>)</p>
+<p class="lang-en"><strong>Return codes</strong> (the <code>action</code> of the <code>on_request</code> reply)</p>
+<table class="lang-fr">
+  <thead><tr><th>Action</th><th>Champs</th><th>Effet</th></tr></thead>
+  <tbody>
+    <tr><td><code>pass</code></td><td>—</td><td>Ne rien changer ; continuer la chaîne.</td></tr>
+    <tr><td><code>modify</code></td><td><code>headers</code>, <code>uri</code>, <code>body</code> (optionnels)</td><td>Overlay des headers par nom (les autres préservés, dont le placeholder) ; remplace URI/body si fournis. Pas de suppression de header en v1.</td></tr>
+    <tr><td><code>block</code></td><td><code>reason</code></td><td>Court-circuit : 403, rien forwardé.</td></tr>
+    <tr><td><code>respond</code></td><td><code>status</code>, <code>headers</code>, <code>body</code></td><td>Court-circuit : réponse synthétique, rien forwardé.</td></tr>
+  </tbody>
+</table>
+<table class="lang-en">
+  <thead><tr><th>Action</th><th>Fields</th><th>Effect</th></tr></thead>
+  <tbody>
+    <tr><td><code>pass</code></td><td>—</td><td>Change nothing; continue the chain.</td></tr>
+    <tr><td><code>modify</code></td><td><code>headers</code>, <code>uri</code>, <code>body</code> (optional)</td><td>Overlay headers by name (others preserved, incl. the placeholder); replace URI/body if provided. No header removal in v1.</td></tr>
+    <tr><td><code>block</code></td><td><code>reason</code></td><td>Short-circuit: 403, nothing forwarded.</td></tr>
+    <tr><td><code>respond</code></td><td><code>status</code>, <code>headers</code>, <code>body</code></td><td>Short-circuit: synthetic response, nothing forwarded.</td></tr>
+  </tbody>
+</table>
+
+<p class="lang-fr"><strong>En cas d'échec</strong> (<code>hooks[].on_failure</code> — timeout ou erreur du plugin)</p>
+<p class="lang-en"><strong>On failure</strong> (<code>hooks[].on_failure</code> — plugin timeout or error)</p>
+<table class="lang-fr">
+  <thead><tr><th>Valeur</th><th>Comportement</th></tr></thead>
+  <tbody>
+    <tr><td><code>skip</code></td><td>Ignorer ce plugin et continuer (défaut — transformeurs).</td></tr>
+    <tr><td><code>block</code></td><td>Échec fermé : la requête est bloquée (plugins de politique).</td></tr>
+  </tbody>
+</table>
+<table class="lang-en">
+  <thead><tr><th>Value</th><th>Behavior</th></tr></thead>
+  <tbody>
+    <tr><td><code>skip</code></td><td>Ignore this plugin and continue (default — transformers).</td></tr>
+    <tr><td><code>block</code></td><td>Fail closed: the request is blocked (policy plugins).</td></tr>
+  </tbody>
+</table>
+
 <h3 class="lang-fr">Écrire un plugin — le protocole</h3>
 <h3 class="lang-en">Writing a plugin — the protocol</h3>
 
@@ -3599,33 +3741,17 @@ plugin's lifetime:
 <ul class="lang-fr">
   <li><code>initialize</code> (au démarrage) → répondre une fois avec une réponse JSON-RPC valide, p. ex.
   <code>{"jsonrpc":"2.0","id":1,"result":{"ready":true}}</code>.</li>
-  <li><code>on_request</code> (par requête matchée) → répondre un <code>action</code> :
-    <ul>
-      <li><code>pass</code> — ne rien changer ;</li>
-      <li><code>modify</code> — fournir <code>headers</code> / <code>uri</code> / <code>body</code>. Les
-      headers sont <strong>fusionnés par nom</strong> (overlay) : ceux non mentionnés (dont le placeholder
-      de credential qu'IRIS doit encore substituer) sont préservés ; pas de suppression en v1 ;</li>
-      <li><code>block</code> — avec <code>reason</code> : requête bloquée (403), rien n'est forwardé ;</li>
-      <li><code>respond</code> — réponse synthétique (<code>status</code>, <code>headers</code>,
-      <code>body</code>) : rien n'est forwardé.</li>
-    </ul>
-  </li>
+  <li><code>on_request</code> (par requête matchée) → répondre un <code>action</code>
+  (<code>pass</code> / <code>modify</code> / <code>block</code> / <code>respond</code> — voir le tableau
+  <em>Codes retour</em> ci-dessus).</li>
   <li><code>shutdown</code> (à la désactivation) → sortir proprement.</li>
 </ul>
 <ul class="lang-en">
   <li><code>initialize</code> (at startup) → reply once with a valid JSON-RPC response, e.g.
   <code>{"jsonrpc":"2.0","id":1,"result":{"ready":true}}</code>.</li>
-  <li><code>on_request</code> (per matched request) → reply an <code>action</code>:
-    <ul>
-      <li><code>pass</code> — change nothing;</li>
-      <li><code>modify</code> — provide <code>headers</code> / <code>uri</code> / <code>body</code>. Headers
-      are <strong>merged by name</strong> (overlay): unspecified ones (including the credential placeholder
-      IRIS still has to substitute) are preserved; no removal in v1;</li>
-      <li><code>block</code> — with <code>reason</code>: request blocked (403), nothing forwarded;</li>
-      <li><code>respond</code> — synthetic response (<code>status</code>, <code>headers</code>,
-      <code>body</code>): nothing forwarded.</li>
-    </ul>
-  </li>
+  <li><code>on_request</code> (per matched request) → reply an <code>action</code>
+  (<code>pass</code> / <code>modify</code> / <code>block</code> / <code>respond</code> — see the
+  <em>Return codes</em> table above).</li>
   <li><code>shutdown</code> (at disable) → exit gracefully.</li>
 </ul>
 
@@ -3646,20 +3772,38 @@ plugin's lifetime:
 <h3 class="lang-en">Complete example</h3>
 
 <p class="lang-fr">
-L'exemple <code>examples/plugins/header-tagger</code> est un plugin complet et fonctionnel (Swift,
-Foundation seul, ~40 lignes). Son cœur :
+Le même plugin — un « tagger » qui répond <code>modify</code> — dans les principaux langages. Chaque
+version est autonome (bibliothèque standard uniquement) et lit/écrit du NDJSON sur stdin/stdout.
+L'exemple Swift complet est fourni dans <code>examples/plugins/header-tagger</code>.
 </p>
 <p class="lang-en">
-The <code>examples/plugins/header-tagger</code> example is a complete, working plugin (Swift,
-Foundation-only, ~40 lines). Its core:
+The same plugin — a "tagger" that replies <code>modify</code> — in the main languages. Each version is
+self-contained (standard library only) and reads/writes NDJSON over stdin/stdout. The full Swift example
+ships in <code>examples/plugins/header-tagger</code>.
 </p>
 
-<pre><code>while let line = readLine(strippingNewline: true) {
+<div class="tabs" id="pluginLangTabs">
+  <div class="tab-buttons">
+    <button class="active" data-tab="swift">Swift</button>
+    <button data-tab="python">Python</button>
+    <button data-tab="node">Node.js</button>
+    <button data-tab="go">Go</button>
+    <button data-tab="bash">Bash</button>
+  </div>
+  <div class="tab-content active" data-tab="swift">
+<pre><code>import Foundation
+
+func emitLine(_ object: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
+    try? FileHandle.standardOutput.write(contentsOf: data)
+    try? FileHandle.standardOutput.write(contentsOf: Data("\n".utf8))
+}
+
+while let line = readLine(strippingNewline: true) {
     guard let data = line.data(using: .utf8),
         let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else { continue }
     let id = object["id"] ?? NSNull()  // echo the request id back
-
     switch object["method"] as? String {
     case "initialize":
         emitLine(["jsonrpc": "2.0", "id": id, "result": ["ready": true]])
@@ -3672,6 +3816,126 @@ Foundation-only, ~40 lines). Its core:
         break
     }
 }</code></pre>
+  </div>
+  <div class="tab-content" data-tab="python">
+<pre><code>import sys, json
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        msg = json.loads(line)
+        if not isinstance(msg, dict):
+            continue  # ignore valid JSON that isn't an object
+    except ValueError:
+        continue  # ignore non-JSON lines
+    mid, method = msg.get("id"), msg.get("method")
+    if method == "initialize":
+        result = {"ready": True}
+    elif method == "on_request":
+        result = {"action": "modify", "headers": [["X-Iris-Plugin", "header-tagger"]]}
+    elif method == "shutdown":
+        break
+    else:
+        continue
+    out = json.dumps({"jsonrpc": "2.0", "id": mid, "result": result}, separators=(",", ":"))
+    sys.stdout.write(out + "\n")
+    sys.stdout.flush()  # NDJSON: flush each reply so the daemon sees it</code></pre>
+  </div>
+  <div class="tab-content" data-tab="node">
+<pre><code>const readline = require("readline");
+const rl = readline.createInterface({ input: process.stdin });
+
+rl.on("line", (line) => {
+  line = line.trim();
+  if (!line) return;
+  let msg;
+  try {
+    msg = JSON.parse(line);
+    if (typeof msg !== "object" || msg === null || Array.isArray(msg)) return;
+  } catch { return; } // ignore non-JSON or non-object lines
+  let result;
+  switch (msg.method) {
+    case "initialize":
+      result = { ready: true };
+      break;
+    case "on_request":
+      result = { action: "modify", headers: [["X-Iris-Plugin", "header-tagger"]] };
+      break;
+    case "shutdown":
+      process.exit(0);
+    default:
+      return;
+  }
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }) + "\n");
+});</code></pre>
+  </div>
+  <div class="tab-content" data-tab="go">
+<pre><code>package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+)
+
+type request struct {
+	ID     json.RawMessage `json:"id"` // echo back verbatim
+	Method string          `json:"method"`
+}
+
+func main() {
+	r := bufio.NewReader(os.Stdin) // handles lines longer than bufio.Scanner's 64 KiB
+	w := bufio.NewWriter(os.Stdout)
+	for {
+		line, err := r.ReadBytes('\n')
+		if len(line) &gt; 0 {
+			var req request
+			if json.Unmarshal(line, &amp;req) == nil {
+				var result any
+				switch req.Method {
+				case "initialize":
+					result = map[string]any{"ready": true}
+				case "on_request":
+					result = map[string]any{"action": "modify",
+						"headers": [][]string{{"X-Iris-Plugin", "header-tagger"}}}
+				case "shutdown":
+					return
+				}
+				if result != nil {
+					out, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+					w.Write(out)
+					w.WriteByte('\n')
+					w.Flush() // NDJSON: flush each reply
+				}
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}</code></pre>
+  </div>
+  <div class="tab-content" data-tab="bash">
+<pre><code>#!/usr/bin/env bash
+# Any language that reads stdin and writes stdout works. Here: bash + jq.
+while IFS= read -r line || [ -n "$line" ]; do
+  [ -z "$line" ] &amp;&amp; continue
+  method=$(printf '%s' "$line" | jq -r '.method // empty')
+  id=$(printf '%s' "$line" | jq -c '.id // null')
+  case "$method" in
+    initialize)
+      jq -nc --argjson id "$id" '{jsonrpc:"2.0",id:$id,result:{ready:true}}' ;;
+    on_request)
+      jq -nc --argjson id "$id" \
+        '{jsonrpc:"2.0",id:$id,result:{action:"modify",headers:[["X-Iris-Plugin","header-tagger"]]}}' ;;
+    shutdown)
+      exit 0 ;;
+  esac
+done</code></pre>
+  </div>
+</div>
 
 <pre class="lang-fr"><code># Construire, installer, activer
 swift build -c release
