@@ -12,6 +12,13 @@ public protocol PluginInvoking: Sendable {
     var id: String { get }
     func onRequest(_ params: PluginRPC.OnRequestParams, timeout: TimeInterval) async throws
         -> PluginRPC.OnRequestResult
+    /// Fire-and-forget completion notification. Read-only; no return value. Default
+    /// is a no-op so conformers that declare no onComplete hook need not implement it.
+    func onComplete(_ params: PluginRPC.OnCompleteParams) async throws
+}
+
+extension PluginInvoking {
+    public func onComplete(_ params: PluginRPC.OnCompleteParams) async throws {}
 }
 
 // MARK: - PluginChainEntry
@@ -51,6 +58,7 @@ public final class HookDispatcher: Sendable {
     static let maxBodyBytes = 4 * 1024 * 1024
 
     private let chainBox = NIOLockedValueBox<[PluginChainEntry]>([])
+    private let completeChainBox = NIOLockedValueBox<[PluginChainEntry]>([])
     private let logger: Logger
 
     public init(logger: Logger = Logger(label: "io.iris.plugins.dispatch")) {
@@ -60,6 +68,11 @@ public final class HookDispatcher: Sendable {
     /// Pushed by `PluginHostManager` after each reconcile. Cheap lock write.
     public func updateChain(_ chain: [PluginChainEntry]) {
         chainBox.withLockedValue { $0 = chain }
+    }
+
+    /// Pushed by `PluginHostManager` after each reconcile (onComplete chain).
+    public func updateCompleteChain(_ chain: [PluginChainEntry]) {
+        completeChainBox.withLockedValue { $0 = chain }
     }
 
     /// Test-only: number of entries in the current chain snapshot. Production code
@@ -164,6 +177,52 @@ public final class HookDispatcher: Sendable {
             }
         }
         return .proceed(head: curHead, body: curBody)
+    }
+
+    /// Fires the onComplete chain for a finished request. Caller MUST invoke this
+    /// off the response-critical path (a detached `Task`): it is fire-and-forget,
+    /// read-only, and never returns anything. Gating runs before any IPC; a request
+    /// with no applicable onComplete hook costs nothing. Per-plugin errors (dead
+    /// process, EPIPE) are logged and swallowed — a misbehaving sink can never
+    /// affect the response (already relayed) nor other plugins' delivery.
+    public func onComplete(
+        method: String,
+        uri: String,
+        host: String,
+        contentType: String?,
+        status: Int,
+        durationMs: Int
+    ) async {
+        let chain = completeChainBox.withLockedValue { $0 }
+        if chain.isEmpty { return }
+        let (path, _) = PlaceholderScanner.splitURI(uri)
+        let applicable = chain.filter {
+            $0.hook.match.matches(
+                host: host,
+                method: method,
+                path: path,
+                requestContentType: contentType,
+                status: status
+            )
+        }
+        if applicable.isEmpty { return }
+        let params = PluginRPC.OnCompleteParams(
+            method: method,
+            uri: uri,
+            host: host,
+            status: status,
+            durationMs: durationMs
+        )
+        for entry in applicable {
+            do {
+                try await entry.invoker.onComplete(params)
+            } catch {
+                logger.debug(
+                    "plugin onComplete failed",
+                    metadata: ["id": "\(entry.pluginId)", "error": "\(error)"]
+                )
+            }
+        }
     }
 
     // MARK: - Wire conversion

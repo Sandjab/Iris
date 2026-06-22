@@ -25,6 +25,15 @@ private actor MockInvoker: PluginInvoking {
     }
 
     var callCount: Int { calls }
+
+    private var completeRecords: [PluginRPC.OnCompleteParams] = []
+    private var completeError: Error?
+    func setOnCompleteThrows(_ error: Error) { completeError = error }
+    func onComplete(_ params: PluginRPC.OnCompleteParams) async throws {
+        if let completeError { throw completeError }
+        completeRecords.append(params)
+    }
+    var completeCalls: [PluginRPC.OnCompleteParams] { completeRecords }
 }
 
 final class HookDispatcherTests: XCTestCase {
@@ -54,6 +63,14 @@ final class HookDispatcherTests: XCTestCase {
                 onFailure: onFailure,
                 timeoutMs: 1000
             )
+        )
+    }
+
+    private func completeEntry(_ inv: any PluginInvoking, match: HookMatch = HookMatch()) -> PluginChainEntry {
+        PluginChainEntry(
+            pluginId: inv.id,
+            invoker: inv,
+            hook: PluginHook(event: .onComplete, match: match, mutates: false, onFailure: .skip, timeoutMs: 1000)
         )
     }
 
@@ -179,5 +196,55 @@ final class HookDispatcherTests: XCTestCase {
         let out = await d.onRequest(head: head(headers: []), body: nil, host: "h")
         guard case .proceed(let rh, _) = out else { return XCTFail("expected .proceed") }
         XCTAssertEqual(rh.headers.first(name: "x"), "ab")
+    }
+
+    func testOnCompleteDeliversParamsToMatchingPlugin() async {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        let d = HookDispatcher()
+        d.updateCompleteChain([completeEntry(inv, match: HookMatch(hosts: ["api.anthropic.com"]))])
+        await d.onComplete(
+            method: "POST",
+            uri: "/v1/messages",
+            host: "api.anthropic.com",
+            contentType: "application/json",
+            status: 200,
+            durationMs: 12
+        )
+        let records = await inv.completeCalls
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.status, 200)
+        XCTAssertEqual(records.first?.uri, "/v1/messages")
+    }
+
+    func testOnCompleteSkipsNonMatchingPlugin() async {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        let d = HookDispatcher()
+        d.updateCompleteChain([completeEntry(inv, match: HookMatch(status: [500]))])
+        await d.onComplete(
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil,
+            status: 200,
+            durationMs: 1
+        )
+        let records = await inv.completeCalls
+        XCTAssertTrue(records.isEmpty, "status condition [500] must not match a 200 completion")
+    }
+
+    func testOnCompleteEmptyChainIsNoop() async {
+        let d = HookDispatcher()
+        await d.onComplete(method: "GET", uri: "/x", host: "h", contentType: nil, status: 0, durationMs: 1)
+        XCTAssertEqual(d.chainCountForTesting, 0)
+    }
+
+    func testOnCompleteSwallowsPluginErrors() async {
+        struct Boom: Error {}
+        let bad = MockInvoker(id: "bad") { _ in .init(action: .pass) }
+        await bad.setOnCompleteThrows(Boom())
+        let d = HookDispatcher()
+        d.updateCompleteChain([completeEntry(bad)])
+        // Must not throw / crash — onComplete is fire-and-forget; errors are logged.
+        await d.onComplete(method: "GET", uri: "/x", host: "h", contentType: nil, status: 0, durationMs: 1)
     }
 }
