@@ -224,14 +224,15 @@ déjà en place.
 
 ## 10. Risques & suivis
 
-- **Backpressure notification** : un flot de complétions vers un plugin lisant lentement
-  son stdin pourrait remplir le pipe (~64 KiB) et bloquer l'écriture sur l'`actor`
-  `PluginHost`. **Jamais l'EL du proxy** (qui ne fait que `Task { … }`). Nuance : pour un
-  plugin déclarant **les deux** hooks, une écriture `on_complete` bloquée tient l'executor de
-  son `actor` et sérialiserait **devant son prochain `onRequest`** — lequel, lui, est sur le
+- **Backpressure notification** : le dispatch `onComplete` est **concurrent** entre plugins
+  (`withTaskGroup`) — un plugin lisant lentement son stdin (pipe ~64 KiB plein → écriture
+  bloquée) **ne retarde donc pas** la livraison aux **autres** plugins. **Jamais l'EL du
+  proxy** non plus (qui ne fait que `Task { … }`). Résidu : pour un plugin déclarant **les
+  deux** hooks, une écriture `on_complete` bloquée tient l'executor de **son propre** `actor`
+  `PluginHost` et sérialiserait devant **son prochain `onRequest`** — lequel, lui, est sur le
   chemin critique (le proxy `await`-e `onRequest`). En pratique auto-limité (un tel plugin
-  serait déjà en train de dépasser son `timeoutMs` sur `onRequest`), borné par plugin, hors EL.
-  Raffinement (drop/borne, ou write non bloquant pour `on_complete`) différé si jamais observé.
+  dépasserait déjà son `timeoutMs` sur `onRequest`), borné à ce plugin, hors EL. Raffinement
+  (write non bloquant pour `on_complete`) différé si jamais observé.
 - **PR 2 `onResponse`** : design séparé ; décision SPECS §7.2 + collecteur bufferisé gaté.
 - **`status=0`** : sentinelle d'échec — documenter dans le manifest d'exemple et la doc
   plugin (manuel ch. 23) lors d'un passage doc ultérieur.

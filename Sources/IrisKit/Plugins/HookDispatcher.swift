@@ -215,14 +215,23 @@ public final class HookDispatcher: Sendable {
             status: status,
             durationMs: durationMs
         )
-        for entry in applicable {
-            do {
-                try await entry.invoker.onComplete(params)
-            } catch {
-                logger.debug(
-                    "plugin onComplete failed",
-                    metadata: ["id": "\(entry.pluginId)", "error": "\(error)"]
-                )
+        // Independent, read-only sinks: dispatch CONCURRENTLY so a slow/blocked
+        // plugin (e.g. its stdin buffer is full and the write blocks) cannot delay
+        // delivery to the other plugins. Order is irrelevant (no output chaining,
+        // design C8). Errors are logged and swallowed per task — fire-and-forget.
+        let logger = self.logger
+        await withTaskGroup(of: Void.self) { group in
+            for entry in applicable {
+                group.addTask {
+                    do {
+                        try await entry.invoker.onComplete(params)
+                    } catch {
+                        logger.debug(
+                            "plugin onComplete failed",
+                            metadata: ["id": "\(entry.pluginId)", "error": "\(error)"]
+                        )
+                    }
+                }
             }
         }
     }

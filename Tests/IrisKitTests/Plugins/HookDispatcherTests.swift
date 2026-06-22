@@ -28,9 +28,18 @@ private actor MockInvoker: PluginInvoking {
 
     private var completeRecords: [PluginRPC.OnCompleteParams] = []
     private var completeError: Error?
+    private var blockOnComplete = false
+    private var released = false
     func setOnCompleteThrows(_ error: Error) { completeError = error }
+    func setBlocksOnComplete() { blockOnComplete = true }
+    func releaseOnComplete() { released = true }
     func onComplete(_ params: PluginRPC.OnCompleteParams) async throws {
         if let completeError { throw completeError }
+        // Block until released (models a slow/blocked sink). Each `await` suspends
+        // the actor, so `releaseOnComplete()` can still run while we spin here.
+        while blockOnComplete && !released {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
         completeRecords.append(params)
     }
     var completeCalls: [PluginRPC.OnCompleteParams] { completeRecords }
@@ -258,5 +267,39 @@ final class HookDispatcherTests: XCTestCase {
         d.updateCompleteChain([completeEntry(bad)])
         // Must not throw / crash — onComplete is fire-and-forget; errors are logged.
         await d.onComplete(method: "GET", uri: "/x", host: "h", contentType: nil, status: 0, durationMs: 1)
+    }
+
+    func testOnCompleteDispatchesConcurrentlyAcrossPlugins() async {
+        // A blocks until released; B records immediately. Concurrent dispatch delivers
+        // to B even while A is blocked. A SEQUENTIAL dispatch (A is first in the chain)
+        // would block B behind A → B would never record until A is released, and this
+        // test would fail. This guards the design-C8 "independent per plugin" property.
+        let a = MockInvoker(id: "a") { _ in .init(action: .pass) }
+        let b = MockInvoker(id: "b") { _ in .init(action: .pass) }
+        await a.setBlocksOnComplete()
+        let d = HookDispatcher()
+        // A is first: a sequential loop would head-of-line block on it.
+        d.updateCompleteChain([completeEntry(a), completeEntry(b)])
+
+        let dispatch = Task {
+            await d.onComplete(method: "GET", uri: "/x", host: "h", contentType: nil, status: 200, durationMs: 1)
+        }
+
+        var bRecorded = false
+        for _ in 0..<400 {
+            if await !b.completeCalls.isEmpty {
+                bRecorded = true
+                break
+            }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let aRecordedWhileBlocked = await !a.completeCalls.isEmpty
+        XCTAssertTrue(bRecorded, "B is delivered concurrently while A is still blocked")
+        XCTAssertFalse(aRecordedWhileBlocked, "A is still blocked, so it has not recorded yet")
+
+        await a.releaseOnComplete()
+        await dispatch.value
+        let aRecorded = await !a.completeCalls.isEmpty
+        XCTAssertTrue(aRecorded, "A records once released (it was dispatched, not dropped)")
     }
 }
