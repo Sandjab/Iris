@@ -86,14 +86,24 @@ final class UpstreamResponseRelay: ChannelDuplexHandler, @unchecked Sendable {
             // Hold the head; run the metadata-mode hook; relay the resolved head on
             // the EventLoop, then drain anything that arrived meanwhile.
             headHookInFlight = true
-            hook(head).hop(to: clientChannel.eventLoop).whenComplete { [weak self] result in
+            // STRONG self (no `[weak self]`): when the upstream closes while the hook
+            // is in flight, NIO fires `channelInactive` and then schedules
+            // `removeHandlers` on the NEXT EL tick, releasing the pipeline's reference
+            // to this relay. A slow hook (real out-of-process plugins are never
+            // sub-ms) resolves AFTER that — a weak ref would already be nil, the queue
+            // would never drain, `completion` would never resolve, and the client
+            // would hang forever. Strong self keeps the relay alive until the hook
+            // resolves. No retain cycle: `self` does not retain this future chain, and
+            // the hook future ALWAYS resolves (bounded by the hook timeout), so the
+            // closure — and thus the relay — is released once it runs.
+            hook(head).hop(to: clientChannel.eventLoop).whenComplete { result in
                 // `!done`: if the stream terminally failed during the hook window
                 // (upstream RST before `.end` → channelInactive → finish(.failure)),
                 // MITMHandler already wrote a 502 to the client. Skip relaying the
                 // late-resolving head so we never write a SECOND head onto that
                 // channel. In the happy path `.end` is still queued here (not
                 // relayed), so `done` is false → a valid head is never skipped.
-                guard let self = self, !self.done else { return }
+                guard !self.done else { return }
                 let resolved: HTTPResponseHead
                 switch result {
                 case .success(let h): resolved = h
@@ -154,26 +164,38 @@ final class UpstreamResponseRelay: ChannelDuplexHandler, @unchecked Sendable {
         context.fireChannelReadComplete()
     }
 
+    /// True when the head hook is in flight AND a terminal `.end` is already queued:
+    /// the COMPLETE response was received before the upstream channel closed or
+    /// errored. In that case the in-flight hook's completion drains the queue and
+    /// resolves `completion`, so an upstream close/error must NOT fail the stream —
+    /// doing so would clobber a good response with a spurious 502 / truncation. A
+    /// premature close/error (no `.end` queued yet) is still a fatal failure.
+    private var completeResponseQueued: Bool {
+        guard headHookInFlight else { return false }
+        return queuedParts.contains {
+            if case .end = $0 { return true }
+            return false
+        }
+    }
+
     func errorCaught(context: ChannelHandlerContext, error: Error) {
-        finish(.failure(error))
+        // Mirror channelInactive: an upstream error AFTER a complete response (e.g. an
+        // RST following `.end`) must not fail the stream while the head hook is in
+        // flight — the hook's completion drains the queued response to the (separate)
+        // client channel. Closing the erroring upstream context is always fine.
+        if !completeResponseQueued {
+            finish(.failure(error))
+        }
         context.close(promise: nil)
     }
 
     func channelInactive(context: ChannelHandlerContext) {
-        // If the head hook is in flight and `.end` is already queued, the full
-        // response was received before the upstream closed. This is a graceful
-        // connection teardown — let the hook's whenComplete drain the queue and
-        // resolve the completion promise normally. A premature close (no `.end`
-        // queued yet) is still a fatal failure.
-        let endQueued = queuedParts.contains {
-            if case .end = $0 { return true }
-            return false
+        // A graceful upstream teardown after a complete response (full body + `.end`
+        // queued during the hook window) is not a failure: the hook's whenComplete
+        // drains the queue and resolves `completion`. Only a premature close fails.
+        if !completeResponseQueued {
+            finish(.failure(ChannelError.alreadyClosed))
         }
-        if headHookInFlight && endQueued {
-            context.fireChannelInactive()
-            return
-        }
-        finish(.failure(ChannelError.alreadyClosed))
         context.fireChannelInactive()
     }
 

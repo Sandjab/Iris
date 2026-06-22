@@ -23,6 +23,26 @@ final class PluginOnResponseE2ETests: XCTestCase {
         { .init(action: .modify, headers: [["x-iris-tagged", "1"]]) }
     }
 
+    /// Like `TaggingInvoker` but its `onResponse` SLEEPS ~300ms before resolving —
+    /// modelling a real out-of-process plugin (never sub-ms). The slow hook lets NIO
+    /// fire `channelInactive` + schedule `removeHandlers` (the mock upstream closes
+    /// promptly after a complete response) BEFORE the hook resolves. Under a
+    /// `[weak self]` drain the relay would already be nil → the queued response would
+    /// never drain → the client hangs forever. The strong-self fix keeps the relay
+    /// alive until the bounded hook future resolves.
+    private struct SlowTaggingInvoker: PluginInvoking {
+        let id: String
+        func onRequest(_ params: PluginRPC.OnRequestParams, timeout: TimeInterval) async throws
+            -> PluginRPC.OnRequestResult
+        { .init(action: .pass) }
+        func onResponse(_ params: PluginRPC.OnResponseParams, timeout: TimeInterval) async throws
+            -> PluginRPC.OnResponseResult
+        {
+            try await Task.sleep(nanoseconds: 300_000_000)
+            return .init(action: .modify, headers: [["x-iris-tagged", "1"]])
+        }
+    }
+
     private struct Fixture {
         let proxy: ProxyServer
         let proxyPort: Int
@@ -128,5 +148,70 @@ final class PluginOnResponseE2ETests: XCTestCase {
         XCTAssertEqual(resp.status, .ok)
         XCTAssertNil(resp.headers.first(name: "x-iris-tagged"), "non-matching request: no plugin header")
         XCTAssertEqual(resp.body, Data("OK".utf8))
+    }
+
+    /// Liveness regression: a SLOW onResponse hook (300ms) must not hang the client
+    /// when the upstream closes promptly after a complete response. On the pre-fix
+    /// `[weak self]` drain, NIO's `removeHandlers` nils the relay before the hook
+    /// resolves → the queued response never drains → this `send` hangs forever.
+    ///
+    /// The send is raced against a 5s watchdog via a CONTINUATION (first-wins), NOT a
+    /// task group: `TestProxyClient.send` blocks on a NIO `future.get()` that ignores
+    /// Task cancellation, so `withThrowingTaskGroup` would join the hung child and the
+    /// whole test would hang to the outer alarm anyway. The continuation race abandons
+    /// the loser, so a regression FAILS deterministically at ~5s (mutation-verified:
+    /// reverting to `[weak self]` makes this test hang→timeout; strong self → green).
+    func testSlowResponseHookDoesNotHang() async throws {
+        let f = try await makeFixture()
+        f.proxy.hookDispatcher.updateResponseChain([
+            PluginChainEntry(
+                pluginId: "slow",
+                invoker: SlowTaggingInvoker(id: "slow"),
+                hook: responseHook(hosts: ["localhost"])
+            )
+        ])
+        let proxyPort = f.proxyPort
+        let proxyCANIO = f.proxyCANIO
+        let resp: TestProxyClient.Response = try await withCheckedThrowingContinuation { cont in
+            let resumed = NIOLockedValueBox(false)
+            func resumeOnce(_ result: Result<TestProxyClient.Response, Error>) {
+                let isFirst = resumed.withLockedValue { flag -> Bool in
+                    if flag { return false }
+                    flag = true
+                    return true
+                }
+                if isFirst { cont.resume(with: result) }
+            }
+            Task {
+                do {
+                    let r = try await TestProxyClient().send(
+                        proxyHost: "127.0.0.1",
+                        proxyPort: proxyPort,
+                        targetHost: "localhost",
+                        targetPort: 443,
+                        method: .POST,
+                        path: "/v1/messages",
+                        headers: [("host", "localhost"), ("content-type", "application/json")],
+                        body: Data(#"{"p":1}"#.utf8),
+                        trustingCAs: [proxyCANIO]
+                    )
+                    resumeOnce(.success(r))
+                } catch {
+                    resumeOnce(.failure(error))
+                }
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                resumeOnce(.failure(IntegrationTestError.timedOut))
+            }
+        }
+        await f.teardown()
+        XCTAssertEqual(resp.status, .ok)
+        XCTAssertEqual(
+            resp.headers.first(name: "x-iris-tagged"),
+            "1",
+            "slow plugin-overlaid response header still reaches the client"
+        )
+        XCTAssertEqual(resp.body, Data("OK".utf8), "the upstream body is relayed unchanged after a slow hook")
     }
 }
