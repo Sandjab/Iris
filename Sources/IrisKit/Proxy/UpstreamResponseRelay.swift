@@ -110,8 +110,11 @@ final class UpstreamResponseRelay: ChannelDuplexHandler, @unchecked Sendable {
                 case .failure: resolved = head  // defensive: hook never fails (R4 skip)
                 }
                 self.relayHead(resolved)
-                self.clientChannel.flush()  // off a read cycle → channelReadComplete won't flush
                 self.headHookInFlight = false
+                // drainQueued() issues the single flush — coalescing the head with any
+                // body parts queued during the hook window into one write cycle (off a
+                // read cycle, channelReadComplete won't flush). With an empty queue it
+                // still flushes the head.
                 self.drainQueued()
             }
         case .body, .end:

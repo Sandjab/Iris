@@ -340,17 +340,32 @@ public final class HookDispatcher: Sendable {
     /// etc. — see `framingHeaders`) are silently skipped: a plugin cannot corrupt the
     /// upstream's own response framing. The upstream's framing headers in `current`
     /// pass through untouched.
+    ///
+    /// SECURITY: plugin-supplied names/values are sanitized before use — surrounding
+    /// whitespace is trimmed (so a padded `" content-length"` cannot bypass the framing
+    /// check) and any pair whose name or value contains a CR or LF is DROPPED. A
+    /// semi-trusted plugin must not be able to inject a header break (CRLF injection /
+    /// HTTP response splitting): a plugin cannot break Iris's guarantees (§3).
     private static func overlayResponseHeaders(
         _ pairs: [[String]],
         onto current: [(String, String)]
     ) -> [(String, String)] {
         var result = current
         for p in pairs where p.count == 2 {
-            guard !framingHeaders.contains(p[0].lowercased()) else { continue }
-            if let idx = result.firstIndex(where: { $0.0.lowercased() == p[0].lowercased() }) {
-                result[idx] = (p[0], p[1])
+            let name = p[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = p[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            // Scan Unicode SCALARS, not Characters: `\r\n` is a single extended
+            // grapheme cluster, so a Character-level `== "\r"` check would MISS the
+            // canonical CRLF injection sequence. Scalars keep CR/LF distinct.
+            guard !name.isEmpty,
+                !name.unicodeScalars.contains(where: { $0 == "\r" || $0 == "\n" }),
+                !value.unicodeScalars.contains(where: { $0 == "\r" || $0 == "\n" })
+            else { continue }
+            guard !framingHeaders.contains(name.lowercased()) else { continue }
+            if let idx = result.firstIndex(where: { $0.0.lowercased() == name.lowercased() }) {
+                result[idx] = (name, value)
             } else {
-                result.append((p[0], p[1]))
+                result.append((name, value))
             }
         }
         return result

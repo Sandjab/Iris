@@ -459,6 +459,43 @@ final class HookDispatcherTests: XCTestCase {
         XCTAssertEqual(out.first(where: { $0.0 == "x-iris-tagged" })?.1, "1", "non-framing overlay still applies")
     }
 
+    func testOnResponseOverlaySanitizesCRLFAndWhitespace() async {
+        // A semi-trusted plugin must not be able to inject a header break (CRLF →
+        // response splitting) nor bypass the framing guard with whitespace padding.
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in
+            .init(
+                action: .modify,
+                headers: [
+                    ["x-evil-value", "ok\r\nInjected: pwned"],
+                    ["x-evil-name\r\nInjected", "1"],
+                    [" content-length", "999"],
+                    ["x-iris-tagged", "1"],
+                ]
+            )
+        }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv)])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("content-length", "2")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        XCTAssertNil(
+            out.first(where: { $0.0.contains("x-evil") || $0.1.contains("\n") || $0.0.contains("\n") }),
+            "headers with CR/LF in name or value are dropped (no response splitting)"
+        )
+        XCTAssertEqual(
+            out.first(where: { $0.0.lowercased() == "content-length" })?.1,
+            "2",
+            "a whitespace-padded framing name cannot bypass the guard"
+        )
+        XCTAssertEqual(out.first(where: { $0.0 == "x-iris-tagged" })?.1, "1", "a clean header still applies")
+    }
+
     func testOnResponseOverlayPreservesDuplicateHeaders() async {
         // Response headers may legally repeat (Set-Cookie). The overlay must not collapse them.
         let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
