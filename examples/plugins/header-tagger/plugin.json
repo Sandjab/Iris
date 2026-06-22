@@ -2,7 +2,7 @@
   "id": "org.iris.example.header-tagger",
   "name": "Header Tagger",
   "version": "1.0.0",
-  "description": "Adds an X-Iris-Plugin header to matched requests (demo). Runtime wiring lands in P3.",
+  "description": "Adds an X-Iris-Plugin header to matched requests (example plugin).",
   "api_version": 1,
   "executable": ".build/release/header-tagger",
   "hooks": [
