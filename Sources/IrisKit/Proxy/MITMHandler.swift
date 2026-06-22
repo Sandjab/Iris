@@ -132,6 +132,10 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         // runs the byte-for-byte v1 path (zero response-path cost).
         let dispatcher = server.hookDispatcher
         let responseHeadHook: (@Sendable (HTTPResponseHead) -> EventLoopFuture<HTTPResponseHead>)?
+        // Fires in bypass mode too (consistent with onComplete); only onRequest is skipped
+        // when paused. Metadata-only, no secret exposure.
+        // NB: chain is a snapshot; a plugin toggled mid-request affects at most this one
+        // request (re-filtered in onResponse).
         if dispatcher.hasResponseHook(
             method: originalMethod,
             uri: originalURI,
