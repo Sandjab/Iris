@@ -150,6 +150,84 @@ final class PluginOnResponseE2ETests: XCTestCase {
         XCTAssertEqual(resp.body, Data("OK".utf8))
     }
 
+    func testStreamingPreservedWithResponseHook() async throws {
+        let proxyCA = CAManager(keyStore: InMemoryCAKeyStore())
+        let proxyCACert = try await proxyCA.ensureCA()
+        let mockCA = CAManager(keyStore: InMemoryCAKeyStore())
+        let mockCACert = try await mockCA.ensureCA()
+
+        // Barrier: the mock waits before sending chunk2 + end.
+        let barrierGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer { try? barrierGroup.syncShutdownGracefully() }
+        let release = barrierGroup.next().makePromise(of: Void.self)
+
+        let mock = try await MockUpstream.startStreaming(host: "localhost", caManager: mockCA) { _ in
+            MockUpstream.StreamingResponsePlan(
+                firstChunk: Data("AAAA".utf8),
+                remainingChunks: [Data("BBBB".utf8)],
+                releaseRest: release.futureResult
+            )
+        }
+        let mockCANIO = try NIOSSLCertificate(bytes: Array(mockCACert.derBytes), format: .der)
+        let proxy = ProxyServer(
+            configuration: .init(
+                listenHost: "127.0.0.1",
+                listenPort: 0,
+                allowedHosts: ["localhost"],
+                upstreamPort: mock.port,
+                upstreamTrustRoots: .certificates([mockCANIO])
+            ),
+            secretStore: InMemorySecretStore(),
+            caManager: proxyCA,
+            hookDispatcher: HookDispatcher()
+        )
+        // Active onResponse plugin: overlays a header at the head.
+        proxy.hookDispatcher.updateResponseChain([
+            PluginChainEntry(
+                pluginId: "tag",
+                invoker: TaggingInvoker(id: "tag"),
+                hook: responseHook(hosts: ["localhost"])
+            )
+        ])
+        let addr = try await proxy.start()
+        guard let proxyPort = addr.port else {
+            try? await proxy.stop()
+            try? await mock.stop()
+            return XCTFail("proxy did not bind")
+        }
+        let proxyCANIO = try NIOSSLCertificate(bytes: Array(proxyCACert.derBytes), format: .der)
+
+        let resp = try await TestProxyClient().sendStreaming(
+            proxyHost: "127.0.0.1",
+            proxyPort: proxyPort,
+            targetHost: "localhost",
+            targetPort: 443,
+            method: .POST,
+            path: "/v1/messages",
+            headers: [("host", "localhost")],
+            body: Data(#"{"p":1}"#.utf8),
+            trustingCAs: [proxyCANIO],
+            streamTimeout: .seconds(3)
+        )
+
+        // PROOF: chunk1 arrives before chunk2 is released → the body is NOT buffered.
+        try await resp.firstChunk.get()
+        release.succeed(())
+
+        var collected = Data()
+        for await chunk in resp.bodyChunks { collected.append(chunk) }
+        try? await proxy.stop()
+        try? await mock.stop()
+
+        XCTAssertEqual(resp.status, .ok)
+        XCTAssertEqual(
+            resp.headers.first(name: "x-iris-tagged"),
+            "1",
+            "header overlaid even on a streaming response"
+        )
+        XCTAssertEqual(collected, Data("AAAABBBB".utf8), "body streamed intact")
+    }
+
     /// Liveness regression: a SLOW onResponse hook (300ms) must not hang the client
     /// when the upstream closes promptly after a complete response. On the pre-fix
     /// `[weak self]` drain, NIO's `removeHandlers` nils the relay before the hook
