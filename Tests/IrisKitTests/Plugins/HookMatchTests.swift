@@ -69,4 +69,29 @@ final class HookMatchTests: XCTestCase {
         let m = HookMatch(pathRegex: "[")
         XCTAssertFalse(m.matches(host: "h", method: "POST", path: "/anything", requestContentType: nil))
     }
+
+    func testStatusIgnoredWhenNotProvided() {
+        // An onRequest evaluation passes no status: a status condition must be skipped,
+        // never fail the match (there is no response status at request time).
+        let m = HookMatch(status: [200])
+        XCTAssertTrue(m.matches(host: "h", method: "POST", path: "/", requestContentType: nil))
+    }
+
+    func testStatusMatchesWhenProvided() {
+        let m = HookMatch(status: [500, 502, 503])
+        XCTAssertTrue(m.matches(host: "h", method: "GET", path: "/", requestContentType: nil, status: 502))
+        XCTAssertFalse(m.matches(host: "h", method: "GET", path: "/", requestContentType: nil, status: 200))
+    }
+
+    func testEmptyStatusListIsWildcard() {
+        let m = HookMatch(status: [])
+        XCTAssertTrue(m.matches(host: "h", method: "GET", path: "/", requestContentType: nil, status: 418))
+    }
+
+    func testStatusZeroSentinelCanBeTargeted() {
+        // status=0 is the upstream-failure sentinel (design C5); a hook can target it.
+        let m = HookMatch(status: [0])
+        XCTAssertTrue(m.matches(host: "h", method: "GET", path: "/", requestContentType: nil, status: 0))
+        XCTAssertFalse(m.matches(host: "h", method: "GET", path: "/", requestContentType: nil, status: 200))
+    }
 }

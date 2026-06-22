@@ -155,23 +155,29 @@ public struct HookMatch: Codable, Sendable, Hashable {
     public let methods: [String]
     public let pathRegex: String?
     public let contentType: String?
+    /// Response status codes to match (onComplete/onResponse only). nil/empty =
+    /// wildcard. Ignored for onRequest (no response status exists at request time).
+    public let status: [Int]?
 
     enum CodingKeys: String, CodingKey {
         case hosts, methods
         case pathRegex = "path_regex"
         case contentType = "content_type"
+        case status
     }
 
     public init(
         hosts: [String] = [],
         methods: [String] = [],
         pathRegex: String? = nil,
-        contentType: String? = nil
+        contentType: String? = nil,
+        status: [Int]? = nil
     ) {
         self.hosts = hosts
         self.methods = methods
         self.pathRegex = pathRegex
         self.contentType = contentType
+        self.status = status
     }
 
     public init(from decoder: Decoder) throws {
@@ -180,6 +186,7 @@ public struct HookMatch: Codable, Sendable, Hashable {
         self.methods = try c.decodeIfPresent([String].self, forKey: .methods) ?? []
         self.pathRegex = try c.decodeIfPresent(String.self, forKey: .pathRegex)
         self.contentType = try c.decodeIfPresent(String.self, forKey: .contentType)
+        self.status = try c.decodeIfPresent([Int].self, forKey: .status)
     }
 }
 
@@ -201,7 +208,8 @@ extension HookMatch {
         host: String,
         method: String,
         path: String,
-        requestContentType: String?
+        requestContentType: String?,
+        status: Int? = nil
     ) -> Bool {
         if !hosts.isEmpty {
             let normalized = Self.normalizeHost(host)
@@ -220,6 +228,11 @@ extension HookMatch {
             guard let have = requestContentType?.lowercased(), have.contains(want.lowercased()) else {
                 return false
             }
+        }
+        // Status is response-only: enforce only when the hook declares it AND a
+        // status is supplied (onComplete). At onRequest `status` is nil → skipped.
+        if let declared = self.status, !declared.isEmpty, let actual = status {
+            guard declared.contains(actual) else { return false }
         }
         return true
     }
