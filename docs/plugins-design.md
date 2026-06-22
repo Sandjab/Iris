@@ -370,10 +370,13 @@ Toute la vision est spécifiée ici ; **v1** = ce qui est construit/mergé en pr
 
 ### Phases ultérieures (designs/PR séparés)
 
+- **Tier observabilité `onComplete` / sinks externes** — ✅ **livré** (hook fire-and-forget,
+  lecture seule, métadonnées HTTP-level à la fin de chaque requête ; voir
+  `docs/plugins-oncomplete-design.md` + `docs/plugins-oncomplete-plan.md`).
 - Hooks `onResponse` : `buffered` d'abord (buffering sous cap, streaming préservé hors hook), puis
-  `streaming`/`metadata`.
+  `streaming`/`metadata`. **PR séparée** — demande une décision explicite de relâchement de
+  SPECS §7.2 (réponse jamais modifiée) + un collecteur de réponse bufferisé gaté sur le match.
 - Config schema-driven (formulaires génériques depuis le JSON Schema du manifest).
-- Tier observabilité `onComplete` / sinks externes.
 
 ---
 
