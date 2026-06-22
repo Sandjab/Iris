@@ -252,6 +252,87 @@ public final class HookDispatcher: Sendable {
         }
     }
 
+    /// Cheap pre-gate (no IPC): true iff any onResponse hook matches the request's
+    /// non-status conditions (host/method/path/contentType), known at request time.
+    /// `MITMHandler` calls this to decide whether to install a response-head hook at
+    /// all — a request with no applicable onResponse hook pays ZERO response-path cost.
+    public func hasResponseHook(method: String, uri: String, host: String, contentType: String?) -> Bool {
+        let chain = responseChainBox.withLockedValue { $0 }
+        if chain.isEmpty { return false }
+        let (path, _) = PlaceholderScanner.splitURI(uri)
+        return chain.contains {
+            $0.hook.match.matches(host: host, method: method, path: path, requestContentType: contentType)
+        }
+    }
+
+    /// Runs the onResponse chain (metadata mode) at the response head. Returns the
+    /// (possibly overlaid) response headers; the body is never seen or touched.
+    /// Status-gates per plugin against the ACTUAL response status; folds headers
+    /// through applicable plugins in chain order (each sees the prior overlay).
+    /// A plugin error/timeout is SKIPPED (design R4) — current headers survive.
+    public func onResponse(
+        status: Int,
+        headers: [(String, String)],
+        method: String,
+        uri: String,
+        host: String,
+        contentType: String?
+    ) async -> [(String, String)] {
+        let chain = responseChainBox.withLockedValue { $0 }
+        if chain.isEmpty { return headers }
+        let (path, _) = PlaceholderScanner.splitURI(uri)
+        let applicable = chain.filter {
+            $0.hook.match.matches(
+                host: host, method: method, path: path, requestContentType: contentType, status: status
+            )
+        }
+        if applicable.isEmpty { return headers }
+
+        var current = headers
+        for entry in applicable {
+            let params = PluginRPC.OnResponseParams(
+                method: method, uri: uri, host: host, status: status,
+                headers: current.map { [$0.0, $0.1] }
+            )
+            // Clamp: validate() rejects timeoutMs<=0 for installed plugins, but a
+            // hook built in code could carry 0 — never hand the invoker a 0s window.
+            let timeout = min(max(Double(entry.hook.timeoutMs) / 1000.0, 0.001), Self.maxHookTimeout)
+            do {
+                let result = try await entry.invoker.onResponse(params, timeout: timeout)
+                if result.action == .modify, let pairs = result.headers {
+                    current = Self.overlayResponseHeaders(pairs, onto: current)
+                }
+            } catch {
+                // Response headers are upstream's (never carry an Iris secret value,
+                // §6.1). onResponse only ever skips (design R4): keep current headers.
+                logger.warning(
+                    "plugin onResponse failed (skipped)",
+                    metadata: ["id": "\(entry.pluginId)", "error": "\(error)"]
+                )
+                continue
+            }
+        }
+        return current
+    }
+
+    /// Overlay by name (case-insensitive), mirroring `onRequest`'s `replaceOrAdd`:
+    /// unspecified headers are preserved, no removal in v1. Order is stable —
+    /// replaced headers keep position; new headers append.
+    private static func overlayResponseHeaders(
+        _ pairs: [[String]],
+        onto current: [(String, String)]
+    ) -> [(String, String)] {
+        var result = current
+        for p in pairs where p.count == 2 {
+            if let idx = result.firstIndex(where: { $0.0.lowercased() == p[0].lowercased() }) {
+                result[idx] = (p[0], p[1])
+            } else {
+                result.append((p[0], p[1]))
+            }
+        }
+        return result
+    }
+
     // MARK: - Wire conversion
 
     private static func makeParams(head: HTTPRequestHead, body: ByteBuffer?, host: String)
