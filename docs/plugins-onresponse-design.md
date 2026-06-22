@@ -167,19 +167,20 @@ Méthode **`on_response`** (request/response, daemon → plugin → daemon), **b
               "status": 200,
               "headers": [["content-type","text/event-stream"], ["x-ratelimit-remaining","12"]] } }
 
-// plugin → daemon  (action = pass | modify)
+// plugin → daemon  (action = pass | modify ; headers superposés par nom)
 { "jsonrpc": "2.0", "id": 42,
-  "result": { "action": "modify",
-              "headers": [["content-type","text/event-stream"], ["x-iris-tagged","1"]] } }
+  "result": { "action": "modify", "headers": [["x-iris-tagged","1"]] } }
 ```
 
 - **Request/response** (R2) : `id` présent, réponse attendue. Le relais retient le head
   jusqu'à la réponse (ou `timeoutMs`).
 - `OnResponseParams` : `method`, `uri` (placeholder-form), `host`, `status: Int`,
   `headers: [[String,String]]` (paires ordonnées, casse préservée).
-- `OnResponseResult` : `action ∈ {pass, modify}`. `pass` → head inchangé. `modify` → le set de
-  headers **remplace** celui du head (le plugin renvoie la liste complète voulue). Status
-  jamais modifiable (R3).
+- `OnResponseResult` : `action ∈ {pass, modify}`. `pass` → head inchangé. `modify` → les headers
+  renvoyés sont **superposés par nom** (`replaceOrAdd` : les headers non cités sont préservés, pas
+  de suppression en v1) — **cohérent avec l'overlay éprouvé d'`onRequest`** (`HookDispatcher.swift`
+  §applyModify), plus sûr qu'un remplacement (un tagger n'a pas à ré-émettre les autres headers).
+  Status jamais modifiable (R3).
 - `PluginRPC.Method.onResponse = "on_response"`. Forme **plate** pilotée par `action`, comme
   `on_request` (plugins-design §9.1).
 
