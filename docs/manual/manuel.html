@@ -3826,6 +3826,8 @@ for line in sys.stdin:
         continue
     try:
         msg = json.loads(line)
+        if not isinstance(msg, dict):
+            continue  # ignore valid JSON that isn't an object
     except ValueError:
         continue  # ignore non-JSON lines
     mid, method = msg.get("id"), msg.get("method")
@@ -3849,7 +3851,10 @@ rl.on("line", (line) => {
   line = line.trim();
   if (!line) return;
   let msg;
-  try { msg = JSON.parse(line); } catch { return; } // ignore non-JSON lines
+  try {
+    msg = JSON.parse(line);
+    if (typeof msg !== "object" || msg === null || Array.isArray(msg)) return;
+  } catch { return; } // ignore non-JSON or non-object lines
   let result;
   switch (msg.method) {
     case "initialize":
