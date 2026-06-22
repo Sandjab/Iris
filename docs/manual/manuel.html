@@ -3559,9 +3559,9 @@ Each plugin is a directory containing a <code>plugin.json</code> and an executab
   <li><code>hooks[].event</code> : <code>on_request</code> (seul événement en v1).</li>
   <li><code>hooks[].match</code> : conditions de déclenchement — <code>hosts</code> (correspondance
   <strong>exacte</strong>, pas de glob), <code>methods</code>, <code>path_regex</code>. Vide = tout.</li>
-  <li><code>mutates</code> : le hook peut-il modifier la requête. <code>on_failure</code> :
+  <li><code>hooks[].mutates</code> : le hook peut-il modifier la requête. <code>hooks[].on_failure</code> :
   <code>skip</code> (ignorer le plugin, continuer) ou <code>block</code> (échec fermé).</li>
-  <li><code>timeout_ms</code> : délai par appel, plafonné par IRIS à 5 s.</li>
+  <li><code>hooks[].timeout_ms</code> : délai par appel, plafonné par IRIS à 5 s.</li>
   <li><code>capabilities.network</code> : liste de <code>host:port</code> autorisés en sortie ; vide = aucune
   sortie réseau. <code>capabilities.filesystem</code> : <code>["scratch"]</code> = un dossier de travail
   dédié ; vide = aucun accès fichier.</li>
@@ -3573,9 +3573,9 @@ Each plugin is a directory containing a <code>plugin.json</code> and an executab
   <li><code>hooks[].event</code>: <code>on_request</code> (the only event in v1).</li>
   <li><code>hooks[].match</code>: trigger conditions — <code>hosts</code> (<strong>exact</strong> match, no
   glob), <code>methods</code>, <code>path_regex</code>. Empty = everything.</li>
-  <li><code>mutates</code>: whether the hook may modify the request. <code>on_failure</code>:
+  <li><code>hooks[].mutates</code>: whether the hook may modify the request. <code>hooks[].on_failure</code>:
   <code>skip</code> (ignore the plugin, continue) or <code>block</code> (fail closed).</li>
-  <li><code>timeout_ms</code>: per-call deadline, capped by IRIS at 5 s.</li>
+  <li><code>hooks[].timeout_ms</code>: per-call deadline, capped by IRIS at 5 s.</li>
   <li><code>capabilities.network</code>: list of allowed <code>host:port</code> egress; empty = no network.
   <code>capabilities.filesystem</code>: <code>["scratch"]</code> = a dedicated working directory; empty = no
   filesystem access.</li>
@@ -3597,7 +3597,8 @@ plugin's lifetime:
 </p>
 
 <ul class="lang-fr">
-  <li><code>initialize</code> (au démarrage) → répondre une fois <code>{"result":{"ready":true}}</code>.</li>
+  <li><code>initialize</code> (au démarrage) → répondre une fois avec une réponse JSON-RPC valide, p. ex.
+  <code>{"jsonrpc":"2.0","id":1,"result":{"ready":true}}</code>.</li>
   <li><code>on_request</code> (par requête matchée) → répondre un <code>action</code> :
     <ul>
       <li><code>pass</code> — ne rien changer ;</li>
@@ -3612,7 +3613,8 @@ plugin's lifetime:
   <li><code>shutdown</code> (à la désactivation) → sortir proprement.</li>
 </ul>
 <ul class="lang-en">
-  <li><code>initialize</code> (at startup) → reply once with <code>{"result":{"ready":true}}</code>.</li>
+  <li><code>initialize</code> (at startup) → reply once with a valid JSON-RPC response, e.g.
+  <code>{"jsonrpc":"2.0","id":1,"result":{"ready":true}}</code>.</li>
   <li><code>on_request</code> (per matched request) → reply an <code>action</code>:
     <ul>
       <li><code>pass</code> — change nothing;</li>
