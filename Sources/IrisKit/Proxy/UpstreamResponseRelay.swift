@@ -160,6 +160,19 @@ final class UpstreamResponseRelay: ChannelDuplexHandler, @unchecked Sendable {
     }
 
     func channelInactive(context: ChannelHandlerContext) {
+        // If the head hook is in flight and `.end` is already queued, the full
+        // response was received before the upstream closed. This is a graceful
+        // connection teardown — let the hook's whenComplete drain the queue and
+        // resolve the completion promise normally. A premature close (no `.end`
+        // queued yet) is still a fatal failure.
+        let endQueued = queuedParts.contains {
+            if case .end = $0 { return true }
+            return false
+        }
+        if headHookInFlight && endQueued {
+            context.fireChannelInactive()
+            return
+        }
         finish(.failure(ChannelError.alreadyClosed))
         context.fireChannelInactive()
     }
