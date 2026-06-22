@@ -1,7 +1,7 @@
 # Design — Plugins : hook `onResponse` (mode `metadata`)
 
 > Document de design (source de vérité pour le plan d'implémentation).
-> Statut : **validé en brainstorm** (2026-06-22), plan à dériver.
+> Statut : **implémenté** (2026-06-22) — voir `docs/plugins-onresponse-plan.md` (plan exécuté).
 > Date : 2026-06-22. Branche : `feat/plugins-onresponse-metadata`.
 > Étend le système de plugins v1 (`docs/plugins-design.md`, P1→P5 mergées) et la PR
 > `onComplete` (`docs/plugins-oncomplete-design.md`, mergée #86).
