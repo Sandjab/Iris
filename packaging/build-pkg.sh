@@ -35,6 +35,14 @@ mkdir -p "$EXPORT"
 swift build -c release --product irisd
 [ -f "$DAEMON_BIN" ] || { echo "error: $DAEMON_BIN introuvable après build" >&2; exit 1; }
 
+# --- 1a. Build iris-sandbox-exec (shim Seatbelt des plugins) --------------
+#   Sans ce binaire embarqué à côté d'irisd, PluginSandbox ne trouve pas le
+#   shim en distribution (Daemon.swift résout le chemin voisin de l'exécutable)
+#   → tout lancement de plugin échoue. Cf. PluginSandbox.swift.
+swift build -c release --product iris-sandbox-exec
+SANDBOX_SHIM_BIN=".build/release/iris-sandbox-exec"
+[ -f "$SANDBOX_SHIM_BIN" ] || { echo "error: $SANDBOX_SHIM_BIN introuvable après build" >&2; exit 1; }
+
 # --- 1b. Build + stage CLI iris (→ /usr/local/bin) ------------------------
 swift build -c release --product iris
 IRIS_CLI_BIN=".build/release/iris"
@@ -61,8 +69,9 @@ xcodebuild -exportArchive \
 APP="$(/usr/bin/find "$EXPORT" -maxdepth 1 -name '*.app' -print -quit)"
 [ -n "$APP" ] && [ -d "$APP" ] || { echo "error: aucun .app exporté dans $EXPORT" >&2; exit 1; }
 
-# --- 4. Embed irisd (ditto, code) + plist (cp, data) ----------------------
+# --- 4. Embed irisd + shim sandbox (ditto, code) + plist (cp, data) -------
 ditto "$DAEMON_BIN" "$APP/Contents/MacOS/irisd"
+ditto "$SANDBOX_SHIM_BIN" "$APP/Contents/MacOS/iris-sandbox-exec"
 mkdir -p "$APP/Contents/Library/LaunchAgents"
 cp packaging/io.iris.daemon.plist "$APP/Contents/Library/LaunchAgents/io.iris.daemon.plist"
 
@@ -70,7 +79,10 @@ cp packaging/io.iris.daemon.plist "$APP/Contents/Library/LaunchAgents/io.iris.da
 #   a. irisd d'abord (code non-bundle → -i obligatoire ; aucun entitlements)
 codesign -s "$APP_IDENTITY" -f --timestamp -o runtime -i io.iris.daemon \
   "$APP/Contents/MacOS/irisd"
-#   b. le bundle ensuite (re-scelle CodeResources → couvre irisd + plist)
+#   a-bis. shim sandbox (idem : code non-bundle, -i obligatoire, sans entitlements)
+codesign -s "$APP_IDENTITY" -f --timestamp -o runtime -i io.iris.sandbox-exec \
+  "$APP/Contents/MacOS/iris-sandbox-exec"
+#   b. le bundle ensuite (re-scelle CodeResources → couvre irisd + shim + plist)
 codesign -s "$APP_IDENTITY" -f --timestamp -o runtime "$APP"
 
 # --- 6. Vérification signature (--deep légitime ici = vérification) --------
