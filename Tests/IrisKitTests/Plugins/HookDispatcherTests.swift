@@ -43,6 +43,22 @@ private actor MockInvoker: PluginInvoking {
         completeRecords.append(params)
     }
     var completeCalls: [PluginRPC.OnCompleteParams] { completeRecords }
+
+    private var responseReply: (@Sendable (PluginRPC.OnResponseParams) async throws -> PluginRPC.OnResponseResult)?
+    private var responseCalls = 0
+    func setOnResponse(
+        _ reply: @escaping @Sendable (PluginRPC.OnResponseParams) async throws -> PluginRPC.OnResponseResult
+    ) {
+        responseReply = reply
+    }
+    func onResponse(_ params: PluginRPC.OnResponseParams, timeout: TimeInterval) async throws
+        -> PluginRPC.OnResponseResult
+    {
+        responseCalls += 1
+        if let responseReply { return try await responseReply(params) }
+        return .init(action: .pass)
+    }
+    var responseCallCount: Int { responseCalls }
 }
 
 final class HookDispatcherTests: XCTestCase {
@@ -267,6 +283,254 @@ final class HookDispatcherTests: XCTestCase {
         d.updateCompleteChain([completeEntry(bad)])
         // Must not throw / crash — onComplete is fire-and-forget; errors are logged.
         await d.onComplete(method: "GET", uri: "/x", host: "h", contentType: nil, status: 0, durationMs: 1)
+    }
+
+    private func responseEntry(
+        _ inv: any PluginInvoking,
+        match: HookMatch = HookMatch(),
+        onFailure: PluginHook.FailureMode = .skip
+    ) -> PluginChainEntry {
+        PluginChainEntry(
+            pluginId: inv.id,
+            invoker: inv,
+            hook: PluginHook(event: .onResponse, match: match, mutates: true, onFailure: onFailure, timeoutMs: 1000)
+        )
+    }
+
+    func testOnResponseModifyOverlaysHeader() async {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in .init(action: .modify, headers: [["x-iris-tagged", "1"]]) }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv, match: HookMatch(hosts: ["h"]))])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("content-type", "text/event-stream")],
+            method: "POST",
+            uri: "/v1/messages",
+            host: "h",
+            contentType: "application/json"
+        )
+        XCTAssertEqual(out.first(where: { $0.0 == "x-iris-tagged" })?.1, "1")
+        XCTAssertEqual(
+            out.first(where: { $0.0 == "content-type" })?.1,
+            "text/event-stream",
+            "overlay preserves unspecified headers"
+        )
+    }
+
+    func testOnResponsePassLeavesHeadersUntouched() async {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in .init(action: .pass) }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv)])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("a", "1")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        XCTAssertEqual(out.map { $0.0 }, ["a"])
+        XCTAssertEqual(out.first?.1, "1")
+    }
+
+    func testOnResponseStatusGating() async {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in .init(action: .modify, headers: [["x", "1"]]) }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv, match: HookMatch(status: [500]))])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("a", "1")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        let calls = await inv.responseCallCount
+        XCTAssertEqual(calls, 0, "status [500] must not match a 200 response")
+        XCTAssertEqual(out.map { $0.0 }, ["a"], "non-matching hook leaves headers unchanged")
+    }
+
+    func testOnResponseChainOrderFolds() async {
+        let a = MockInvoker(id: "a") { _ in .init(action: .pass) }
+        await a.setOnResponse { _ in .init(action: .modify, headers: [["x", "a"]]) }
+        let b = MockInvoker(id: "b") { _ in .init(action: .pass) }
+        await b.setOnResponse { p in
+            let seen = p.headers.first(where: { $0[0] == "x" })?[1] ?? "?"
+            return .init(action: .modify, headers: [["x", seen + "b"]])
+        }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(a), responseEntry(b)])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        XCTAssertEqual(out.first(where: { $0.0 == "x" })?.1, "ab")
+    }
+
+    func testOnResponseSkipsFailingPlugin() async {
+        struct Boom: Error {}
+        let a = MockInvoker(id: "a") { _ in .init(action: .pass) }
+        await a.setOnResponse { _ in throw Boom() }
+        let b = MockInvoker(id: "b") { _ in .init(action: .pass) }
+        await b.setOnResponse { _ in .init(action: .modify, headers: [["x-b", "1"]]) }
+        let d = HookDispatcher()
+        // onFailure is ignored for onResponse; the manifest rejects `block` for
+        // response hooks, so a throwing response plugin can only ever be skipped.
+        d.updateResponseChain([responseEntry(a), responseEntry(b)])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        XCTAssertEqual(
+            out.first(where: { $0.0 == "x-b" })?.1,
+            "1",
+            "a throwing plugin is skipped; chain continues"
+        )
+    }
+
+    func testHasResponseHookPreGate() {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv, match: HookMatch(hosts: ["api.anthropic.com"]))])
+        XCTAssertTrue(
+            d.hasResponseHook(method: "POST", uri: "/v1/messages", host: "api.anthropic.com", contentType: nil)
+        )
+        XCTAssertFalse(
+            d.hasResponseHook(method: "POST", uri: "/v1/messages", host: "other.com", contentType: nil)
+        )
+    }
+
+    func testHasResponseHookIgnoresStatus() async {
+        // The pre-gate deliberately OVER-INCLUDES: response status is unknown at
+        // request time, so a status-restricted hook must still arm the response
+        // path. The full status filter then rejects the non-matching response.
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in .init(action: .modify, headers: [["x", "1"]]) }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv, match: HookMatch(status: [500]))])
+        XCTAssertTrue(
+            d.hasResponseHook(method: "GET", uri: "/x", host: "h", contentType: nil),
+            "pre-gate ignores status (unknown at request time) — must arm the response path"
+        )
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("a", "1")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        let calls = await inv.responseCallCount
+        XCTAssertEqual(calls, 0, "the full status filter rejects a 200 against status [500]")
+        XCTAssertEqual(out.map { $0.0 }, ["a"], "non-matching status leaves headers unchanged")
+    }
+
+    func testOnResponseIgnoresFramingHeaderOverlay() async {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in
+            .init(action: .modify, headers: [["content-length", "999"], ["x-iris-tagged", "1"]])
+        }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv)])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("content-length", "2"), ("content-type", "application/json")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        XCTAssertEqual(
+            out.first(where: { $0.0.lowercased() == "content-length" })?.1,
+            "2",
+            "a plugin must not overwrite the upstream content-length (framing protection)"
+        )
+        XCTAssertEqual(out.first(where: { $0.0 == "x-iris-tagged" })?.1, "1", "non-framing overlay still applies")
+    }
+
+    func testOnResponseOverlaySanitizesCRLFAndWhitespace() async {
+        // A semi-trusted plugin must not be able to inject a header break (CRLF →
+        // response splitting) nor bypass the framing guard with whitespace padding.
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in
+            .init(
+                action: .modify,
+                headers: [
+                    ["x-evil-value", "ok\r\nInjected: pwned"],
+                    ["x-evil-name\r\nInjected", "1"],
+                    [" content-length", "999"],
+                    ["x-iris-tagged", "1"],
+                ]
+            )
+        }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv)])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("content-length", "2")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        XCTAssertNil(
+            out.first(where: { $0.0.contains("x-evil") || $0.1.contains("\n") || $0.0.contains("\n") }),
+            "headers with CR/LF in name or value are dropped (no response splitting)"
+        )
+        XCTAssertEqual(
+            out.first(where: { $0.0.lowercased() == "content-length" })?.1,
+            "2",
+            "a whitespace-padded framing name cannot bypass the guard"
+        )
+        XCTAssertEqual(out.first(where: { $0.0 == "x-iris-tagged" })?.1, "1", "a clean header still applies")
+    }
+
+    func testOnResponseOverlayPreservesDuplicateHeaders() async {
+        // Response headers may legally repeat (Set-Cookie). The overlay must not collapse them.
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in .init(action: .modify, headers: [["x-iris-tagged", "1"]]) }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv)])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("set-cookie", "a=1"), ("set-cookie", "b=2"), ("content-type", "text/html")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        let cookies = out.filter { $0.0.lowercased() == "set-cookie" }.map { $0.1 }
+        XCTAssertEqual(cookies, ["a=1", "b=2"], "duplicate Set-Cookie headers are preserved through the overlay")
+        XCTAssertEqual(out.first(where: { $0.0 == "x-iris-tagged" })?.1, "1")
+    }
+
+    func testOnResponseOverlayReplaceIsCaseInsensitive() async {
+        let inv = MockInvoker(id: "p") { _ in .init(action: .pass) }
+        await inv.setOnResponse { _ in .init(action: .modify, headers: [["Content-Type", "text/plain"]]) }
+        let d = HookDispatcher()
+        d.updateResponseChain([responseEntry(inv)])
+        let out = await d.onResponse(
+            status: 200,
+            headers: [("content-type", "text/html")],
+            method: "GET",
+            uri: "/x",
+            host: "h",
+            contentType: nil
+        )
+        let cts = out.filter { $0.0.lowercased() == "content-type" }
+        XCTAssertEqual(cts.count, 1, "case-insensitive replace must not duplicate the header")
+        XCTAssertEqual(cts.first?.1, "text/plain")
     }
 
     func testOnCompleteDispatchesConcurrentlyAcrossPlugins() async {

@@ -237,4 +237,29 @@ final class PluginManifestTests: XCTestCase {
         XCTAssertEqual(manifest.hooks[0].event, .onComplete)
         XCTAssertEqual(manifest.hooks[0].match.status, [500, 502])
     }
+
+    func testDecodesOnResponseHook() throws {
+        let json = #"""
+            {"id":"p","name":"P","version":"1.0.0","api_version":1,"executable":"bin/p",
+             "hooks":[{"event":"on_response","match":{"hosts":["api.anthropic.com"],"status":[200]},
+                       "on_failure":"skip","timeout_ms":1000}]}
+            """#
+        let m = try JSONDecoder().decode(PluginManifest.self, from: Data(json.utf8))
+        try m.validate()
+        XCTAssertEqual(m.hooks.first?.event, .onResponse)
+        XCTAssertEqual(m.hooks.first?.match.status, [200])
+    }
+
+    func testResponseHookRejectsBlockFailureMode() throws {
+        let json = #"""
+            {"id":"p","name":"P","version":"1.0.0","api_version":1,"executable":"bin/p",
+             "hooks":[{"event":"on_response","match":{},"on_failure":"block","timeout_ms":1000}]}
+            """#
+        let m = try JSONDecoder().decode(PluginManifest.self, from: Data(json.utf8))
+        XCTAssertThrowsError(try m.validate()) { error in
+            guard case PluginError.invalidManifest = error else {
+                return XCTFail("expected .invalidManifest, got \(error)")
+            }
+        }
+    }
 }

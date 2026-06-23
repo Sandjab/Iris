@@ -39,7 +39,8 @@ final class UpstreamClient: @unchecked Sendable {
         port: Int,
         to clientChannel: Channel,
         on eventLoop: EventLoop,
-        headWritten: NIOLoopBoundBox<Bool>
+        headWritten: NIOLoopBoundBox<Bool>,
+        responseHeadHook: (@Sendable (HTTPResponseHead) -> EventLoopFuture<HTTPResponseHead>)? = nil
     ) -> EventLoopFuture<StreamOutcome> {
         let completion = eventLoop.makePromise(of: StreamOutcome.self)
         do {
@@ -78,7 +79,8 @@ final class UpstreamClient: @unchecked Sendable {
                                 UpstreamResponseRelay(
                                     clientChannel: clientChannel,
                                     completion: completion,
-                                    headWritten: headWritten
+                                    headWritten: headWritten,
+                                    responseHeadHook: responseHeadHook
                                 )
                             )
                         })

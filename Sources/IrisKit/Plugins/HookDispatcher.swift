@@ -15,18 +15,28 @@ public protocol PluginInvoking: Sendable {
     /// Fire-and-forget completion notification. Read-only; no return value. Default
     /// is a no-op so conformers that declare no onComplete hook need not implement it.
     func onComplete(_ params: PluginRPC.OnCompleteParams) async throws
+    /// Runs the onResponse hook (metadata mode): observe/overlay response headers.
+    /// Default returns `.pass` — effectively a no-op — so conformers declaring no
+    /// onResponse hook need not implement it.
+    func onResponse(_ params: PluginRPC.OnResponseParams, timeout: TimeInterval) async throws
+        -> PluginRPC.OnResponseResult
 }
 
 extension PluginInvoking {
     public func onComplete(_ params: PluginRPC.OnCompleteParams) async throws {}
+    public func onResponse(_ params: PluginRPC.OnResponseParams, timeout: TimeInterval) async throws
+        -> PluginRPC.OnResponseResult
+    {
+        .init(action: .pass)
+    }
 }
 
 // MARK: - PluginChainEntry
 
 /// One running plugin + a hook it declared, in chain order. Built by
 /// `PluginHostManager` after reconcile and pushed to the dispatcher. A single
-/// entry belongs to either the onRequest chain or the onComplete chain depending
-/// on the hook's `event`; the struct itself is event-agnostic.
+/// entry belongs to the onRequest, onResponse, or onComplete chain depending on
+/// the hook's `event`; the struct itself is event-agnostic.
 public struct PluginChainEntry: Sendable {
     public let pluginId: String
     public let invoker: any PluginInvoking
@@ -60,6 +70,7 @@ public final class HookDispatcher: Sendable {
     static let maxBodyBytes = 4 * 1024 * 1024
 
     private let chainBox = NIOLockedValueBox<[PluginChainEntry]>([])
+    private let responseChainBox = NIOLockedValueBox<[PluginChainEntry]>([])
     private let completeChainBox = NIOLockedValueBox<[PluginChainEntry]>([])
     private let logger: Logger
 
@@ -70,6 +81,11 @@ public final class HookDispatcher: Sendable {
     /// Pushed by `PluginHostManager` after each reconcile. Cheap lock write.
     public func updateChain(_ chain: [PluginChainEntry]) {
         chainBox.withLockedValue { $0 = chain }
+    }
+
+    /// Pushed by `PluginHostManager` after each reconcile (onResponse chain).
+    public func updateResponseChain(_ chain: [PluginChainEntry]) {
+        responseChainBox.withLockedValue { $0 = chain }
     }
 
     /// Pushed by `PluginHostManager` after each reconcile (onComplete chain).
@@ -234,6 +250,125 @@ public final class HookDispatcher: Sendable {
                 }
             }
         }
+    }
+
+    /// Cheap pre-gate (no IPC): true iff any onResponse hook matches the request's
+    /// non-status conditions (host/method/path/contentType), known at request time.
+    /// `MITMHandler` calls this to decide whether to install a response-head hook at
+    /// all — a request with no applicable onResponse hook pays ZERO response-path cost.
+    public func hasResponseHook(method: String, uri: String, host: String, contentType: String?) -> Bool {
+        let chain = responseChainBox.withLockedValue { $0 }
+        if chain.isEmpty { return false }
+        let (path, _) = PlaceholderScanner.splitURI(uri)
+        return chain.contains {
+            $0.hook.match.matches(host: host, method: method, path: path, requestContentType: contentType)
+        }
+    }
+
+    /// Runs the onResponse chain (metadata mode) at the response head. Returns the
+    /// (possibly overlaid) response headers; the body is never seen or touched.
+    /// Status-gates per plugin against the ACTUAL response status; folds headers
+    /// through applicable plugins in chain order (each sees the prior overlay).
+    /// A plugin error/timeout is SKIPPED (design R4) — current headers survive.
+    public func onResponse(
+        status: Int,
+        headers: [(String, String)],
+        method: String,
+        uri: String,
+        host: String,
+        contentType: String?
+    ) async -> [(String, String)] {
+        let chain = responseChainBox.withLockedValue { $0 }
+        if chain.isEmpty { return headers }
+        let (path, _) = PlaceholderScanner.splitURI(uri)
+        let applicable = chain.filter {
+            $0.hook.match.matches(
+                host: host,
+                method: method,
+                path: path,
+                requestContentType: contentType,
+                status: status
+            )
+        }
+        if applicable.isEmpty { return headers }
+
+        var current = headers
+        for entry in applicable {
+            let params = PluginRPC.OnResponseParams(
+                method: method,
+                uri: uri,
+                host: host,
+                status: status,
+                headers: current.map { [$0.0, $0.1] }
+            )
+            // Clamp: validate() rejects timeoutMs<=0 for installed plugins, but a
+            // hook built in code could carry 0 — never hand the invoker a 0s window.
+            let timeout = min(max(Double(entry.hook.timeoutMs) / 1000.0, 0.001), Self.maxHookTimeout)
+            do {
+                let result = try await entry.invoker.onResponse(params, timeout: timeout)
+                if result.action == .modify, let pairs = result.headers {
+                    current = Self.overlayResponseHeaders(pairs, onto: current)
+                }
+            } catch {
+                // Response headers are upstream's (never carry an Iris secret value,
+                // §6.1). onResponse only ever skips (design R4): keep current headers.
+                logger.warning(
+                    "plugin onResponse failed (skipped)",
+                    metadata: ["id": "\(entry.pluginId)", "error": "\(error)"]
+                )
+            }
+        }
+        return current
+    }
+
+    /// Framing/hop-by-hop names a plugin must never overwrite (RFC 7230 §6.1).
+    /// Mirrors the set stripped by `MITMHandler.writeSynthetic` — verbatim copy
+    /// so any future additions remain consistent.
+    private static let framingHeaders: Set<String> = [
+        "content-length", "transfer-encoding", "connection", "keep-alive",
+        "upgrade", "te", "trailer", "proxy-authenticate", "proxy-authorization",
+        "proxy-connection",
+    ]
+
+    /// Overlay by name (case-insensitive): replaces the first occurrence by name,
+    /// any later duplicate entries are preserved — correct for response headers
+    /// where duplicate names are meaningful (e.g. `Set-Cookie`). No removal in v1.
+    /// Unspecified headers are preserved. Order is stable — replaced headers keep
+    /// position; new headers append.
+    ///
+    /// Framing/hop-by-hop names (`content-length`, `transfer-encoding`, `connection`,
+    /// etc. — see `framingHeaders`) are silently skipped: a plugin cannot corrupt the
+    /// upstream's own response framing. The upstream's framing headers in `current`
+    /// pass through untouched.
+    ///
+    /// SECURITY: plugin-supplied names/values are sanitized before use — surrounding
+    /// whitespace is trimmed (so a padded `" content-length"` cannot bypass the framing
+    /// check) and any pair whose name or value contains a CR or LF is DROPPED. A
+    /// semi-trusted plugin must not be able to inject a header break (CRLF injection /
+    /// HTTP response splitting): a plugin cannot break Iris's guarantees (§3).
+    private static func overlayResponseHeaders(
+        _ pairs: [[String]],
+        onto current: [(String, String)]
+    ) -> [(String, String)] {
+        var result = current
+        for p in pairs where p.count == 2 {
+            let name = p[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = p[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            // Scan Unicode SCALARS, not Characters: `\r\n` is a single extended
+            // grapheme cluster, so a Character-level `== "\r"` check would MISS the
+            // canonical CRLF injection sequence. Scalars keep CR/LF distinct.
+            guard !name.isEmpty,
+                !name.unicodeScalars.contains(where: { $0 == "\r" || $0 == "\n" }),
+                !value.unicodeScalars.contains(where: { $0 == "\r" || $0 == "\n" })
+            else { continue }
+            guard !framingHeaders.contains(name.lowercased()) else { continue }
+            if let idx = result.firstIndex(where: { $0.0.lowercased() == name.lowercased() }) {
+                result[idx] = (name, value)
+            } else {
+                result.append((name, value))
+            }
+        }
+        return result
     }
 
     // MARK: - Wire conversion

@@ -370,6 +370,10 @@ For each intercepted HTTPS request that targets a MITM-whitelisted host, the bro
 
 Response bodies are **never** scanned or modified.
 
+Plugins may, via the `onResponse` hook (metadata mode), observe the response status
+line and **overlay response headers** before relay. Response **bodies** remain never
+scanned, modified, or buffered (the relay forwards body parts part-by-part, §7.3).
+
 ### 7.3 Streaming
 
 For Server-Sent Events and chunked responses going upstream→client, the broker forwards bytes without buffering or modification.

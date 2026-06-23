@@ -75,6 +75,43 @@ final class HeaderTaggerExampleTests: XCTestCase {
         XCTAssertTrue(tagged, "modify result must add X-Iris-Plugin: header-tagger")
     }
 
+    /// Protocol-level: a started host answers `on_response` with a `modify` action
+    /// carrying `x-iris-tagged: 1`. Exercises PluginHost.onResponse + the plugin's
+    /// new handler end-to-end through the real sandboxed subprocess.
+    func testHeaderTaggerReturnsModifyWithTaggedResponseHeader() async throws {
+        let scratch = try scratchDir()
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let host = makeHost(scratch: scratch)
+        try await host.start()
+
+        var caught: Error?
+        var result: PluginRPC.OnResponseResult?
+        do {
+            result = try await host.onResponse(
+                PluginRPC.OnResponseParams(
+                    method: "POST",
+                    uri: "/v1/messages",
+                    host: "api.anthropic.com",
+                    status: 200,
+                    headers: [["content-type", "text/event-stream"]]
+                ),
+                timeout: 2.0
+            )
+        } catch {
+            caught = error
+        }
+        await host.shutdown()
+        if let caught = caught { throw caught }
+
+        XCTAssertEqual(result?.action, .modify, "header-tagger must return a modify action for on_response")
+        let tagged = (result?.headers ?? []).contains {
+            $0.count == 2
+                && $0[0].caseInsensitiveCompare("x-iris-tagged") == .orderedSame
+                && $0[1] == "1"
+        }
+        XCTAssertTrue(tagged, "modify result must add x-iris-tagged: 1")
+    }
+
     /// Real delivery: a started host receives an `on_complete` NOTIFICATION and the
     /// plugin records it in its scratch dir. Proves PluginHost.onComplete writes the
     /// notification and the example plugin handles it (no reply expected).

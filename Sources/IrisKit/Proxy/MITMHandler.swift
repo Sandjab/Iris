@@ -127,6 +127,43 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
         // (head already on the wire). EL-confined to the client/upstream loop.
         let headWritten = NIOLoopBoundBox(false, eventLoop: eventLoop)
 
+        // Pre-gate (design R6.a): build a response-head hook ONLY if an onResponse
+        // plugin matches this request's request-time conditions. nil → the relay
+        // runs the byte-for-byte v1 path (zero response-path cost).
+        let dispatcher = server.hookDispatcher
+        let responseHeadHook: (@Sendable (HTTPResponseHead) -> EventLoopFuture<HTTPResponseHead>)?
+        // Fires in bypass mode too (consistent with onComplete); only onRequest is skipped
+        // when paused. Metadata-only, no secret exposure.
+        // NB: chain is a snapshot; a plugin toggled mid-request affects at most this one
+        // request (re-filtered in onResponse).
+        if dispatcher.hasResponseHook(
+            method: originalMethod,
+            uri: originalURI,
+            host: host,
+            contentType: originalContentType
+        ) {
+            responseHeadHook = { head in
+                eventLoop.makeFutureWithTask { () async -> HTTPResponseHead in
+                    let pairs = head.headers.map { ($0.name, $0.value) }
+                    let modified = await dispatcher.onResponse(
+                        status: Int(head.status.code),
+                        headers: pairs,
+                        method: originalMethod,
+                        uri: originalURI,
+                        host: host,
+                        contentType: originalContentType
+                    )
+                    var h = HTTPHeaders()
+                    for (n, v) in modified { h.add(name: n, value: v) }
+                    var newHead = head
+                    newHead.headers = h
+                    return newHead
+                }
+            }
+        } else {
+            responseHeadHook = nil
+        }
+
         eventLoop.makeFutureWithTask { () async throws -> ProcessedRequest in
             let processed = try await Self.processRequest(
                 head: head,
@@ -176,7 +213,8 @@ final class MITMHandler: ChannelInboundHandler, @unchecked Sendable {
                     port: server.configuration.upstreamPort,
                     to: channel,
                     on: eventLoop,
-                    headWritten: headWritten
+                    headWritten: headWritten,
+                    responseHeadHook: responseHeadHook
                 ).map { (processed, $0) }
             }
         }.whenComplete { result in

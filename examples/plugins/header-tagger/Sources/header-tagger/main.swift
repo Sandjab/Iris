@@ -68,6 +68,12 @@ while let line = readLine(strippingNewline: true) {
             "jsonrpc": "2.0", "id": id,
             "result": ["action": "modify", "headers": [["X-Iris-Plugin", "header-tagger"]]],
         ])
+    case "on_response":
+        // Tag the response so downstream observers can see the plugin ran.
+        emitLine([
+            "jsonrpc": "2.0", "id": id,
+            "result": ["action": "modify", "headers": [["x-iris-tagged", "1"]]],
+        ])
     case "on_complete":
         // Notification: no reply. Record HTTP-level metadata to scratch.
         if let params = object["params"] as? [String: Any] {
