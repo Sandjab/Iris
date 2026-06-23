@@ -20,6 +20,7 @@ RESOURCES="packaging/installer/resources"
 DISTRIBUTION="packaging/installer/Distribution.xml"
 # APP est dérivé après l'export (le nom réel suit PRODUCT_NAME → IrisApp.app actuellement).
 DAEMON_BIN=".build/release/irisd"
+SANDBOX_SHIM_BIN=".build/release/iris-sandbox-exec"
 
 # --- 0. Préconditions (fail-fast, aucun fallback) -------------------------
 : "${IRIS_TEAM_ID:?error: exporte IRIS_TEAM_ID (Team ID Apple) avant de lancer}"
@@ -40,7 +41,6 @@ swift build -c release --product irisd
 #   shim en distribution (Daemon.swift résout le chemin voisin de l'exécutable)
 #   → tout lancement de plugin échoue. Cf. PluginSandbox.swift.
 swift build -c release --product iris-sandbox-exec
-SANDBOX_SHIM_BIN=".build/release/iris-sandbox-exec"
 [ -f "$SANDBOX_SHIM_BIN" ] || { echo "error: $SANDBOX_SHIM_BIN introuvable après build" >&2; exit 1; }
 
 # --- 1b. Build + stage CLI iris (→ /usr/local/bin) ------------------------
