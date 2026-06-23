@@ -18,8 +18,9 @@ COMPONENT_DIR="$BUILD/component"
 COMPONENT_PKG="$COMPONENT_DIR/Iris-component.pkg"
 RESOURCES="packaging/installer/resources"
 DISTRIBUTION="packaging/installer/Distribution.xml"
-# APP est dérivé après l'export (le nom réel suit PRODUCT_NAME → IrisApp.app actuellement).
+# APP est dérivé après l'export (le nom réel suit PRODUCT_NAME → Iris.app actuellement).
 DAEMON_BIN=".build/release/irisd"
+SANDBOX_SHIM_BIN=".build/release/iris-sandbox-exec"
 
 # --- 0. Préconditions (fail-fast, aucun fallback) -------------------------
 : "${IRIS_TEAM_ID:?error: exporte IRIS_TEAM_ID (Team ID Apple) avant de lancer}"
@@ -34,6 +35,13 @@ mkdir -p "$EXPORT"
 # --- 1. Build irisd (SwiftPM, release) ------------------------------------
 swift build -c release --product irisd
 [ -f "$DAEMON_BIN" ] || { echo "error: $DAEMON_BIN introuvable après build" >&2; exit 1; }
+
+# --- 1a. Build iris-sandbox-exec (shim Seatbelt des plugins) --------------
+#   Sans ce binaire embarqué à côté d'irisd, PluginSandbox ne trouve pas le
+#   shim en distribution (Daemon.swift résout le chemin voisin de l'exécutable)
+#   → tout lancement de plugin échoue. Cf. PluginSandbox.swift.
+swift build -c release --product iris-sandbox-exec
+[ -f "$SANDBOX_SHIM_BIN" ] || { echo "error: $SANDBOX_SHIM_BIN introuvable après build" >&2; exit 1; }
 
 # --- 1b. Build + stage CLI iris (→ /usr/local/bin) ------------------------
 swift build -c release --product iris
@@ -57,12 +65,13 @@ xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
   -exportOptionsPlist "$BUILD/exportOptions.plist" \
   -exportPath "$EXPORT"
-# Nom réel du bundle = PRODUCT_NAME (IrisApp.app) → dérivé, pas figé.
+# Nom réel du bundle = PRODUCT_NAME (Iris.app) → dérivé, pas figé.
 APP="$(/usr/bin/find "$EXPORT" -maxdepth 1 -name '*.app' -print -quit)"
 [ -n "$APP" ] && [ -d "$APP" ] || { echo "error: aucun .app exporté dans $EXPORT" >&2; exit 1; }
 
-# --- 4. Embed irisd (ditto, code) + plist (cp, data) ----------------------
+# --- 4. Embed irisd + shim sandbox (ditto, code) + plist (cp, data) -------
 ditto "$DAEMON_BIN" "$APP/Contents/MacOS/irisd"
+ditto "$SANDBOX_SHIM_BIN" "$APP/Contents/MacOS/iris-sandbox-exec"
 mkdir -p "$APP/Contents/Library/LaunchAgents"
 cp packaging/io.iris.daemon.plist "$APP/Contents/Library/LaunchAgents/io.iris.daemon.plist"
 
@@ -70,7 +79,10 @@ cp packaging/io.iris.daemon.plist "$APP/Contents/Library/LaunchAgents/io.iris.da
 #   a. irisd d'abord (code non-bundle → -i obligatoire ; aucun entitlements)
 codesign -s "$APP_IDENTITY" -f --timestamp -o runtime -i io.iris.daemon \
   "$APP/Contents/MacOS/irisd"
-#   b. le bundle ensuite (re-scelle CodeResources → couvre irisd + plist)
+#   a-bis. shim sandbox (idem : code non-bundle, -i obligatoire, sans entitlements)
+codesign -s "$APP_IDENTITY" -f --timestamp -o runtime -i io.iris.sandbox-exec \
+  "$APP/Contents/MacOS/iris-sandbox-exec"
+#   b. le bundle ensuite (re-scelle CodeResources → couvre irisd + shim + plist)
 codesign -s "$APP_IDENTITY" -f --timestamp -o runtime "$APP"
 
 # --- 6. Vérification signature (--deep légitime ici = vérification) --------
