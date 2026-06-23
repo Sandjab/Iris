@@ -18,7 +18,7 @@ COMPONENT_DIR="$BUILD/component"
 COMPONENT_PKG="$COMPONENT_DIR/Iris-component.pkg"
 RESOURCES="packaging/installer/resources"
 DISTRIBUTION="packaging/installer/Distribution.xml"
-# APP est dérivé après l'export (le nom réel suit PRODUCT_NAME → IrisApp.app actuellement).
+# APP est dérivé après l'export (le nom réel suit PRODUCT_NAME → Iris.app actuellement).
 DAEMON_BIN=".build/release/irisd"
 SANDBOX_SHIM_BIN=".build/release/iris-sandbox-exec"
 
@@ -65,7 +65,7 @@ xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
   -exportOptionsPlist "$BUILD/exportOptions.plist" \
   -exportPath "$EXPORT"
-# Nom réel du bundle = PRODUCT_NAME (IrisApp.app) → dérivé, pas figé.
+# Nom réel du bundle = PRODUCT_NAME (Iris.app) → dérivé, pas figé.
 APP="$(/usr/bin/find "$EXPORT" -maxdepth 1 -name '*.app' -print -quit)"
 [ -n "$APP" ] && [ -d "$APP" ] || { echo "error: aucun .app exporté dans $EXPORT" >&2; exit 1; }
 
