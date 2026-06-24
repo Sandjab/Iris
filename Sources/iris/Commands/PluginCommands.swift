@@ -71,7 +71,8 @@ extension PluginCommand {
         mutating func run() async throws {
             // The daemon (LaunchAgent) has CWD = "/", so a relative path would
             // resolve to "/examples/...". Resolve against the client CWD here.
-            let absolutePath = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).path
+            let absolutePath = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+                .standardizedFileURL.path
             let plugin = try await withAdminClient(connection) { client in
                 try await client.call(
                     .pluginInstall,
