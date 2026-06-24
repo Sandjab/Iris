@@ -29,6 +29,18 @@ public enum PluginPacker {
     public static func pack(source: URL, output: URL, force: Bool) throws -> URL {
         let fm = FileManager.default
 
+        let source = source.standardizedFileURL
+        let output = output.standardizedFileURL
+
+        // Refuse to pack into the source tree or an ancestor of it: with --force the
+        // cleanup step below would delete the source. (output *under* source — e.g.
+        // the default <source>/dist — is fine.)
+        if source.path == output.path || source.path.hasPrefix(output.path + "/") {
+            throw PluginError.ioError(
+                "output directory cannot be the source directory or an ancestor of it: \(output.path)"
+            )
+        }
+
         // 1. Read + validate the source manifest.
         let manifestURL = source.appendingPathComponent("plugin.json")
         let manifestData = try io("read \(manifestURL.path)") { try Data(contentsOf: manifestURL) }
@@ -48,13 +60,15 @@ public enum PluginPacker {
 
         // 3. Prepare a clean output directory.
         if fm.fileExists(atPath: output.path) {
-            let contents = try io("inspect \(output.path)") {
-                try fm.contentsOfDirectory(atPath: output.path)
-            }
-            if !contents.isEmpty && !force {
-                throw PluginError.ioError(
-                    "output directory is not empty: \(output.path) (use --force to overwrite)"
-                )
+            if !force {
+                let contents = try io("inspect \(output.path)") {
+                    try fm.contentsOfDirectory(atPath: output.path)
+                }
+                if !contents.isEmpty {
+                    throw PluginError.ioError(
+                        "output directory is not empty: \(output.path) (use --force to overwrite)"
+                    )
+                }
             }
             try io("clean \(output.path)") { try fm.removeItem(at: output) }
         }

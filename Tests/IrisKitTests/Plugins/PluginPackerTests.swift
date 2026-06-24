@@ -98,6 +98,23 @@ final class PluginPackerTests: XCTestCase {
         )
     }
 
+    func testPackRefusesOutputEqualToSourceAndPreservesIt() throws {
+        let source = try makeSourceWithSymlinkedExecutable()
+        defer { try? FileManager.default.removeItem(at: source) }
+        // output == source + --force must NOT delete the source.
+        XCTAssertThrowsError(try PluginPacker.pack(source: source, output: source, force: true)) {
+            error in
+            guard case PluginError.ioError = error else {
+                return XCTFail("expected ioError, got \(error)")
+            }
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: source.appendingPathComponent("plugin.json").path
+            )
+        )
+    }
+
     func testPackFailsWhenExecutableMissing() throws {
         let source = try makeDir("packsrc")
         defer { try? FileManager.default.removeItem(at: source) }
