@@ -69,10 +69,13 @@ extension PluginCommand {
         @Flag(name: .customLong("json"), help: "Emit JSON output.") var json: Bool = false
 
         mutating func run() async throws {
+            // The daemon (LaunchAgent) has CWD = "/", so a relative path would
+            // resolve to "/examples/...". Resolve against the client CWD here.
+            let absolutePath = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).path
             let plugin = try await withAdminClient(connection) { client in
                 try await client.call(
                     .pluginInstall,
-                    params: PluginInstallParams(path: path),
+                    params: PluginInstallParams(path: absolutePath),
                     returning: Plugin.self
                 )
             }
