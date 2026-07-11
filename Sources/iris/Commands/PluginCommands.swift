@@ -9,6 +9,7 @@ struct PluginCommand: AsyncParsableCommand {
         subcommands: [
             List.self,
             Install.self,
+            Pack.self,
             Info.self,
             Enable.self,
             Disable.self,
@@ -68,10 +69,14 @@ extension PluginCommand {
         @Flag(name: .customLong("json"), help: "Emit JSON output.") var json: Bool = false
 
         mutating func run() async throws {
+            // The daemon (LaunchAgent) has CWD = "/", so a relative path would
+            // resolve to "/examples/...". Resolve against the client CWD here.
+            let absolutePath = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+                .standardizedFileURL.path
             let plugin = try await withAdminClient(connection) { client in
                 try await client.call(
                     .pluginInstall,
-                    params: PluginInstallParams(path: path),
+                    params: PluginInstallParams(path: absolutePath),
                     returning: Plugin.self
                 )
             }
@@ -82,6 +87,46 @@ extension PluginCommand {
                 json: json
             )
         }
+    }
+
+    // MARK: - plugin pack
+
+    struct Pack: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "pack",
+            abstract: "Assemble an installable plugin bundle (no symlinks) from a built source dir."
+        )
+
+        @Argument(help: "Path to the plugin source directory (containing plugin.json).")
+        var source: String
+        @Option(
+            name: [.customShort("o"), .customLong("output")],
+            help: "Output bundle directory (default: <source-dir>/dist)."
+        )
+        var output: String?
+        @Flag(help: "Overwrite a non-empty output directory.")
+        var force: Bool = false
+        @Flag(name: .customLong("json"), help: "Emit JSON output.") var json: Bool = false
+
+        // pack is purely local: URL(fileURLWithPath:) resolves a relative path
+        // against the client CWD — no RPC, so no need to send an absolute path.
+        mutating func run() async throws {
+            let sourceURL = URL(fileURLWithPath: (source as NSString).expandingTildeInPath)
+            let outputURL =
+                output.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+                ?? sourceURL.appendingPathComponent("dist")
+            let bundle = try PluginPacker.pack(source: sourceURL, output: outputURL, force: force)
+            try Output.print(
+                humanText:
+                    "packed bundle at \(bundle.path)\nInstall it with: iris plugin install \"\(bundle.path)\"",
+                jsonValue: PackResult(bundle: bundle.path),
+                json: json
+            )
+        }
+    }
+
+    private struct PackResult: Encodable {
+        let bundle: String
     }
 
     // MARK: - plugin info

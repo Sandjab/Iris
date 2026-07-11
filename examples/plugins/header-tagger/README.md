@@ -28,18 +28,28 @@ This produces `.build/release/header-tagger`, the path referenced by `plugin.jso
 
 ## Install (requires a running irisd)
 
+Build, pack into a clean installable bundle, then install that bundle:
+
 ```bash
-iris plugin install examples/plugins/header-tagger
+swift build -c release
+iris plugin pack examples/plugins/header-tagger
+iris plugin install "$(pwd)/examples/plugins/header-tagger/dist"
 iris plugin enable org.iris.example.header-tagger
 ```
 
+`iris plugin pack` copies the built binary next to a rewritten manifest
+(`executable: "header-tagger"`) under `dist/`, excluding the `.build/` tree. The
+source directory itself is **not** installable: SwiftPM's `.build/release` is a
+symlink, which the installer refuses (a symlink cannot be pinned by the TOFU hash).
+
 The content hash is pinned at install time (TOFU). If you rebuild the binary after
-installing, the directory content changes and IRIS marks the plugin
-`needs-reapproval`. Re-pinning is **remove then reinstall** (install rejects an
+installing, re-pinning is **remove → re-pack → reinstall** (install rejects an
 already-installed id — there is no in-place re-pin):
 
 ```bash
 iris plugin rm org.iris.example.header-tagger
-iris plugin install examples/plugins/header-tagger
+swift build -c release
+iris plugin pack examples/plugins/header-tagger --force
+iris plugin install "$(pwd)/examples/plugins/header-tagger/dist"
 iris plugin enable org.iris.example.header-tagger
 ```

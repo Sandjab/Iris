@@ -314,6 +314,7 @@ pipeline existant **inchangé**.
 ```
 iris plugin list                  # plugins installés + état
 iris plugin install <path>        # valide, affiche capabilities, installe, épingle le hash
+iris plugin pack <path>           # assemble un bundle installable (sans symlink) sous <path>/dist
 iris plugin info <id>             # manifest, capabilities, hash, état
 iris plugin enable <id>           # approuve capabilities + active (spawn)
 iris plugin disable <id>          # désactive (shutdown)
