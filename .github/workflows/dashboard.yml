@@ -48,7 +48,13 @@ jobs:
           # `run:`) so the bash script never embeds untrusted-context values
           # directly. `github.repository` is set by GitHub itself; keeping the
           # non-injectable pattern means any future extension starts safe.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GitHub restricted /repos/{owner}/{repo}/stargazers to a repo's
+          # admins and collaborators (2026-07-13). The default GITHUB_TOKEN is an
+          # app installation token — neither — so it 403s there even on this repo
+          # and FIG. 01 (star history) renders empty. A PAT belonging to an admin,
+          # stored as the secret CARTOUCHE_PAT, restores the curve; without one the
+          # dashboard still renders, minus that figure.
+          GITHUB_TOKEN: ${{ secrets.CARTOUCHE_PAT || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           mkdir -p assets
