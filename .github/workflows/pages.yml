@@ -47,6 +47,14 @@ jobs:
           cp docs/manual/screenshots/*.png _site/screenshots/
           python3 .github/scripts/build-pages.py docs/manual/manuel.html _site/index.html
 
+      # Anonymous, cookie-free visit counter (GoatCounter) — injected into the
+      # published copy only, never into the sources. The grep fails the build
+      # if the injection touched nothing.
+      - name: Inject visit counter
+        run: |
+          find _site -name '*.html' -exec sed -i 's|</body>|<script data-goatcounter="https://sandjab.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>\n</body>|' {} +
+          grep -rl goatcounter _site --include='*.html' >/dev/null
+
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa  # v3
         with:
           path: _site
